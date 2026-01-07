@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Silica Sand AFS Test Report</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+        }
+
+        h2 {
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        .header-table, .sieve-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 12px;
+        }
+
+        .header-table td {
+            padding: 4px;
+            vertical-align: top;
+        }
+
+        .sieve-table th, .sieve-table td {
+            border: 1px solid #000;
+            padding: 5px;
+            text-align: center;
+        }
+
+        .sieve-table th {
+            background-color: #f0f0f0;
+        }
+
+        .totals {
+            margin-top: 10px;
+            width: 100%;
+        }
+
+        .totals td {
+            padding: 4px;
+        }
+
+        .right {
+            text-align: right;
+        }
+    </style>
+</head>
+
+<body>
+
+<h2>SILICA SAND AFS TEST REPORT</h2>
+
+<!-- HEADER SECTION -->
+<table class="header-table">
+    <tr>
+        <td><b>Company Name:</b> {{ report.company_name }}</td>
+        <td class="right"><b>Date:</b> {{ report.report_date }}</td>
+    </tr>
+    <tr>
+        <td><b>Truck No:</b> {{ report.truck_no }}</td>
+        <td class="right"><b>Dry Bed No:</b> {{ report.dry_bed_no }}</td>
+    </tr>
+    <tr>
+        <td><b>Material / AFS Grade:</b> {{ report.material_type }}</td>
+        <td class="right"><b>Sieve Reference:</b> {{ report.sieve_reference }}</td>
+    </tr>
+</table>
+
+<!-- SIEVE TABLE -->
+<table class="sieve-table">
+    <tr>
+        <th>Mesh Size</th>
+        <th>Sieve Aperture (MIC)</th>
+        <th>Weight (g)</th>
+        <th>Multiplying Factor</th>
+        <th>Product</th>
+    </tr>
+
+    {% for s in sieves %}
+    <tr>
+        <td>{{ s.mesh_size }}</td>
+        <td>{{ s.aperture }}</td>
+        <td>{{ "%.2f"|format(s.weight) }}</td>
+        <td>{{ s.multiplying_factor }}</td>
+        <td>{{ "%.2f"|format(s.product) }}</td>
+    </tr>
+    {% endfor %}
+</table>
+
+<!-- TOTALS -->
+<table class="totals">
+    <tr>
+        <td><b>Total Quantity (g):</b></td>
+        <td class="right">{{ "%.2f"|format(report.total_quantity) }}</td>
+    </tr>
+    <tr>
+        <td><b>Total AFS:</b></td>
+        <td class="right">{{ "%.2f"|format(report.total_afs) }}</td>
+    </tr>
+</table>
+
+</body>
+</html>
