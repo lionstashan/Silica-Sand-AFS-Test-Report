@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, Form, Depends
 from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from typing import List
@@ -14,6 +15,7 @@ from app import models
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Silica Lab Reporting System")
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
 app.include_router(reports.router)
