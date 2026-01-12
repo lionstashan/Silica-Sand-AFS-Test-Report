@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, Form, Depends
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from typing import List
@@ -79,3 +79,11 @@ def office_reports(request: Request, db: Session = Depends(get_db)):
         "reports_list.html",
         {"request": request, "reports": reports_list}
     )
+
+
+# ---------------- Portfolio ----------------
+@app.get("/portfolio")
+def portfolio():
+    with open("reports_pdfs/Dharmendra_Yadav_Portfolio.html", "r") as f:
+        content = f.read()
+    return HTMLResponse(content=content)
