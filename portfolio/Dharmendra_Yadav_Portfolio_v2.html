@@ -240,37 +240,163 @@
 
     @media print {
       body {
-        background: white;
-        color: black;
-      }
-
-      .hero, .section, .achievements, .experience-item, .expertise-card, .education-item {
-        page-break-inside: avoid;
-        break-inside: avoid;
-      }
-
-      .section {
-        page-break-before: auto;
-        break-before: auto;
-      }
-
-      .achievements {
-        page-break-before: always;
-        break-before: page;
-      }
-
-      .section h2 {
-        page-break-after: avoid;
-        break-after: avoid;
-      }
-
-      .hero {
-        margin-bottom: 20px;
+        background: white !important;
+        color: black !important;
+        font-size: 12px;
+        line-height: 1.4;
       }
 
       .container {
-        padding: 0;
-        max-width: none;
+        padding: 0 !important;
+        max-width: none !important;
+        margin: 0 !important;
+      }
+
+      .hero {
+        margin-bottom: 10px !important;
+        padding: 20px !important;
+        border-radius: 0 !important;
+        background: white !important;
+        box-shadow: none !important;
+        backdrop-filter: none !important;
+        flex-direction: row !important;
+        align-items: flex-start !important;
+      }
+
+      .hero img {
+        width: 100px !important;
+        height: 100px !important;
+        margin-right: 20px !important;
+      }
+
+      .hero-content h1 {
+        font-size: 24px !important;
+        margin-bottom: 5px !important;
+      }
+
+      .hero-content .subtitle {
+        font-size: 14px !important;
+        margin-bottom: 10px !important;
+      }
+
+      .contact-info {
+        display: block !important;
+      }
+
+      .contact-item {
+        display: inline-block !important;
+        margin-right: 15px !important;
+        font-size: 11px !important;
+      }
+
+      .section {
+        margin-bottom: 15px !important;
+        padding: 15px !important;
+        border-radius: 0 !important;
+        background: white !important;
+        box-shadow: none !important;
+        backdrop-filter: none !important;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+
+      .achievements {
+        background: #f0f0f0 !important;
+        color: black !important;
+        padding: 15px !important;
+        border-radius: 0 !important;
+        margin-bottom: 15px !important;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+
+      .section h2 {
+        font-size: 16px !important;
+        margin-bottom: 10px !important;
+        border-bottom: 2px solid black !important;
+        padding-bottom: 5px !important;
+        page-break-after: avoid !important;
+        break-after: avoid !important;
+      }
+
+      .summary {
+        font-size: 11px !important;
+        line-height: 1.4 !important;
+      }
+
+      .expertise-grid {
+        display: block !important;
+      }
+
+      .expertise-card {
+        margin-bottom: 10px !important;
+        padding: 10px !important;
+        border-radius: 0 !important;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+
+      .experience-item {
+        margin-bottom: 10px !important;
+        padding: 10px !important;
+        border-radius: 0 !important;
+        background: #f9f9f9 !important;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+
+      .experience-item h3 {
+        font-size: 14px !important;
+        margin-bottom: 3px !important;
+      }
+
+      .role {
+        font-size: 12px !important;
+        margin-bottom: 3px !important;
+      }
+
+      .date {
+        font-size: 10px !important;
+        margin-bottom: 8px !important;
+      }
+
+      .experience-item ul {
+        margin-top: 5px !important;
+      }
+
+      .experience-item li {
+        font-size: 11px !important;
+        margin-bottom: 3px !important;
+      }
+
+      .education {
+        display: block !important;
+      }
+
+      .education-item {
+        display: inline-block !important;
+        width: 48% !important;
+        margin-bottom: 10px !important;
+        padding: 10px !important;
+        border-radius: 0 !important;
+        vertical-align: top !important;
+      }
+
+      .education-item h3 {
+        font-size: 13px !important;
+        margin-bottom: 3px !important;
+      }
+
+      .education-item p {
+        font-size: 12px !important;
+      }
+
+      /* Hide decorative elements */
+      .hero::before,
+      .hero::after,
+      .section::before,
+      .section::after {
+        display: none !important;
       }
     }
   </style>
