@@ -32,6 +32,12 @@ def lab_form(request: Request):
     return templates.TemplateResponse("form.html", {"request": request})
 
 
+# ---------------- Root Redirect ----------------
+@app.get("/")
+def root_redirect():
+    return RedirectResponse(url="/dashmesh-report")
+
+
 # ---------------- Submit Form ----------------
 @app.post("/submit-report")
 def submit_report(

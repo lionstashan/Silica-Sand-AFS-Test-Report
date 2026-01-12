@@ -2,482 +2,102 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dashmesh Minerals | Silica Sand AFS Report</title>
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
-  * {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-  }
-
   body {
-    font-family: 'Poppins', sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    min-height: 100vh;
-    padding: 30px 20px;
-    color: #2c3e50;
-  }
-
-  .container {
-    max-width: 1100px;
-    margin: 0 auto;
-    background: white;
-    border-radius: 15px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.15);
-    overflow: hidden;
+    font-family: "Segoe UI", Arial, Helvetica, sans-serif;
+    margin: 30px;
+    color: #1f2933;
+    background: #ffffff;
   }
 
   /* ===== HEADER ===== */
   .header {
-    background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
-    padding: 30px 40px;
     display: flex;
     align-items: center;
-    gap: 30px;
-    color: white;
-  }
-
-  .logo {
-    flex-shrink: 0;
+    gap: 24px;
+    border-bottom: 4px solid #0f766e;
+    padding-bottom: 14px;
   }
 
   .logo img {
-    height: 80px;
-    filter: brightness(0) invert(1);
-    border-radius: 8px;
+    height: 72px;
   }
 
-  .header-content h1 {
-    font-size: 28px;
-    font-weight: 700;
-    margin-bottom: 8px;
+  .company-name {
+    font-size: 24px;
+    font-weight: 800;
+    color: #0f172a;
   }
 
-  .header-content p {
-    font-size: 14px;
-    opacity: 0.95;
-    line-height: 1.6;
+  .company-info {
+    font-size: 13px;
+    color: #475569;
+    line-height: 1.5;
   }
 
-  /* ===== MAIN CONTENT ===== */
-  .main-content {
-    padding: 40px;
-  }
-
-  /* ===== META INFO ===== */
-  .meta-section {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 20px;
-    margin-bottom: 30px;
-    background: #f8f9fa;
-    padding: 20px;
-    border-radius: 10px;
-  }
-
-  .meta-item {
+  /* ===== META ===== */
+  .info {
+    margin-top: 18px;
     display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .meta-item label {
+    justify-content: space-between;
+    font-size: 14px;
     font-weight: 600;
-    color: #2c3e50;
-    min-width: 80px;
   }
 
   .meta-input {
-    border: 1px solid #cbd5e1;
+    border: none;
     font-size: 14px;
-    padding: 8px 12px;
-    border-radius: 6px;
+    width: 130px;
     text-align: center;
     font-weight: 500;
-    transition: border-color 0.3s;
-  }
-
-  .meta-input:focus {
-    outline: none;
-    border-color: #1e40af;
-    box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.1);
   }
 
   /* ===== TITLE ===== */
-  .report-title {
+  h3 {
+    margin-top: 28px;
     text-align: center;
-    margin-bottom: 30px;
-  }
-
-  .report-title h2 {
-    font-size: 24px;
-    color: #2c3e50;
-    margin-bottom: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-  }
-
-  .report-title .afs-value {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 18px;
-    font-weight: 700;
+    font-size: 19px;
+    color: #0f172a;
+    border-bottom: 2px solid #e2e8f0;
+    padding-bottom: 6px;
+    letter-spacing: 0.3px;
   }
 
   /* ===== TABLE ===== */
-  .table-wrapper {
-    overflow-x: auto;
-    margin-bottom: 30px;
-  }
-
   table {
     width: 100%;
     border-collapse: collapse;
+    margin-top: 22px;
     font-size: 14px;
   }
 
   th, td {
-    border: 1px solid #e2e8f0;
-    padding: 12px 10px;
+    border: 1px solid #cbd5e1;
+    padding: 8px 6px;
     text-align: center;
   }
 
   th {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    font-weight: 600;
-    text-transform: uppercase;
-    font-size: 13px;
-  }
-
-  tr:nth-child(even) {
-    background: #f8f9fa;
-  }
-
-  tr:hover {
-    background: #eff6ff;
+    background: #f1f5f9;
+    font-weight: 700;
+    color: #0f172a;
   }
 
   input.weight {
-    width: 85px;
+    width: 80px;
     border: 1px solid #cbd5e1;
-    border-radius: 6px;
-    padding: 6px;
+    border-radius: 4px;
+    padding: 4px;
     text-align: center;
-    font-weight: 500;
-    font-family: 'Poppins', sans-serif;
   }
 
   input.weight:focus {
     outline: none;
-    border-color: #667eea;
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-  }
-
-  .total-row td {
-    font-weight: 700;
-    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
-    color: #1e40af;
-  }
-
-  /* ===== FOOTER RESULT ===== */
-  .result-section {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    padding: 25px;
-    border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 30px;
-    flex-wrap: wrap;
-    gap: 20px;
-  }
-
-  .result-item {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-  }
-
-  .result-label {
-    font-size: 14px;
-    opacity: 0.9;
-  }
-
-  .result-value {
-    font-size: 28px;
-    font-weight: 700;
-  }
-
-  .afs-multiplier {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .afs-multiplier input {
-    width: 70px;
-    padding: 8px 12px;
-    border: none;
-    border-radius: 6px;
-    text-align: center;
-    font-weight: 600;
-  }
-
-  /* ===== CHART ===== */
-  .chart-section {
-    background: #f8f9fa;
-    padding: 30px;
-    border-radius: 10px;
-    margin-bottom: 30px;
-  }
-
-  .chart-section h3 {
-    font-size: 18px;
-    color: #2c3e50;
-    margin-bottom: 20px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .chart-section h3 i {
-    color: #667eea;
-  }
-
-  /* ===== PRINT ===== */
-  @media print {
-    body {
-      background: white;
-      padding: 0;
-    }
-
-    .container {
-      box-shadow: none;
-      border-radius: 0;
-    }
-
-    input {
-      border: none !important;
-      box-shadow: none !important;
-      background: transparent;
-      text-align: center;
-    }
-
-    .header {
-      page-break-after: avoid;
-    }
-
-    table {
-      page-break-inside: avoid;
-    }
-
-    .chart-section {
-      page-break-inside: avoid;
-      page-break-before: always;
-    }
-  }
-</style>
-</head>
-
-<body oninput="calculateTotals()">
-
-<!-- ===== CONTAINER ===== -->
-<div class="container">
-
-  <!-- ===== HEADER ===== -->
-  <div class="header">
-    <div class="logo">
-      <img src="logo.png" alt="Dashmesh Minerals Logo">
-    </div>
-    <div class="header-content">
-      <h1>Dashmesh Minerals Pvt Ltd</h1>
-      <p>
-        <i class="fas fa-phone"></i> +91 9649520959 | +91 7014117310<br>
-        <i class="fas fa-envelope"></i> info@dashmeshminerals.com<br>
-        <i class="fas fa-map-marker-alt"></i> C-129, Kanta Kathuria Colony, Bikaner – 334001 (Rajasthan)<br>
-        <i class="fas fa-certificate"></i> GST No: 08AAJCD9707B1ZO | CIN: U08108RJ2023PTC087187<br>
-        <i class="fas fa-globe"></i> www.dashmeshminerals.com
-      </p>
-    </div>
-  </div>
-
-  <!-- ===== MAIN CONTENT ===== -->
-  <div class="main-content">
-
-    <!-- ===== META INFO ===== -->
-    <div class="meta-section">
-      <div class="meta-item">
-        <label><i class="fas fa-calendar"></i> Date:</label>
-        <input class="meta-input" value="21-11-2025">
-      </div>
-      <div class="meta-item">
-        <label><i class="fas fa-truck"></i> Truck No:</label>
-        <input class="meta-input" value="RJ27GC2652">
-      </div>
-      <div class="meta-item">
-        <label><i class="fas fa-cube"></i> AFS Range:</label>
-        <input class="meta-input" value="55–60">
-      </div>
-    </div>
-
-    <!-- ===== TITLE ===== -->
-    <div class="report-title">
-      <h2>
-        <i class="fas fa-flask"></i>
-        Silica Sand AFS Report
-      </h2>
-    </div>
-
-    <!-- ===== TABLE ===== -->
-    <div class="table-wrapper">
-      <table>
-        <thead>
-          <tr>
-            <th>Sr No</th>
-            <th>Sieve</th>
-            <th>Sieve Aperture (MIC)</th>
-            <th>Weight (GMS)</th>
-            <th>Multiplying Factor</th>
-            <th>Product</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr class="row"><td>1</td><td>10</td><td>1700</td><td><input class="weight"></td><td class="factor">5</td><td class="product">0.00</td></tr>
-          <tr class="row"><td>2</td><td>20</td><td>850</td><td><input class="weight"></td><td class="factor">10</td><td class="product">0.00</td></tr>
-          <tr class="row"><td>3</td><td>30</td><td>600</td><td><input class="weight"></td><td class="factor">20</td><td class="product">0.00</td></tr>
-          <tr class="row"><td>4</td><td>40</td><td>425</td><td><input class="weight"></td><td class="factor">30</td><td class="product">0.00</td></tr>
-          <tr class="row"><td>5</td><td>50</td><td>300</td><td><input class="weight"></td><td class="factor">40</td><td class="product">0.00</td></tr>
-          <tr class="row"><td>6</td><td>70</td><td>212</td><td><input class="weight"></td><td class="factor">50</td><td class="product">0.00</td></tr>
-          <tr class="row"><td>7</td><td>100</td><td>150</td><td><input class="weight"></td><td class="factor">70</td><td class="product">0.00</td></tr>
-          <tr class="row"><td>8</td><td>140</td><td>106</td><td><input class="weight"></td><td class="factor">100</td><td class="product">0.00</td></tr>
-          <tr class="row"><td>9</td><td>200</td><td>75</td><td><input class="weight"></td><td class="factor">140</td><td class="product">0.00</td></tr>
-          <tr class="row"><td>10</td><td>270</td><td>53</td><td><input class="weight"></td><td class="factor">200</td><td class="product">0.00</td></tr>
-          <tr class="row"><td>11</td><td>350</td><td>Sieve</td><td><input class="weight"></td><td class="factor">300</td><td class="product">0.00</td></tr>
-          <tr class="total-row">
-            <td colspan="3"><i class="fas fa-sum"></i> TOTAL</td>
-            <td id="totalWeight">0.00</td>
-            <td></td>
-            <td id="totalProduct">0.00</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <!-- ===== RESULT ===== -->
-    <div class="result-section">
-      <div class="result-item">
-        <div>
-          <div class="result-label"><i class="fas fa-tachometer-alt"></i> Total AFS:</div>
-          <div class="result-value" id="totalAFS">0.00</div>
-        </div>
-      </div>
-      <div class="result-item afs-multiplier">
-        <div class="result-label"><i class="fas fa-times"></i> x =</div>
-        <input class="meta-input" id="afsMultiplier" type="number" step="0.01" value="1" style="background: white; color: #2c3e50;">
-      </div>
-    </div>
-
-    <!-- ===== CHART ===== -->
-    <div class="chart-section">
-      <h3><i class="fas fa-chart-line"></i> Weight vs Sieve Trend</h3>
-      <canvas id="weightChart"></canvas>
-    </div>
-
-  </div>
-</div>
-
-<script>
-const sieveLabels = [10,20,30,40,50,70,100,140,200,270,350];
-let chart;
-
-function calculateTotals() {
-  let totalWeight = 0;
-  let totalProduct = 0;
-  let weights = [];
-
-  document.querySelectorAll(".row").forEach(row => {
-    let w = parseFloat(row.querySelector(".weight").value) || 0;
-    let f = parseFloat(row.querySelector(".factor").innerText) || 0;
-    let p = w * f;
-
-    row.querySelector(".product").innerText = p.toFixed(2);
-    totalWeight += w;
-    totalProduct += p;
-    weights.push(w);
-  });
-
-  document.getElementById("totalWeight").innerText = totalWeight.toFixed(2);
-  document.getElementById("totalProduct").innerText = totalProduct.toFixed(2);
-
-  let x = parseFloat(document.getElementById("afsMultiplier").value) || 1;
-  let afs = (totalProduct * x) / 100;
-
-  document.getElementById("totalAFS").innerText = afs.toFixed(2);
-
-  updateChart(weights);
-}
-
-function updateChart(weights) {
-  if (!chart) {
-    chart = new Chart(document.getElementById("weightChart"), {
-      type: "line",
-      data: {
-        labels: sieveLabels,
-        datasets: [{
-          label: "Weight (GMS)",
-          data: weights,
-          borderColor: "#667eea",
-          backgroundColor: "rgba(102, 126, 234, 0.1)",
-          borderWidth: 3,
-          tension: 0.35,
-          fill: true,
-          pointRadius: 5,
-          pointBackgroundColor: "#667eea",
-          pointBorderColor: "#fff",
-          pointBorderWidth: 2
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: true,
-        plugins: {
-          legend: {
-            display: true,
-            labels: { font: { size: 14, weight: 'bold' }, color: '#2c3e50' }
-          }
-        },
-        scales: {
-          x: {
-            title: { display: true, text: "Sieve", font: { size: 13, weight: 'bold' }, color: '#2c3e50' },
-            grid: { color: 'rgba(0,0,0,0.05)' }
-          },
-          y: {
-            title: { display: true, text: "Weight (GMS)", font: { size: 13, weight: 'bold' }, color: '#2c3e50' },
-            grid: { color: 'rgba(0,0,0,0.05)' }
-          }
-        }
-      }
-    });
-  } else {
-    chart.data.datasets[0].data = weights;
-    chart.update();
-  }
-}
-</script>
-
-</body>
-</html>
+    border-color: #0f766e;
   }
 
   .total-row td {
@@ -611,8 +231,7 @@ function calculateTotals() {
   document.getElementById("totalProduct").innerText = totalProduct.toFixed(2);
 
   let x = parseFloat(document.getElementById("afsMultiplier").value) || 1;
-   let afs = (totalProduct * x) / 100;
-
+  let afs = (totalProduct * x) / 100;
   document.getElementById("totalAFS").innerText = afs.toFixed(2);
 
   updateChart(weights);
