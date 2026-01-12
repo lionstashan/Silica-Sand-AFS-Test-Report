@@ -103,24 +103,27 @@ def portfolio():
 
 @app.get("/portfolio.pdf")
 def portfolio_pdf():
-    # Generate a simple PDF using ReportLab
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter)
-    styles = getSampleStyleSheet()
-    
-    content = []
-    content.append(Paragraph("Dharmendra Yadav - Professional Portfolio", styles['Title']))
-    content.append(Spacer(1, 12))
-    content.append(Paragraph("Entrepreneur | Chief Technical Adviser | Mining & Minerals Specialist", styles['Heading1']))
-    content.append(Spacer(1, 12))
-    content.append(Paragraph("Phone: +91 9166344448 | Email: info@silicasand.in | Location: Jaipur, India", styles['Normal']))
-    content.append(Spacer(1, 12))
-    content.append(Paragraph("Professional Summary: Strategic entrepreneur and technical expert with over 12 years of experience in the mining, glass, and ceramics industries...", styles['Normal']))
-    # Add more content as needed
-    
-    doc.build(content)
-    buffer.seek(0)
-    return FileResponse(buffer, media_type="application/pdf", filename="Dharmendra_Yadav_Portfolio.pdf")
+    try:
+        # Generate a simple PDF using ReportLab
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter)
+        styles = getSampleStyleSheet()
+        
+        content = []
+        content.append(Paragraph("Dharmendra Yadav - Professional Portfolio", styles['Title']))
+        content.append(Spacer(1, 12))
+        content.append(Paragraph("Entrepreneur | Chief Technical Adviser | Mining & Minerals Specialist", styles['Heading1']))
+        content.append(Spacer(1, 12))
+        content.append(Paragraph("Phone: +91 9166344448 | Email: info@silicasand.in | Location: Jaipur, India", styles['Normal']))
+        content.append(Spacer(1, 12))
+        content.append(Paragraph("Professional Summary: Strategic entrepreneur and technical expert with over 12 years of experience in the mining, glass, and ceramics industries...", styles['Normal']))
+        # Add more content as needed
+        
+        doc.build(content)
+        buffer.seek(0)
+        return FileResponse(buffer, media_type="application/pdf", filename="Dharmendra_Yadav_Portfolio.pdf")
+    except Exception as e:
+        return HTMLResponse(content=f"<h1>PDF Error: {str(e)}</h1>", status_code=500)
 
 
 # ---------------- Test Page ----------------
