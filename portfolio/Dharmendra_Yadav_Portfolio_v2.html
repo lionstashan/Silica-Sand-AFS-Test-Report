@@ -237,6 +237,42 @@
         font-size: 2rem;
       }
     }
+
+    @media print {
+      body {
+        background: white;
+        color: black;
+      }
+
+      .hero, .section, .achievements, .experience-item, .expertise-card, .education-item {
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+
+      .section {
+        page-break-before: auto;
+        break-before: auto;
+      }
+
+      .achievements {
+        page-break-before: always;
+        break-before: page;
+      }
+
+      .section h2 {
+        page-break-after: avoid;
+        break-after: avoid;
+      }
+
+      .hero {
+        margin-bottom: 20px;
+      }
+
+      .container {
+        padding: 0;
+        max-width: none;
+      }
+    }
   </style>
 </head>
 
