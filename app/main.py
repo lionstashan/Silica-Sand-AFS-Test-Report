@@ -1,11 +1,12 @@
 from fastapi import FastAPI, Request, Form, Depends
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import date
 import os
+from weasyprint import HTML, CSS
 
 from app.database import Base, engine, get_db
 from app.schemas import ReportCreate, SieveInput
@@ -92,3 +93,21 @@ def portfolio():
     with open(file_path, "r") as f:
         content = f.read()
     return HTMLResponse(content=content)
+
+
+@app.get("/portfolio.pdf")
+def portfolio_pdf():
+    file_path = os.path.join(os.path.dirname(__file__), "../portfolio/Dharmendra_Yadav_Portfolio.html")
+    with open(file_path, "r") as f:
+        html_content = f.read()
+    
+    # Generate PDF from HTML
+    html_doc = HTML(string=html_content, base_url=os.path.join(os.path.dirname(__file__), "../portfolio/"))
+    pdf_bytes = html_doc.write_pdf()
+    
+    # Return as downloadable PDF
+    return FileResponse(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        filename="Dharmendra_Yadav_Portfolio.pdf"
+    )
