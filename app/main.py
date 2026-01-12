@@ -157,3 +157,17 @@ def test_page():
     </html>
     """
     return HTMLResponse(content=html_content)
+
+
+# ---------------- Dashmesh Report ----------------
+@app.get("/dashmesh-report")
+def dashmesh_report():
+    try:
+        file_path = os.path.join(os.path.dirname(__file__), "Dashmesh/Dashmesh_Minerals_AFS_Report.html")
+        with open(file_path, "r") as f:
+            content = f.read()
+        # Replace local logo path with static URL
+        content = content.replace('src="logo.png"', 'src="/static/dashmesh_logo.png"')
+        return HTMLResponse(content=content)
+    except Exception as e:
+        return HTMLResponse(content=f"<h1>Error: {str(e)}</h1>", status_code=500)
