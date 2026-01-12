@@ -5,6 +5,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import date
+import os
 
 from app.database import Base, engine, get_db
 from app.schemas import ReportCreate, SieveInput
@@ -14,7 +15,8 @@ from app import models
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Silica Lab Reporting System")
-app.mount("/static", StaticFiles(directory="portfolio"), name="static")
+portfolio_dir = os.path.join(os.path.dirname(__file__), "../portfolio")
+app.mount("/static", StaticFiles(directory=portfolio_dir), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
 app.include_router(reports.router)
@@ -86,6 +88,7 @@ def office_reports(request: Request, db: Session = Depends(get_db)):
 # ---------------- Portfolio ----------------
 @app.get("/portfolio")
 def portfolio():
-    with open("portfolio/Dharmendra_Yadav_Portfolio.html", "r") as f:
+    file_path = os.path.join(os.path.dirname(__file__), "../portfolio/Dharmendra_Yadav_Portfolio.html")
+    with open(file_path, "r") as f:
         content = f.read()
     return HTMLResponse(content=content)
