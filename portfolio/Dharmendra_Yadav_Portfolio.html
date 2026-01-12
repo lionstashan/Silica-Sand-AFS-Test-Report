@@ -33,6 +33,23 @@
       background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
       padding: 30px;
       border-radius: 8px;
+      position: relative;
+    }
+
+    .download-btn {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: #3498db;
+      color: white;
+      padding: 10px 20px;
+      text-decoration: none;
+      border-radius: 5px;
+      font-weight: 500;
+    }
+
+    .download-btn:hover {
+      background: #2980b9;
     }
 
     .header img {
@@ -134,6 +151,7 @@
 <div class="container">
   <!-- Header -->
   <div class="header">
+    <a href="/portfolio.pdf" class="download-btn" download>Download PDF</a>
     <img src="/static/Dharmendra_Yadav.jpeg" alt="Dharmendra Yadav">
     <div>
       <h1>Dharmendra Yadav</h1>
