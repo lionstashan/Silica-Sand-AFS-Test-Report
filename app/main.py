@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, Form, Depends
 from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from typing import List
@@ -13,6 +14,7 @@ from app import models
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Silica Lab Reporting System")
+app.mount("/static", StaticFiles(directory="portfolio"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
 app.include_router(reports.router)
@@ -84,6 +86,6 @@ def office_reports(request: Request, db: Session = Depends(get_db)):
 # ---------------- Portfolio ----------------
 @app.get("/portfolio")
 def portfolio():
-    with open("reports_pdfs/Dharmendra_Yadav_Portfolio.html", "r") as f:
+    with open("portfolio/Dharmendra_Yadav_Portfolio.html", "r") as f:
         content = f.read()
     return HTMLResponse(content=content)
