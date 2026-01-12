@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dharmendra Yadav | Modern Professional Portfolio</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Poppins', sans-serif;
+      line-height: 1.6;
+      color: #333;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .hero {
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: 20px;
+      padding: 40px;
+      margin-bottom: 30px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+      display: flex;
+      align-items: center;
+      gap: 40px;
+      backdrop-filter: blur(10px);
+    }
+
+    .hero img {
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 5px solid #667eea;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    }
+
+    .hero-content h1 {
+      font-size: 2.5rem;
+      color: #2c3e50;
+      margin-bottom: 10px;
+    }
+
+    .hero-content .subtitle {
+      font-size: 1.2rem;
+      color: #667eea;
+      font-weight: 600;
+      margin-bottom: 20px;
+    }
+
+    .contact-info {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      margin-top: 20px;
+    }
+
+    .contact-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #555;
+    }
+
+    .contact-item i {
+      color: #667eea;
+      width: 20px;
+    }
+
+    .section {
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: 15px;
+      padding: 30px;
+      margin-bottom: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+      backdrop-filter: blur(10px);
+    }
+
+    .section h2 {
+      font-size: 1.8rem;
+      color: #2c3e50;
+      margin-bottom: 20px;
+      border-bottom: 3px solid #667eea;
+      padding-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .section h2 i {
+      color: #667eea;
+    }
+
+    .summary {
+      font-size: 1.1rem;
+      color: #555;
+      line-height: 1.8;
+    }
+
+    .expertise-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+
+    .expertise-card {
+      background: #f8f9fa;
+      padding: 20px;
+      border-radius: 10px;
+      border-left: 4px solid #667eea;
+    }
+
+    .expertise-card h3 {
+      color: #2c3e50;
+      margin-bottom: 10px;
+      font-size: 1.1rem;
+    }
+
+    .expertise-card ul {
+      list-style: none;
+      padding: 0;
+    }
+
+    .expertise-card li {
+      padding: 5px 0;
+      color: #555;
+    }
+
+    .experience-item {
+      background: #f8f9fa;
+      padding: 20px;
+      border-radius: 10px;
+      margin-bottom: 20px;
+      border-left: 4px solid #667eea;
+      transition: transform 0.3s ease;
+    }
+
+    .experience-item:hover {
+      transform: translateY(-5px);
+    }
+
+    .experience-item h3 {
+      color: #2c3e50;
+      margin-bottom: 5px;
+      font-size: 1.2rem;
+    }
+
+    .role {
+      color: #667eea;
+      font-weight: 600;
+      margin-bottom: 5px;
+    }
+
+    .date {
+      color: #888;
+      font-size: 0.9rem;
+      margin-bottom: 15px;
+    }
+
+    .achievements {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px;
+      border-radius: 15px;
+      margin-bottom: 20px;
+    }
+
+    .achievements h2 {
+      color: white;
+      border-bottom-color: white;
+    }
+
+    .achievements ul {
+      list-style: none;
+      padding: 0;
+    }
+
+    .achievements li {
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.2);
+    }
+
+    .achievements li:last-child {
+      border-bottom: none;
+    }
+
+    .education {
+      display: flex;
+      justify-content: space-around;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+
+    .education-item {
+      background: #f8f9fa;
+      padding: 20px;
+      border-radius: 10px;
+      text-align: center;
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .education-item h3 {
+      color: #2c3e50;
+      margin-bottom: 5px;
+    }
+
+    .education-item p {
+      color: #667eea;
+      font-weight: 600;
+    }
+
+    @media (max-width: 768px) {
+      .hero {
+        flex-direction: column;
+        text-align: center;
+      }
+
+      .hero img {
+        width: 150px;
+        height: 150px;
+      }
+
+      .hero-content h1 {
+        font-size: 2rem;
+      }
+    }
+  </style>
+</head>
+
+<body>
+<div class="container">
+  <!-- Hero Section -->
+  <div class="hero">
+    <img src="/static/Dharmendra_Yadav.jpeg" alt="Dharmendra Yadav">
+    <div class="hero-content">
+      <h1>Dharmendra Yadav</h1>
+      <div class="subtitle">
+        Entrepreneur | Chief Technical Adviser | Mining & Minerals Specialist
+      </div>
+      <div class="contact-info">
+        <div class="contact-item">
+          <i class="fas fa-phone"></i>
+          <span>+91 9166344448</span>
+        </div>
+        <div class="contact-item">
+          <i class="fas fa-envelope"></i>
+          <span>info@silicasand.in</span>
+        </div>
+        <div class="contact-item">
+          <i class="fas fa-map-marker-alt"></i>
+          <span>Jaipur, India</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Professional Summary -->
+  <div class="section">
+    <h2>Professional Summary</h2>
+    <p>
+      Strategic entrepreneur and technical expert with over 12 years of experience in the mining, glass, and ceramics industries. A specialist in the end-to-end lifecycle of industrial minerals—from geological exploration and mine establishment to advanced beneficiation processes. Currently serving as a Chief Technical Adviser for industry leader Gold Plus Glass Ltd while managing a portfolio of successful mineral enterprises.
+    </p>
+  </div>
+
+  <!-- Core Expertise -->
+  <div class="section">
+    <h2>Core Expertise</h2>
+    <ul>
+      <li><strong>Mineral Specialization:</strong> Silica Sand, Sandstone, Dolomite, Feldspar, and Ball Clay.</li>
+      <li><strong>Technical Operations:</strong> Turnkey Mineral Beneficiation Solutions, Mine Procurement, and Auction Advisory.</li>
+      <li><strong>Strategic Leadership:</strong> Multi-company Founding, Stakeholder Management, and Technical Advisory.</li>
+    </ul>
+  </div>
+
+  <!-- Key Achievements -->
+  <div class="section">
+    <h2>Key Achievements</h2>
+    <ul>
+      <li>Spearheaded the procurement and establishment of large-scale silica sand mines in Prayagraj and Karnataka for Gold Plus Glass Industry Limited.</li>
+      <li>Supplied high-quality sandstone to the Ram Mandir in Ayodhya and various prestigious temple construction projects through Jaipur Silica Sand Pvt Ltd.</li>
+      <li>Managed a high-capacity Silica Beneficiation Unit in Bikaner, Rajasthan, producing Glass and Foundry Grade Silica Sand for major clients including Indian Railways, BHEL, and Kirloskar.</li>
+      <li>Founded and led multiple mineral enterprises, demonstrating entrepreneurial acumen in the competitive mining and minerals sector.</li>
+      <li>Developed specialized consultancy services in Tile Adhesive, Ready-mix Plaster, and Mining Auction processes, showcasing deep market knowledge.</li>
+    </ul>
+  </div>
+
+  <!-- Market Knowledge -->
+  <div class="section">
+    <h2>Market Knowledge</h2>
+    <p>
+      With over 12 years in the industry, Dharmendra possesses extensive knowledge of the Indian mining and minerals market, including:
+    </p>
+    <ul>
+      <li><strong>Regulatory Landscape:</strong> Expertise in navigating mining regulations, auction processes, and environmental compliance in Rajasthan and other key states.</li>
+      <li><strong>Industry Trends:</strong> Deep understanding of demand dynamics in glass, ceramics, construction, and heavy engineering sectors.</li>
+      <li><strong>Supply Chain Optimization:</strong> Proven ability to optimize mineral beneficiation processes for cost-effective, high-quality output.</li>
+      <li><strong>Competitive Analysis:</strong> Strategic insights into market positioning, stakeholder management, and sustainable mining practices.</li>
+    </ul>
+  </div>
+
+  <!-- Professional Experience -->
+  <div class="section">
+    <h2>Professional Experience</h2>
+
+    <h3>Gold Plus Glass Industry Limited</h3>
+    <div class="role">Chief Technical Adviser (Mining & Operations)</div>
+    <div class="date">2022 – Present</div>
+    <ul>
+      <li>Lead technical strategist for the mining and operations segment.</li>
+      <li>Spearheaded the procurement and establishment of large-scale silica sand mines in Prayagraj and Karnataka.</li>
+    </ul>
+
+    <h3>Silica Sand India Pvt Ltd</h3>
+    <div class="role">Founder</div>
+    <div class="date">Jan 2025 – Present</div>
+    <ul>
+      <li>Providing technical and turnkey solutions for silica sand beneficiation.</li>
+      <li>Specialized consultancy in Tile Adhesive, Ready-mix Plaster, and Mining Auction processes.</li>
+    </ul>
+
+    <h3>Jaipur Silica Sand Pvt Ltd</h3>
+    <div class="role">Co-Founder</div>
+    <div class="date">2023 – Present</div>
+    <ul>
+      <li>Operates a premier Sandstone Mine in Bansi Paharpur, Bharatpur.</li>
+      <li>Supplies high-quality sandstone to the Ram Mandir, Ayodhya and for the construction of various prestigious temples.</li>
+    </ul>
+
+    <h3>Ojaswi Mines and Minerals</h3>
+    <div class="role">Sole Proprietor</div>
+    <div class="date">Jan 2013 – Present</div>
+    <ul>
+      <li>Produces Glass Grade Silica Sand for Gold Plus Glass Limited.</li>
+      <li>Produces Foundry Grade Silica Sand for major institutions including Indian Railways, BHEL, Kirloskar, and various heavy machinery and automobile companies.</li>
+      <li>Manages a high-capacity Silica Beneficiation Unit in Bikaner (Rajasthan).</li>
+    </ul>
+
+    <h3>Proton Ceramics</h3>
+    <div class="role">Partner</div>
+    <div class="date">2020 – Present</div>
+    <ul>
+      <li>Producing high-quality Ball Clay specifically for the tile industry.</li>
+    </ul>
+
+    <h3>Acecone Ceramica Pvt Ltd</h3>
+    <div class="role">Co-Founder</div>
+    <div class="date">2013 – 2017</div>
+    <ul>
+      <li>Focused on Research & Development of various mineral processing techniques and mineral development.</li>
+    </ul>
+  </div>
+
+  <!-- Technical Highlights -->
+  <div class="section">
+    <h2>Technical Highlights</h2>
+    <ul>
+      <li>12+ Years of deep-domain experience in the Silica sand, Dolomite, Feldspar, and Ball Clay industries.</li>
+      <li>Proven track record in supplying critical raw materials to the automobile, heavy engineering, and temple architecture sectors.</li>
+    </ul>
+  </div>
+
+  <!-- Education -->
+  <div class="section">
+    <h2>Education</h2>
+    <ul>
+      <li><strong>M.Sc. in Mining & Geology</strong> – 2014</li>
+      <li><strong>B.Tech in Glass and Ceramic Engineering</strong> – 2012</li>
+    </ul>
+  </div>
+
+  <div class="footer">
+    © Dharmendra Yadav | Professional Portfolio
+  </div>
+
+</div>
+</body>
+</html>
