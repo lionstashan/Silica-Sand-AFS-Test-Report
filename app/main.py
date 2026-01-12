@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, Form, Depends
-from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -120,8 +120,13 @@ def portfolio_pdf():
         # Add more content as needed
         
         doc.build(content)
-        buffer.seek(0)
-        return FileResponse(buffer, media_type="application/pdf", filename="Dharmendra_Yadav_Portfolio.pdf")
+        pdf_bytes = buffer.getvalue()
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": "attachment; filename=Dharmendra_Yadav_Portfolio.pdf"}
+        )
     except Exception as e:
         return HTMLResponse(content=f"<h1>PDF Error: {str(e)}</h1>", status_code=500)
 
