@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dharmendra Yadav — Portfolio (v3)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0e14;
+      --bg-alt: #121620;
+      --text: #e6edf3;
+      --muted: #9ca3af;
+      --accent: #3b82f6;
+      --accent-2: #10b981;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text);
+      background: linear-gradient(180deg, var(--bg), var(--bg-alt));
+      overflow: hidden;
+    }
+
+    /* Slider container */
+    .slider {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+    }
+    .slides {
+      display: flex;
+      width: 100%;
+      height: 100%;
+      transition: transform 0.8s ease-in-out;
+    }
+    .slides .slide { opacity: 0.92; transform: scale(0.995); transition: opacity 0.6s ease, transform 0.6s ease; }
+    .slides .slide.active { opacity: 1; transform: scale(1); }
+    .slide {
+      position: relative;
+      min-width: 100%;
+      height: 100%;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 40px;
+      padding: 64px;
+      align-items: center;
+      background: radial-gradient(1200px 600px at 20% 20%, rgba(59,130,246,0.08), transparent),
+                  radial-gradient(800px 400px at 80% 60%, rgba(16,185,129,0.08), transparent);
+    }
+    .slide.full {
+      grid-template-columns: 1fr;
+      text-align: center;
+      justify-items: center;
+    }
+
+    /* Background image support with subtle overlay */
+    .slide.bg::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-position: center;
+      background-size: cover;
+      background-repeat: no-repeat;
+      filter: saturate(1.05) contrast(1.05) brightness(0.6);
+      opacity: 0.35;
+    }
+    .bg-gif::before {
+      background-image: url('https://www.dashmeshminerals.com/static/media/manmeet%20dashmesh%20gif.b5be547af2e70d508be0.gif');
+    }
+    .bg-mine1::before {
+      background-image: url('https://www.dashmeshminerals.com/static/media/5.a8b68bdba22d7113f7f3.JPG');
+    }
+    .bg-mine2::before {
+      background-image: url('https://www.dashmeshminerals.com/static/media/1.cfb99d9805b1d06a0f34.JPG');
+    }
+
+    .headline {
+      font-size: 56px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      background: linear-gradient(90deg, #fff, #93c5fd, #a7f3d0);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      filter: drop-shadow(0 10px 24px rgba(59,130,246,0.15));
+    }
+    .subline {
+      font-size: 20px;
+      color: var(--muted);
+      margin-top: 12px;
+      max-width: 960px;
+    }
+
+    .card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 20px;
+      padding: 32px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.25);
+    }
+
+    .profile {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 32px;
+      align-items: center;
+    }
+    .profile img {
+      width: 100%;
+      height: 300px;
+      object-fit: cover;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.12);
+    }
+    .title {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .role {
+      font-size: 18px;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+
+    .list {
+      display: grid;
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .list li {
+      list-style: none;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      padding: 12px 14px;
+      border-radius: 12px;
+    }
+
+    .image-panel {
+      position: relative;
+      height: 100%;
+      border-radius: 20px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .image-panel img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      filter: saturate(1.05) contrast(1.05);
+    }
+    .kenburns {
+      animation: kenburns 18s ease-in-out infinite alternate;
+      transform-origin: center;
+    }
+    @keyframes kenburns {
+      0% { transform: scale(1.02) translate3d(0,0,0); }
+      100% { transform: scale(1.08) translate3d(2%, -2%, 0); }
+    }
+    .image-caption {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 16px 24px;
+      background: linear-gradient(180deg, rgba(0,0,0,0.0), rgba(0,0,0,0.6));
+      color: #fff;
+      font-size: 16px;
+    }
+
+    /* Navigation */
+    .nav {
+      position: absolute;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 8px;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.35);
+      transition: all 0.3s ease;
+      cursor: pointer;
+    }
+    .dot.active { background: var(--accent); width: 26px; border-radius: 8px; }
+
+    .arrows {
+      position: absolute;
+      top: 50%;
+      left: 0; right: 0;
+      display: flex;
+      justify-content: space-between;
+      padding: 0 24px;
+      transform: translateY(-50%);
+    }
+    .arrow {
+      width: 44px; height: 44px;
+      display: grid; place-items: center;
+      color: #fff;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .arrow:hover { background: rgba(59,130,246,0.25); }
+
+    /* Progress bar */
+    .progress {
+      position: absolute;
+      bottom: 16px;
+      left: 24px;
+      right: 24px;
+      height: 4px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .progress .bar {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      box-shadow: 0 0 16px rgba(59,130,246,0.35);
+    }
+
+    @media (max-width: 980px) {
+      .slide { grid-template-columns: 1fr; padding: 24px; }
+      .profile { grid-template-columns: 1fr; }
+      .headline { font-size: 36px; }
+    }
+
+    /* Scope adjustments to Slide 2 (profile) for better fit */
+    .slide-profile .profile { grid-template-columns: 240px 1fr; gap: 24px; }
+    .slide-profile .profile img { height: 240px; }
+    .slide-profile .title { font-size: 26px; }
+    .slide-profile .role { font-size: 16px; }
+
+    /* Alternate profile layout */
+    .slide-profile-alt { grid-template-columns: 1.2fr 0.8fr; }
+    .slide-profile-alt .left {
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 24px;
+      align-items: start;
+    }
+    .headshot {
+      width: 180px;
+      height: 180px;
+      border-radius: 16px;
+      object-fit: cover;
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 10px 24px rgba(0,0,0,0.35);
+    }
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .chip {
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(59,130,246,0.18);
+      border: 1px solid rgba(59,130,246,0.35);
+    }
+    .chip.alt { background: rgba(16,185,129,0.18); border-color: rgba(16,185,129,0.35); }
+    .summary {
+      margin-top: 12px;
+    }
+    .bullets { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .bullets li { list-style: none; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); padding: 10px 12px; border-radius: 10px; }
+    @media (max-width: 980px) {
+      .slide-profile-alt { grid-template-columns: 1fr; }
+      .slide-profile-alt .left { grid-template-columns: 1fr; }
+      .bullets { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="slider" id="slider">
+    <div class="slides" id="slides">
+      <!-- Slide 1: Welcome -->
+      <section class="slide full bg bg-gif">
+        <div class="card" style="max-width: 900px;">
+          <div class="headline">Welcome to Dharmendra Yadav's Portfolio</div>
+          <div class="subline">Focused on industrial minerals, end-to-end beneficiation, and technical leadership across mining operations. Explore highlights, expertise, and project snapshots.</div>
+        </div>
+      </section>
+
+      <!-- Slide 2: Profile -->
+      <section class="slide slide-profile-alt">
+        <div class="left">
+          <img class="headshot" src="/static/Dharmendra_Yadav.jpeg" alt="Dharmendra Yadav" />
+          <div>
+            <div class="title">Dharmendra Yadav</div>
+            <div class="role">Entrepreneur · Technical Adviser · Mining & Minerals Specialist</div>
+            <div class="chips">
+              <span class="chip">CTO — Dashmesh Minerals</span>
+              <span class="chip alt">Technical Adviser — Gold Plus Glass</span>
+              <span class="chip">Founder — Silica Sand India</span>
+            </div>
+            <div class="subline summary">Technical lead across mining operations, plant calibration, and efficiency-focused beneficiation. Experienced in delivering quality aligned to complex customer parameters.</div>
+            <ul class="bullets">
+              <li>Mine establishment and operational governance</li>
+              <li>Quality optimization and process fine-tuning</li>
+              <li>Beneficiation design (lab → plant)</li>
+              <li>Stakeholder alignment and supply chain</li>
+            </ul>
+          </div>
+        </div>
+        <div class="image-panel">
+          <img class="kenburns" src="https://www.dashmeshminerals.com/static/media/5.a8b68bdba22d7113f7f3.JPG" alt="Dashmesh Minerals Site" />
+        </div>
+      </section>
+
+      <!-- Slide 3: Summary -->
+      <section class="slide full bg bg-mine2">
+        <div class="card" style="max-width: 980px;">
+          <div class="title" style="font-size:32px;">Professional Summary</div>
+          <div class="subline">Strategic entrepreneur and technical expert with 12+ years across mining, glass, and ceramics industries. Specialist in geological exploration, mine establishment, and advanced beneficiation processes with a focus on efficiency and repeatable quality.</div>
+          <ul class="list">
+            <li>Established large-scale silica sand mines and beneficiation units.</li>
+            <li>Led plant calibration and process fine-tuning to meet complex quality targets.</li>
+            <li>Strong stakeholder alignment and supply chain optimization.</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- Slide 4: Core Expertise -->
+      <section class="slide">
+        <div class="card">
+          <div class="title" style="font-size:28px;">Core Expertise</div>
+          <ul class="list">
+            <li>Silica, Dolomite, Feldspar, Ball Clay — end-to-end lifecycle.</li>
+            <li>Beneficiation process design and optimization (lab to plant scale).</li>
+            <li>Quality assurance against complex technical parameters.</li>
+            <li>Mine procurement, setup, and operational governance.</li>
+            <li>Market analysis and cost-efficient production strategies.</li>
+          </ul>
+        </div>
+        <div class="image-panel">
+          <img class="kenburns" src="https://www.dashmeshminerals.com/static/media/1.cfb99d9805b1d06a0f34.JPG" alt="Dashmesh Minerals Site" />
+        </div>
+      </section>
+
+      <!-- Slide 5: Contact -->
+      <section class="slide full">
+        <div class="card" style="max-width: 900px;">
+          <div class="title" style="font-size:28px;">Contact</div>
+          <div class="subline">Phone: +91 9166344448 &nbsp;&nbsp;•&nbsp;&nbsp; Email: info@silicasand.in &nbsp;&nbsp;•&nbsp;&nbsp; Location: Jaipur, India</div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Navigation dots -->
+    <div class="nav" id="nav"></div>
+
+    <!-- Progress bar -->
+    <div class="progress"><div class="bar" id="bar"></div></div>
+
+    <!-- Arrows -->
+    <div class="arrows">
+      <div class="arrow" id="prev" aria-label="Previous">&#9664;</div>
+      <div class="arrow" id="next" aria-label="Next">&#9654;</div>
+    </div>
+  </div>
+
+  <script>
+    const slidesEl = document.getElementById('slides');
+    const navEl = document.getElementById('nav');
+    const prevEl = document.getElementById('prev');
+    const nextEl = document.getElementById('next');
+    const barEl = document.getElementById('bar');
+
+    const slideNodes = [...slidesEl.children];
+
+    const SLIDE_COUNT = slidesEl.children.length;
+    let current = 0;
+    let timer = null;
+
+    function render() {
+      slidesEl.style.transform = `translateX(-${current * 100}vw)`;
+      [...navEl.children].forEach((dot, idx) => {
+        dot.classList.toggle('active', idx === current);
+      });
+      slideNodes.forEach((s, idx) => s.classList.toggle('active', idx === current));
+    }
+
+    function makeDots() {
+      for (let i = 0; i < SLIDE_COUNT; i++) {
+        const dot = document.createElement('div');
+        dot.className = 'dot' + (i === 0 ? ' active' : '');
+        dot.addEventListener('click', () => {
+          current = i; resetAuto(); render();
+        });
+        navEl.appendChild(dot);
+      }
+    }
+
+    function next() { current = (current + 1) % SLIDE_COUNT; render(); }
+    function prev() { current = (current - 1 + SLIDE_COUNT) % SLIDE_COUNT; render(); }
+
+    function resetAuto() {
+      if (timer) clearInterval(timer);
+      // reset progress animation
+      barEl.style.transition = 'none';
+      barEl.style.width = '0%';
+      barEl.offsetWidth; // force reflow
+      barEl.style.transition = 'width 6s linear';
+      requestAnimationFrame(() => { barEl.style.width = '100%'; });
+      timer = setInterval(() => { next(); }, 6000);
+    }
+
+    // Init
+    makeDots();
+    render();
+    resetAuto();
+
+    nextEl.addEventListener('click', () => { next(); resetAuto(); });
+    prevEl.addEventListener('click', () => { prev(); resetAuto(); });
+
+    // Keyboard support
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight') { next(); resetAuto(); }
+      if (e.key === 'ArrowLeft') { prev(); resetAuto(); }
+    });
+  </script>
+</body>
+</html>
