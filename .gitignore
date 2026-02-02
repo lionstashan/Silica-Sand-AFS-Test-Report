@@ -1,4 +1,6 @@
 venv/
+.venv/
 __pycache__/
 *.db
 reports_pdfs/
+.DS_Store

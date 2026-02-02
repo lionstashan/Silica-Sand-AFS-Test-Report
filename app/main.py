@@ -129,7 +129,7 @@ def portfolio_pdf():
         content = []
         content.append(Paragraph("Dharmendra Yadav - Professional Portfolio", styles['Title']))
         content.append(Spacer(1, 12))
-        content.append(Paragraph("Entrepreneur | Chief Technical Adviser | Mining & Minerals Specialist", styles['Heading1']))
+        content.append(Paragraph("Entrepreneur | Technical Adviser | Mining & Minerals Specialist", styles['Heading1']))
         content.append(Spacer(1, 12))
         content.append(Paragraph("Phone: +91 9166344448 | Email: info@silicasand.in | Location: Jaipur, India", styles['Normal']))
         content.append(Spacer(1, 12))
