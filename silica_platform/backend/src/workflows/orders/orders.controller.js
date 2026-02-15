@@ -69,6 +69,14 @@ async function history(req, res) {
   } catch (e) { return bad(res, e); }
 }
 
+async function getOne(req, res) {
+  try {
+    const data = await svc.getOrderById(req.params.id);
+    if (!data) return res.status(404).json({ error: 'Order not found' });
+    return res.json(data);
+  } catch (e) { return bad(res, e); }
+}
+
 module.exports = {
   create,
   approve,
@@ -78,4 +86,5 @@ module.exports = {
   allocate,
   reallocate,
   history,
+  getOne,
 };

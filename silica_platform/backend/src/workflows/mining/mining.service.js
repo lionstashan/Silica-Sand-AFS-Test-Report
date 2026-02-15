@@ -91,4 +91,13 @@ module.exports = {
   addDowntime,
   resumeMining,
   completeMining,
+  listPending,
 };
+
+async function listPending() {
+  // Return mining tasks; optionally filter by ticket status not Completed
+  const { db } = require('../../config/firebase');
+  const { MINING_COLLECTION } = require('./mining.model');
+  const snap = await db.collection(MINING_COLLECTION).orderBy('timestamps.createdAt', 'desc').get();
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}

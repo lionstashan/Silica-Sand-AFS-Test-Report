@@ -1,0 +1,5 @@
+[
+  { "id": "grade_A", "name": "Grade A", "description": "High purity", "active": true },
+  { "id": "grade_B", "name": "Grade B", "description": "Medium purity", "active": true },
+  { "id": "grade_C", "name": "Grade C", "description": "Standard purity", "active": true }
+]

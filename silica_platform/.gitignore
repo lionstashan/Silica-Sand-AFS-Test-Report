@@ -1,0 +1,20 @@
+# Node backend
+backend/node_modules/
+backend/.env
+backend/.DS_Store
+
+# Flutter mobile
+mobile/build/
+mobile/.dart_tool/
+mobile/.packages
+mobile/ios/Pods/
+mobile/ios/DerivedData/
+mobile/android/.gradle/
+mobile/android/local.properties
+
+# Python leftovers
+**/__pycache__/
+*.pyc
+
+# Mac system
+.DS_Store

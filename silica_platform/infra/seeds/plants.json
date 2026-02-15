@@ -1,0 +1,7 @@
+[
+  { "id": "plant_wet_1", "name": "Wet Plant 1", "type": "Wet", "active": true },
+  { "id": "plant_wet_2", "name": "Wet Plant 2", "type": "Wet", "active": true },
+  { "id": "plant_dry_1", "name": "Dry Plant 1", "type": "Dry", "active": true },
+  { "id": "plant_dry_2", "name": "Dry Plant 2", "type": "Dry", "active": true },
+  { "id": "plant_dry_3", "name": "Dry Plant 3", "type": "Dry", "active": true }
+]

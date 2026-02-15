@@ -1,5 +1,4 @@
 const admin = require('firebase-admin');
-const { initializeApp, cert } = admin;
 
 let initialized = false;
 
@@ -17,10 +16,12 @@ function initFirebaseAdmin() {
 
   const privateKey = rawKey.replace(/\\n/g, '\n');
 
-  initializeApp({
-    credential: cert({ projectId, clientEmail, privateKey }),
+  admin.initializeApp({
+    credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
     storageBucket,
   });
+
+  console.log('Firebase Admin initialized successfully');
 
   initialized = true;
   return admin;

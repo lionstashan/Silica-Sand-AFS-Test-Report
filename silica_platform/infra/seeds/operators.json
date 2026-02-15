@@ -1,0 +1,7 @@
+[
+  { "id": "op_machine_1", "name": "Machine Operator 1", "role": "Machine", "phone": "+91XXXXXXXXXX", "active": true },
+  { "id": "op_machine_2", "name": "Machine Operator 2", "role": "Machine", "phone": "+91XXXXXXXXXX", "active": true },
+  { "id": "op_dumper_1", "name": "Dumper Operator 1", "role": "Dumper", "phone": "+91XXXXXXXXXX", "active": true },
+  { "id": "op_dumper_2", "name": "Dumper Operator 2", "role": "Dumper", "phone": "+91XXXXXXXXXX", "active": true },
+  { "id": "op_qc_1", "name": "QC Operator 1", "role": "QC", "phone": "+91XXXXXXXXXX", "active": true }
+]

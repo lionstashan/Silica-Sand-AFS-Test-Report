@@ -1,0 +1,24 @@
+name: silica_mobile
+description: Silica Mines Operations mobile app
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  firebase_core: ^2.25.0
+  firebase_auth: ^4.17.4
+  cloud_firestore: ^4.15.9
+  firebase_messaging: ^14.7.9
+  connectivity_plus: ^6.0.3
+  firebase_storage: ^11.7.7
+  image_picker: ^1.0.7
+  provider: ^6.1.2
+  http: ^1.2.0
+  shared_preferences: ^2.3.2
+
+flutter:
+  uses-material-design: true

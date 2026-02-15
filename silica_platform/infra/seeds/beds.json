@@ -1,0 +1,6 @@
+[
+  { "id": "bed_1", "name": "Drying Bed 1", "capacity": 100, "active": true },
+  { "id": "bed_2", "name": "Drying Bed 2", "capacity": 100, "active": true },
+  { "id": "bed_3", "name": "Drying Bed 3", "capacity": 100, "active": true },
+  { "id": "bed_4", "name": "Drying Bed 4", "capacity": 100, "active": true }
+]

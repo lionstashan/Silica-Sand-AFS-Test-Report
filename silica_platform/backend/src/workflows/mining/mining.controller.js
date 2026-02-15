@@ -59,10 +59,18 @@ async function complete(req, res) {
   } catch (e) { return bad(res, e); }
 }
 
+async function pending(req, res) {
+  try {
+    const result = await service.listPending();
+    return res.json(result);
+  } catch (e) { return bad(res, e); }
+}
+
 module.exports = {
   create,
   start,
   downtime,
   resume,
   complete,
+  pending,
 };

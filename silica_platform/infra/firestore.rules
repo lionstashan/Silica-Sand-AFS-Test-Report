@@ -1,0 +1,151 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function hasRole(role) {
+      return request.auth.token.roles != null && role in request.auth.token.roles;
+    }
+    // Tickets and subcollections
+    match /tickets/{ticketId} {
+      function isMining() {
+        return request.resource.data.type == 'Mining';
+      }
+      function isProduction() { return request.resource.data.type == 'Production'; }
+      function isDrying() { return request.resource.data.type == 'Drying'; }
+      function validMiningStatus(s) {
+        return s in ['Open','In-Progress','Downtime','Downtime-Fix','Downtime-Fix-Completed','Ready-To-Resume','Completed','Closed'];
+      }
+      function validMiningFields() {
+        return
+          isMining() &&
+          validMiningStatus(request.resource.data.status) &&
+          request.resource.data.mine is int && request.resource.data.mine >= 1 && request.resource.data.mine <= 3 &&
+          request.resource.data.pit is int && request.resource.data.pit >= 1 && request.resource.data.pit <= 4 &&
+          ( !('expectedDumpers' in request.resource.data) || (request.resource.data.expectedDumpers is int && request.resource.data.expectedDumpers >= 0) ) &&
+          ( !('dumpersLoaded' in request.resource.data) || (request.resource.data.dumpersLoaded is int && request.resource.data.dumpersLoaded >= 0) ) &&
+          ( !('machineOperator' in request.resource.data) || (request.resource.data.machineOperator is string && request.resource.data.machineOperator.size() > 0) ) &&
+          ( !('dumperOperators' in request.resource.data) || (request.resource.data.dumperOperators is list) ) &&
+          ( !('downtimeReasons' in request.resource.data) || (request.resource.data.downtimeReasons is list) );
+      }
+      function allowedNext(from, to) {
+        return from == to ||
+          (from == 'Open' && (to == 'In-Progress' || to == 'Downtime')) ||
+          (from == 'In-Progress' && (to == 'Downtime' || to == 'Completed')) ||
+          (from == 'Downtime' && (to == 'Downtime-Fix' || to == 'Ready-To-Resume')) ||
+          (from == 'Downtime-Fix' && to == 'Downtime-Fix-Completed') ||
+          (from == 'Downtime-Fix-Completed' && to == 'Ready-To-Resume') ||
+          (from == 'Ready-To-Resume' && (to == 'In-Progress' || to == 'Completed')) ||
+          (from == 'Completed' && to == 'Closed');
+      }
+      function validMiningTransition() {
+        return !isMining() || allowedNext(resource.data.status, request.resource.data.status);
+      }
+
+      // Production validations
+      function validProductionStatus(s) { return s in ['Open','In-Progress','QC-Pending','Completed','Closed']; }
+      function validProductionFields() {
+        return isProduction() &&
+          validProductionStatus(request.resource.data.status) &&
+          request.resource.data.plant is string && request.resource.data.plant.size() > 0 &&
+          ( !('productionQty' in request.resource.data) || (request.resource.data.productionQty is number && request.resource.data.productionQty >= 0) ) &&
+          ( !('gradeBreakup' in request.resource.data) || request.resource.data.gradeBreakup is map ) &&
+          ( !('qc' in request.resource.data) || (request.resource.data.qc.status in ['Pass','Fail','Pending']) );
+      }
+      function allowedNextProd(from, to) {
+        return from == to ||
+          (from == 'Open' && (to == 'In-Progress' || to == 'QC-Pending' || to == 'Completed')) ||
+          (from == 'In-Progress' && (to == 'QC-Pending' || to == 'Completed')) ||
+          (from == 'QC-Pending' && to == 'Completed') ||
+          (from == 'Completed' && to == 'Closed');
+      }
+      function validProductionTransition() { return !isProduction() || allowedNextProd(resource.data.status, request.resource.data.status); }
+
+      // Drying validations
+      function validDryingStatus(s) { return s in ['Open','In-Progress','QC-Pending','Completed','Closed']; }
+      function validDryingFields() {
+        return isDrying() &&
+          validDryingStatus(request.resource.data.status) &&
+          request.resource.data.bed is string && request.resource.data.bed.size() > 0 &&
+          request.resource.data.grade is string && request.resource.data.grade.size() > 0 &&
+          ( !('moistureStart' in request.resource.data) || (request.resource.data.moistureStart is number && request.resource.data.moistureStart >= 0 && request.resource.data.moistureStart <= 100) ) &&
+          ( !('moistureEnd' in request.resource.data) || (request.resource.data.moistureEnd is number && request.resource.data.moistureEnd >= 0 && request.resource.data.moistureEnd <= 100) ) &&
+          ( !('dryQty' in request.resource.data) || (request.resource.data.dryQty is number && request.resource.data.dryQty >= 0) ) &&
+          ( !('qc' in request.resource.data) || (request.resource.data.qc.status in ['Pass','Fail','Pending']) );
+      }
+      function allowedNextDry(from, to) {
+        return from == to ||
+          (from == 'Open' && (to == 'In-Progress' || to == 'QC-Pending' || to == 'Completed')) ||
+          (from == 'In-Progress' && (to == 'QC-Pending' || to == 'Completed')) ||
+          (from == 'QC-Pending' && to == 'Completed') ||
+          (from == 'Completed' && to == 'Closed');
+      }
+      function validDryingTransition() { return !isDrying() || allowedNextDry(resource.data.status, request.resource.data.status); }
+      allow read: if hasRole('Manager') || hasRole('Director') || hasRole('QC') || hasRole('Dispatch') || hasRole('Accounts') || hasRole('Maintenance');
+      allow create: if (hasRole('Manager') || hasRole('QC') || hasRole('Dispatch')) && (
+        (!isMining() || validMiningFields()) &&
+        (!isProduction() || validProductionFields()) &&
+        (!isDrying() || validDryingFields())
+      );
+      allow update: if (hasRole('Manager') || hasRole('QC') || hasRole('Dispatch') || hasRole('Maintenance')) && (
+        (!isMining() || (validMiningFields() && validMiningTransition())) &&
+        (!isProduction() || (validProductionFields() && validProductionTransition())) &&
+        (!isDrying() || (validDryingFields() && validDryingTransition()))
+      );
+      match /logs/{logId} {
+        allow read: if hasRole('Manager') || hasRole('Director') || hasRole('QC') || hasRole('Dispatch') || hasRole('Accounts') || hasRole('Maintenance');
+        allow write: if hasRole('Manager') || hasRole('QC') || hasRole('Dispatch') || hasRole('Maintenance');
+      }
+      match /photos/{photoId} {
+        allow read: if hasRole('Manager') || hasRole('Director') || hasRole('QC') || hasRole('Dispatch') || hasRole('Accounts') || hasRole('Maintenance');
+        allow write: if hasRole('Manager') || hasRole('QC') || hasRole('Dispatch') || hasRole('Maintenance');
+      }
+    }
+
+    // Stocks
+    match /stocks/{docId} {
+      allow read: if hasRole('Manager') || hasRole('Director') || hasRole('Accounts') || hasRole('QC');
+      allow write: if hasRole('Manager') || hasRole('Accounts');
+    }
+
+    // Masters
+    match /plants/{plantId} {
+      allow read: if hasRole('Manager') || hasRole('Director') || hasRole('QC') || hasRole('Dispatch') || hasRole('Accounts');
+      allow write: if hasRole('Manager');
+    }
+    match /beds/{bedId} {
+      allow read: if hasRole('Manager') || hasRole('Director') || hasRole('QC') || hasRole('Dispatch') || hasRole('Accounts');
+      allow write: if hasRole('Manager');
+    }
+    match /grades/{gradeId} {
+      allow read: if hasRole('Manager') || hasRole('Director') || hasRole('QC') || hasRole('Dispatch') || hasRole('Accounts');
+      allow write: if hasRole('Manager');
+    }
+    match /operators/{operatorId} {
+      allow read: if hasRole('Manager') || hasRole('Director');
+      allow write: if hasRole('Manager');
+    }
+
+    // Orders and dispatches
+    match /orders/{orderId} {
+      allow read: if hasRole('Manager') || hasRole('Director') || hasRole('Dispatch') || hasRole('Accounts');
+      allow write: if hasRole('Manager') || hasRole('Dispatch') || hasRole('Accounts');
+      match /dispatches/{dispatchId} {
+        allow read: if hasRole('Manager') || hasRole('Director') || hasRole('Dispatch') || hasRole('Accounts');
+        allow write: if hasRole('Dispatch') || hasRole('Manager');
+      }
+    }
+
+    // Users and device tokens
+    match /users/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid || hasRole('Director') || hasRole('Manager');
+      allow write: if hasRole('Manager') || hasRole('Director');
+      match /devices/{deviceId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+    }
+
+    // Default director-level read
+    match /{document=**} {
+      allow read: if hasRole('Director');
+    }
+  }
+}

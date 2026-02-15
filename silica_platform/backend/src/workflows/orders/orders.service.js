@@ -55,6 +55,12 @@ async function listHistory({ company, grade, status }) {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
+async function getOrderById(id) {
+  const snap = await orderRef(id).get();
+  if (!snap.exists) return null;
+  return { id: snap.id, ...snap.data() };
+}
+
 // Allocation: Reserve stock and create dispatch in a single transaction.
 async function allocate({ orderId, quantity, userId }) {
   const q = Number(quantity);
@@ -197,4 +203,5 @@ module.exports = {
   listHistory,
   allocate,
   reallocate,
+  getOrderById,
 };
