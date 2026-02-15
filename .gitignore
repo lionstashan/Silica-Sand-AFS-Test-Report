@@ -4,3 +4,4 @@ __pycache__/
 *.db
 reports_pdfs/
 .DS_Store
+node_modules/
