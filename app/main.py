@@ -35,7 +35,21 @@ def lab_form(request: Request):
 # ---------------- Root Redirect ----------------
 @app.get("/")
 def root_redirect():
-    return RedirectResponse(url="/dashmesh-report")
+    # Serve the portfolio at site root
+    return RedirectResponse(url="/portfolio")
+
+
+@app.get("/lab-report")
+def lab_report():
+    try:
+        file_path = os.path.join(os.path.dirname(__file__), "Dashmesh/lab-report.html")
+        with open(file_path, "r") as f:
+            content = f.read()
+        # Replace local logo path with static URL
+        content = content.replace('src="logo.png"', 'src="/static/dashmesh_logo.png"')
+        return HTMLResponse(content=content)
+    except Exception as e:
+        return HTMLResponse(content=f"<h1>Error: {str(e)}</h1>", status_code=500)
 
 
 # ---------------- Submit Form ----------------
