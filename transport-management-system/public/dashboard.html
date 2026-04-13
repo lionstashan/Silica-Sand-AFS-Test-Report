@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Transport Management Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Role Selection Modal -->
+  <div id="role-modal" style="display: none;">
+    <div class="role-modal-content">
+      <h2>Select Your Role</h2>
+      <div class="role-buttons">
+        <button class="role-btn" data-role="Gate">Gate</button>
+        <button class="role-btn" data-role="Dispatch">Dispatch</button>
+        <button class="role-btn" data-role="Weighbridge">Weighbridge</button>
+        <button class="role-btn" data-role="Admin">Admin</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PIN Entry Modal -->
+  <div id="pin-modal" style="display: none;">
+    <div class="pin-modal-content">
+      <h2>Enter PIN</h2>
+      <p id="pin-role-label"></p>
+      <input type="password" id="pin-input" placeholder="Enter 4-digit PIN" maxlength="4" />
+      <button id="pin-submit-btn">Submit</button>
+      <button id="pin-cancel-btn">Back</button>
+      <p id="pin-error-message" style="color: #b91c1c; display: none;"></p>
+    </div>
+  </div>
+
+  <header>
+    <h1>Transport Management Dashboard</h1>
+    <p>Real-time overview of transport operations.</p>
+    <nav>
+      <a href="/" class="nav-link">← Back to Main</a>
+      <a href="#" id="logout-link" class="nav-link" style="display: none;">Logout</a>
+    </nav>
+  </header>
+
+  <section class="panel" style="display: none;">
+    <h2>Summary</h2>
+    <div class="summary-cards" id="summary-cards">
+      <!-- Cards will be populated by JavaScript -->
+    </div>
+  </section>
+
+  <section class="panel" style="display: none;">
+    <h2 id="active-trucks-header">Active Trucks</h2>
+    <div class="table-container">
+      <table class="trip-table-dashboard-active">
+        <thead>
+          <tr>
+            <th>Truck Number</th>
+            <th>Status</th>
+            <th>Customer</th>
+            <th>Net Weight</th>
+            <th>Time In</th>
+            <th>Time Spent</th>
+          </tr>
+        </thead>
+        <tbody id="active-trips-table"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" style="display: none;">
+    <h2 id="completed-trucks-header">Completed / Cancelled Trucks</h2>
+    <div class="filters">
+      <div class="filter-group">
+        <label>Search Truck:
+          <input type="text" id="truck-search" placeholder="Enter truck number..." />
+        </label>
+        <label>Filter Status:
+          <select id="status-filter">
+            <option value="">All Statuses</option>
+            <option value="COMPLETED">COMPLETED</option>
+            <option value="CANCELLED">CANCELLED</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div class="table-container">
+      <table class="trip-table-dashboard-completed">
+        <thead>
+          <tr>
+            <th>Truck Number</th>
+            <th>Status</th>
+            <th>Customer</th>
+            <th>Net Weight</th>
+            <th>Time In</th>
+            <th>Time Spent</th>
+          </tr>
+        </thead>
+        <tbody id="completed-trips-table"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>
