@@ -3,6 +3,12 @@ let userRole = null;
 let refreshInterval;
 const IST_TIMEZONE = 'Asia/Kolkata';
 const VALID_ROLES = ['Gate', 'Dispatch', 'Weighbridge', 'Admin'];
+const istDatePartsFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: IST_TIMEZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit'
+});
 
 // Hardcoded PINs for each role
 const rolePINs = {
@@ -25,13 +31,6 @@ function getCurrentRole() {
     userRole = role;
   }
   return userRole;
-}
-
-function getCurrentISTDate() {
-  const nowIST = new Date().toLocaleString('en-US', {
-    timeZone: IST_TIMEZONE
-  });
-  return new Date(nowIST);
 }
 
 // Initialize role from localStorage
@@ -184,11 +183,14 @@ function createSummaryCard(title, count, colorClass) {
 }
 
 function getIstDateParts(date) {
-  return {
-    year: date.getFullYear(),
-    month: date.getMonth(),
-    day: date.getDate()
-  };
+  const parts = istDatePartsFormatter.formatToParts(date);
+  const mapped = {};
+  parts.forEach((part) => {
+    if (part.type === 'year' || part.type === 'month' || part.type === 'day') {
+      mapped[part.type] = part.value;
+    }
+  });
+  return mapped;
 }
 
 function parseWeight(value) {
@@ -201,7 +203,7 @@ function formatTons(weightInKg) {
 }
 
 function calculateDispatchVolumes(trips) {
-  const nowIst = getIstDateParts(getCurrentISTDate());
+  const nowIst = getIstDateParts(new Date());
   let todayDispatchKg = 0;
   let monthDispatchKg = 0;
 
@@ -294,10 +296,8 @@ function getDelayClass(timeSpent) {
 
 function parseTripDate(value) {
   if (!value) return null;
-  const rawDate = new Date(value);
-  if (Number.isNaN(rawDate.getTime())) return null;
-  const istString = rawDate.toLocaleString('en-US', { timeZone: IST_TIMEZONE });
-  return new Date(istString);
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function formatDateTime(value) {
@@ -361,7 +361,7 @@ function updateCompletedTripsTable(trips, totalCount) {
 
 function calculateTimeSpent(inTime) {
   if (!inTime) return null;
-  const diffMs = getCurrentISTDate().getTime() - inTime.getTime();
+  const diffMs = Date.now() - inTime.getTime();
   if (diffMs <= 0) return 0;
   return Math.floor(diffMs / (1000 * 60));
 }

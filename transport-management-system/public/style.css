@@ -787,12 +787,11 @@ tr:nth-child(even) {
     text-align: left;
   }
 
-  .trip-table-main td:nth-child(8) .weight-input:not(.net-weight) {
-    display: none;
-  }
-
   .trip-table-main td:nth-child(8) .save-weight-btn {
-    display: none;
+    min-height: 44px;
+    width: 100%;
+    font-size: 0.95rem;
+    margin-top: 6px;
   }
 
   .trip-table-main td:nth-child(12) {

@@ -31,11 +31,8 @@ function hasRoleAccess(allowedRoles) {
   return !!role && allowedRoles.includes(role);
 }
 
-function getCurrentISTDate() {
-  const nowIST = new Date().toLocaleString('en-US', {
-    timeZone: IST_TIMEZONE
-  });
-  return new Date(nowIST);
+function getCurrentTimestampISO() {
+  return new Date().toISOString();
 }
 
 // Initialize role from localStorage
@@ -223,6 +220,8 @@ function getActionDropdown(trip) {
   if (!canEditStatus) {
     return '<span>-</span>';
   }
+  const isAdmin = hasRoleAccess(['Admin']);
+  const isTerminalStatus = trip.status === 'COMPLETED' || trip.status === 'CANCELLED';
   const statuses = [
     'IN_GATE',
     'AT_DISPATCH',
@@ -244,7 +243,7 @@ function getActionDropdown(trip) {
   }).join('');
 
   return `
-    <select class="status-action-select" data-trip-id="${trip.id}" ${trip.is_cancelled ? 'disabled' : ''}>
+    <select class="status-action-select" data-trip-id="${trip.id}" ${(!isAdmin && isTerminalStatus) ? 'disabled' : ''}>
       ${options}
     </select>
   `;
@@ -325,10 +324,8 @@ function getSelectedWeightOperatorFromRow(tripId) {
 
 function parseTripDate(value) {
   if (!value) return null;
-  const rawDate = new Date(value);
-  if (Number.isNaN(rawDate.getTime())) return null;
-  const istString = rawDate.toLocaleString('en-US', { timeZone: IST_TIMEZONE });
-  return new Date(istString);
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function formatDateTime(value) {
@@ -340,7 +337,7 @@ function formatDateTime(value) {
 
 function calculateTimeSpent(inTime) {
   if (!inTime) return null;
-  const diffMs = getCurrentISTDate().getTime() - inTime.getTime();
+  const diffMs = Date.now() - inTime.getTime();
   if (diffMs <= 0) return 0;
   return Math.floor(diffMs / (1000 * 60));
 }
@@ -407,6 +404,19 @@ async function updateTripStatus(tripId, status, cancelReason = null) {
     return;
   }
 
+  const existingTrip = getTripById(tripId);
+  if (!existingTrip) {
+    showMessage('Trip not found', false);
+    return;
+  }
+
+  const isAdmin = hasRoleAccess(['Admin']);
+  const isTerminalStatus = existingTrip.status === 'COMPLETED' || existingTrip.status === 'CANCELLED';
+  if (!isAdmin && isTerminalStatus) {
+    showMessage('Only Admin can update Completed/Cancelled trips', false);
+    return;
+  }
+
   // Check permissions for cancel action
   if (status === 'CANCELLED') {
     if (!hasRoleAccess(['Dispatch', 'Admin'])) {
@@ -431,7 +441,6 @@ async function updateTripStatus(tripId, status, cancelReason = null) {
     }
   }
 
-  const existingTrip = getTripById(tripId);
   const payload = {
     ...getBaseTripPayload(existingTrip),
     status
@@ -445,11 +454,11 @@ async function updateTripStatus(tripId, status, cancelReason = null) {
   if (status === 'CANCELLED') {
     payload.is_cancelled = true;
     payload.cancel_reason = cancelReason;
-    payload.out_time = getCurrentISTDate().toISOString();
+    payload.out_time = getCurrentTimestampISO();
   } else if (status === 'COMPLETED') {
     payload.is_cancelled = false;
     payload.cancel_reason = null;
-    payload.out_time = getCurrentISTDate().toISOString();
+    payload.out_time = getCurrentTimestampISO();
   } else if (payload.is_cancelled && existingTrip && existingTrip.status !== 'CANCELLED') {
     payload.is_cancelled = false;
     payload.cancel_reason = null;
@@ -629,7 +638,7 @@ function getFormData() {
     driver_phone: formData.get('driver_phone') || '',
     gate_person_name: gatePerson,
     status: 'IN_GATE', // Default status for gate entry
-    in_time: getCurrentISTDate().toISOString()
+    in_time: getCurrentTimestampISO()
   };
 }
 
