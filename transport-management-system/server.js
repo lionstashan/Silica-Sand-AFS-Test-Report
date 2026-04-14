@@ -26,18 +26,25 @@ app.post('/trip', async (req, res) => {
     material_type,
     grade,
     loading_point,
+    labour_team,
+    eta,
+    waiting_reason,
     tare_weight,
     gross_weight,
     net_weight,
     status,
+    final_status,
     is_cancelled,
     cancel_reason,
     in_time,
-    out_time
+    out_time,
+    last_status_update_time
   } = req.body;
 
   const safeStatus = status || 'IN_GATE';
-  const safeInTime = in_time || new Date().toISOString();
+  // Use server time as canonical source to avoid client timezone skew.
+  const safeInTime = new Date().toISOString();
+  const safeLastStatusUpdateTime = last_status_update_time || safeInTime;
   const safeIsCancelled = is_cancelled ?? false;
 
   try {
@@ -55,15 +62,20 @@ app.post('/trip', async (req, res) => {
         material_type,
         grade,
         loading_point,
+        labour_team,
+        eta,
+        waiting_reason,
         tare_weight,
         gross_weight,
         net_weight,
         status,
+        final_status,
         is_cancelled,
         cancel_reason,
         in_time,
-        out_time
-      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+        out_time,
+        last_status_update_time
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
       RETURNING *`,
       [
         sequence_number,
@@ -78,14 +90,19 @@ app.post('/trip', async (req, res) => {
         material_type,
         grade,
         loading_point,
+        labour_team,
+        eta,
+        waiting_reason,
         tare_weight,
         gross_weight,
         net_weight,
         safeStatus,
+        final_status || null,
         safeIsCancelled,
         cancel_reason,
         safeInTime,
-        out_time
+        out_time,
+        safeLastStatusUpdateTime
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -120,14 +137,19 @@ app.put('/trip/:id', async (req, res) => {
     'material_type',
     'grade',
     'loading_point',
+    'labour_team',
+    'eta',
+    'waiting_reason',
     'tare_weight',
     'gross_weight',
     'net_weight',
     'status',
+    'final_status',
     'is_cancelled',
     'cancel_reason',
     'in_time',
-    'out_time'
+    'out_time',
+    'last_status_update_time'
   ];
 
   const providedFields = allowedFields.filter((field) =>

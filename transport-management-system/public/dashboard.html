@@ -15,6 +15,7 @@
         <button class="role-btn" data-role="Gate">Gate</button>
         <button class="role-btn" data-role="Dispatch">Dispatch</button>
         <button class="role-btn" data-role="Weighbridge">Weighbridge</button>
+        <button class="role-btn" data-role="Finance">Finance</button>
         <button class="role-btn" data-role="Admin">Admin</button>
       </div>
     </div>
@@ -36,6 +37,7 @@
     <h1>Transport Management Dashboard</h1>
     <p>Real-time overview of transport operations.</p>
     <nav>
+      <span id="role-indicator" class="role-indicator" style="display: none;"></span>
       <a href="/" class="nav-link">← Back to Main</a>
       <a href="#" id="logout-link" class="nav-link" style="display: none;">Logout</a>
     </nav>
@@ -50,7 +52,7 @@
 
   <section class="panel" style="display: none;">
     <h2 id="active-trucks-header">Active Trucks</h2>
-    <div class="table-container">
+    <div class="table-container desktop-only">
       <table class="trip-table-dashboard-active">
         <thead>
           <tr>
@@ -59,45 +61,59 @@
             <th>Customer</th>
             <th>Net Weight</th>
             <th>Time In</th>
-            <th>Time Spent</th>
+            <th>Total Time</th>
+            <th>Stage Time</th>
           </tr>
         </thead>
         <tbody id="active-trips-table"></tbody>
       </table>
     </div>
+    <div id="active-mobile-list" class="mobile-trip-list mobile-only"></div>
   </section>
 
   <section class="panel" style="display: none;">
-    <h2 id="completed-trucks-header">Completed / Cancelled Trucks</h2>
+    <h2>Reports (Completed & Cancelled)</h2>
     <div class="filters">
       <div class="filter-group">
-        <label>Search Truck:
-          <input type="text" id="truck-search" placeholder="Enter truck number..." />
+        <label>From Date:
+          <input type="date" id="report-from-date" />
         </label>
-        <label>Filter Status:
-          <select id="status-filter">
-            <option value="">All Statuses</option>
+        <label>To Date:
+          <input type="date" id="report-to-date" />
+        </label>
+        <label>Status:
+          <select id="report-status-filter">
+            <option value="">All</option>
             <option value="COMPLETED">COMPLETED</option>
             <option value="CANCELLED">CANCELLED</option>
           </select>
         </label>
+        <label>Search:
+          <input type="text" id="report-search" placeholder="Truck or customer..." />
+        </label>
+        <button id="report-refresh-btn" type="button">Refresh</button>
+        <button id="report-export-btn" type="button">Export CSV</button>
       </div>
+      <p id="report-record-count">Total Records: 0</p>
     </div>
-    <div class="table-container">
+    <div class="table-container desktop-only">
       <table class="trip-table-dashboard-completed">
         <thead>
           <tr>
             <th>Truck Number</th>
-            <th>Status</th>
             <th>Customer</th>
+            <th>Status</th>
             <th>Net Weight</th>
             <th>Time In</th>
-            <th>Time Spent</th>
+            <th>Time Out</th>
+            <th>Total Time</th>
+            <th>Cancel Reason</th>
           </tr>
         </thead>
-        <tbody id="completed-trips-table"></tbody>
+        <tbody id="report-trips-table"></tbody>
       </table>
     </div>
+    <div id="report-mobile-list" class="mobile-trip-list mobile-only"></div>
   </section>
 
   <script src="dashboard.js"></script>

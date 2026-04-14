@@ -36,6 +36,17 @@ header nav {
   transition: background-color 0.2s;
 }
 
+.role-indicator {
+  display: inline-block;
+  margin-right: 10px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
 .nav-link:hover {
   background: rgba(255, 255, 255, 0.3);
 }
@@ -263,6 +274,51 @@ button#clear-button:hover {
   overflow-x: auto;
 }
 
+.mobile-only {
+  display: none;
+}
+
+.desktop-only {
+  display: block;
+}
+
+.mobile-trip-list {
+  display: none;
+}
+
+.mobile-trip-card {
+  border: 1px solid #dbe4f0;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 10px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+.mobile-trip-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.mobile-trip-truck {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.mobile-trip-grid {
+  display: grid;
+  gap: 6px;
+  font-size: 0.86rem;
+  color: #334155;
+}
+
+.mobile-trip-actions {
+  margin-top: 10px;
+}
+
 @media (max-width: 768px) {
   .table-container {
     font-size: 0.75rem;
@@ -363,19 +419,47 @@ tr:nth-child(even) {
   color: #374151;
 }
 
+.status-in-gate {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.status-at-dispatch,
 .status-at_dispatch {
   background: #dbeafe;
   color: #1e40af;
 }
 
+.status-waiting {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.status-sent-for-tare-weight {
+  background: #e0f2fe;
+  color: #075985;
+}
+
+.status-tare-weight-done,
 .status-tare_weight_done {
   background: #fef3c7;
   color: #92400e;
 }
 
+.status-ready-for-loading {
+  background: #cffafe;
+  color: #155e75;
+}
+
+.status-loading-in-progress,
 .status-loading_in_progress {
   background: #fed7aa;
   color: #9a3412;
+}
+
+.status-loading-completed {
+  background: #fde68a;
+  color: #92400e;
 }
 
 .status-loaded {
@@ -383,9 +467,25 @@ tr:nth-child(even) {
   color: #92400e;
 }
 
+.status-gross-weight-pending {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
+.status-gross-weight-done,
 .status-gross_weight_done {
   background: #d1fae5;
   color: #065f46;
+}
+
+.status-billing-pending {
+  background: #f3e8ff;
+  color: #7e22ce;
+}
+
+.status-billing-completed {
+  background: #e9d5ff;
+  color: #6b21a8;
 }
 
 .status-completed {
@@ -396,6 +496,11 @@ tr:nth-child(even) {
 .status-cancelled {
   background: #fee2e2;
   color: #991b1b;
+}
+
+.status-exited {
+  background: #dcfce7;
+  color: #166534;
 }
 
 /* Delayed truck highlighting */
@@ -459,6 +564,111 @@ tr:nth-child(even) {
   flex-direction: column;
   gap: 4px;
   align-items: stretch;
+}
+
+.weight-readonly {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mini-muted {
+  font-size: 0.76rem;
+  color: #6b7280;
+}
+
+.workflow-details {
+  margin-bottom: 6px;
+  font-size: 0.78rem;
+  color: #334155;
+  display: grid;
+  gap: 2px;
+}
+
+.workflow-container {
+  min-width: 220px;
+  display: grid;
+  gap: 6px;
+}
+
+.workflow-group {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.workflow-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.workflow-btn {
+  flex: 0 0 auto;
+  min-width: 120px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #1f2937;
+  font-size: 0.78rem;
+}
+
+.workflow-btn.primary {
+  background: #0f4c81;
+  color: white;
+  border-color: #0f4c81;
+}
+
+.workflow-btn.danger {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fecaca;
+}
+
+.workflow-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dispatch-editor {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.dispatch-editor label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  gap: 4px;
+}
+
+.dispatch-input,
+.dispatch-other-input {
+  margin-top: 4px;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+  border-radius: 6px;
+}
+
+.reason-chip {
+  font-size: 0.72rem;
+  background: #f8fafc;
+  border: 1px solid #dbeafe;
+  border-radius: 6px;
+  padding: 3px 6px;
+  color: #334155;
+}
+
+.reason-chip-error {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
 }
 
 .weight-input {
@@ -580,6 +790,10 @@ tr:nth-child(even) {
   border-left-color: #0f4c81;
 }
 
+.card-light-blue {
+  border-left-color: #38bdf8;
+}
+
 .card-gray {
   border-left-color: #6b7280;
 }
@@ -596,6 +810,14 @@ tr:nth-child(even) {
   border-left-color: #ef4444;
 }
 
+.card-purple {
+  border-left-color: #8b5cf6;
+}
+
+.card-yellow {
+  border-left-color: #facc15;
+}
+
 .card-number {
   font-size: 2.5rem;
   font-weight: 700;
@@ -608,6 +830,14 @@ tr:nth-child(even) {
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.card-trucks {
+  margin-top: 8px;
+  font-size: 0.74rem;
+  color: #475569;
+  line-height: 1.35;
+  word-break: break-word;
 }
 
 @media (max-width: 768px) {
@@ -626,6 +856,10 @@ tr:nth-child(even) {
 
   .card-title {
     font-size: 0.8rem;
+  }
+
+  .card-trucks {
+    font-size: 0.68rem;
   }
 }
 
@@ -701,148 +935,13 @@ tr:nth-child(even) {
     font-size: 1rem;
   }
 
-  /* Convert data tables into cards for mobile */
-  .trip-table-main thead,
-  .trip-table-dashboard-active thead,
-  .trip-table-dashboard-completed thead {
-    display: none;
+  .desktop-only {
+    display: none !important;
   }
 
-  .trip-table-main,
-  .trip-table-dashboard-active,
-  .trip-table-dashboard-completed,
-  .trip-table-main tbody,
-  .trip-table-dashboard-active tbody,
-  .trip-table-dashboard-completed tbody {
-    display: block;
-    width: 100%;
-  }
-
-  .trip-table-main tr,
-  .trip-table-dashboard-active tr,
-  .trip-table-dashboard-completed tr {
-    display: block;
-    background: #ffffff;
-    border: 1px solid #dbe4f0;
-    border-radius: 12px;
-    margin-bottom: 12px;
-    padding: 10px 12px;
-    box-shadow: 0 3px 10px rgba(15, 23, 42, 0.06);
-  }
-
-  .trip-table-main td,
-  .trip-table-dashboard-active td,
-  .trip-table-dashboard-completed td {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    border: 0;
-    padding: 8px 0;
-    white-space: normal;
-    text-align: right;
-  }
-
-  .trip-table-main td::before,
-  .trip-table-dashboard-active td::before,
-  .trip-table-dashboard-completed td::before {
-    font-weight: 600;
-    color: #334155;
-    text-align: left;
-    margin-right: auto;
-  }
-
-  /* Main table labels */
-  .trip-table-main td:nth-child(1)::before { content: "Truck Number"; }
-  .trip-table-main td:nth-child(2)::before { content: "Status"; }
-  .trip-table-main td:nth-child(3)::before { content: "Customer"; }
-  .trip-table-main td:nth-child(8)::before { content: "Net Weight"; }
-  .trip-table-main td:nth-child(11)::before { content: "Time Spent"; }
-  .trip-table-main td:nth-child(12)::before { content: "Actions"; }
-
-  /* Keep mobile cards focused for field use */
-  .trip-table-main td:nth-child(4),
-  .trip-table-main td:nth-child(5),
-  .trip-table-main td:nth-child(6),
-  .trip-table-main td:nth-child(7),
-  .trip-table-main td:nth-child(9),
-  .trip-table-main td:nth-child(10) {
-    display: none;
-  }
-
-  .trip-table-main td:nth-child(1) {
-    font-size: 1.05rem;
-    font-weight: 700;
-  }
-
-  .trip-table-main td:nth-child(8) .weight-inputs {
-    width: 100%;
-    gap: 6px;
-    align-items: stretch;
-  }
-
-  .trip-table-main td:nth-child(8) .weight-input {
-    width: 100%;
-    min-height: 42px;
-    text-align: left;
-  }
-
-  .trip-table-main td:nth-child(8) .save-weight-btn {
-    min-height: 44px;
-    width: 100%;
-    font-size: 0.95rem;
-    margin-top: 6px;
-  }
-
-  .trip-table-main td:nth-child(12) {
-    display: block;
-    text-align: left;
-  }
-
-  .trip-table-main td:nth-child(12)::before {
-    display: block;
-    margin-bottom: 6px;
-  }
-
-  .trip-table-main .action-buttons,
-  .trip-table-main .status-action-select {
-    width: 100%;
-  }
-
-  .trip-table-main .action-buttons {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .trip-table-main .action-btn,
-  .trip-table-main .status-action-select {
-    min-height: 44px;
-    width: 100%;
-    font-size: 0.95rem;
-  }
-
-  /* Dashboard card labels */
-  .trip-table-dashboard-active td:nth-child(1)::before,
-  .trip-table-dashboard-completed td:nth-child(1)::before { content: "Truck Number"; }
-  .trip-table-dashboard-active td:nth-child(2)::before,
-  .trip-table-dashboard-completed td:nth-child(2)::before { content: "Status"; }
-  .trip-table-dashboard-active td:nth-child(3)::before,
-  .trip-table-dashboard-completed td:nth-child(3)::before { content: "Customer"; }
-  .trip-table-dashboard-active td:nth-child(4)::before,
-  .trip-table-dashboard-completed td:nth-child(4)::before { content: "Net Weight"; }
-  .trip-table-dashboard-active td:nth-child(6)::before,
-  .trip-table-dashboard-completed td:nth-child(6)::before { content: "Time Spent"; }
-
-  .trip-table-dashboard-active td:nth-child(5),
-  .trip-table-dashboard-completed td:nth-child(5) {
-    display: none;
-  }
-
-  .trip-table-dashboard-active td:nth-child(1),
-  .trip-table-dashboard-completed td:nth-child(1) {
-    font-size: 1.05rem;
-    font-weight: 700;
+  .mobile-only,
+  .mobile-trip-list {
+    display: block !important;
   }
 
   .summary-cards {

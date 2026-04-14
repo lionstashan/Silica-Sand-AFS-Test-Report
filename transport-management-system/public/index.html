@@ -15,6 +15,7 @@
         <button class="role-btn" data-role="Gate">Gate</button>
         <button class="role-btn" data-role="Dispatch">Dispatch</button>
         <button class="role-btn" data-role="Weighbridge">Weighbridge</button>
+        <button class="role-btn" data-role="Finance">Finance</button>
         <button class="role-btn" data-role="Admin">Admin</button>
       </div>
     </div>
@@ -36,6 +37,7 @@
     <h1>Gate Entry System</h1>
     <p>Record truck entries at the gate.</p>
     <nav>
+      <span id="role-indicator" class="role-indicator" style="display: none;"></span>
       <a href="/dashboard" class="nav-link">Dashboard →</a>
       <a href="#" id="logout-link" class="nav-link" style="display: none;">Logout</a>
     </nav>
@@ -107,15 +109,11 @@
         <label>Filter Status:
           <select id="status-filter">
             <option value="">All Statuses</option>
-            <option value="IN_GATE">IN_GATE</option>
-            <option value="LOADING_IN_PROGRESS">LOADING_IN_PROGRESS</option>
-            <option value="COMPLETED">COMPLETED</option>
-            <option value="CANCELLED">CANCELLED</option>
           </select>
         </label>
       </div>
     </div>
-    <div class="table-container">
+    <div class="table-container desktop-only">
       <table class="trip-table-main">
         <thead>
           <tr>
@@ -127,15 +125,16 @@
             <th>Driver Phone</th>
             <th>Gate Person</th>
             <th>Weights</th>
-            <th>Weight Operator</th>
             <th>Time In</th>
-            <th>Time Spent</th>
-            <th>Actions</th>
+            <th>Total Time</th>
+            <th>Stage Time</th>
+            <th>Workflow / Actions</th>
           </tr>
         </thead>
         <tbody id="trips-table"></tbody>
       </table>
     </div>
+    <div id="trips-mobile-list" class="mobile-trip-list mobile-only"></div>
   </section>
 
   <script src="app.js"></script>
