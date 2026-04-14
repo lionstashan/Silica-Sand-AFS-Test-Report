@@ -51,6 +51,12 @@ const STATUS_TRANSITIONS = {
   EXITED: []
 };
 
+const AUTO_STATUS_TRANSITIONS = {
+  TARE_WEIGHT_DONE: 'AT_DISPATCH',
+  LOADING_COMPLETED: 'GROSS_WEIGHT_PENDING',
+  GROSS_WEIGHT_DONE: 'BILLING_PENDING'
+};
+
 const ROLE_ALLOWED_TARGETS = {
   Gate: ['EXITED'],
   Dispatch: ['AT_DISPATCH', 'WAITING', 'READY_FOR_LOADING', 'CANCELLED'],
@@ -151,10 +157,11 @@ app.post('/trip', async (req, res) => {
     last_status_update_time
   } = req.body;
 
-  const safeStatus = status || 'IN_GATE';
+  const requestedStatus = normalizeStatus(status || 'IN_GATE');
+  const safeStatus = requestedStatus === 'IN_GATE' ? 'SENT_FOR_TARE_WEIGHT' : requestedStatus;
   // Use server time as canonical source to avoid client timezone skew.
   const safeInTime = new Date().toISOString();
-  const safeLastStatusUpdateTime = last_status_update_time || safeInTime;
+  const safeLastStatusUpdateTime = safeInTime;
   const safeIsCancelled = is_cancelled ?? false;
 
   try {
@@ -333,7 +340,7 @@ app.put('/trip/:id', async (req, res) => {
   const values = providedFields.map((field) => req.body[field]);
 
   try {
-    const result = await pool.query(
+    let result = await pool.query(
       `UPDATE trips SET ${setClause} WHERE id = $${providedFields.length + 1} RETURNING *`,
       [...values, id]
     );
@@ -342,7 +349,24 @@ app.put('/trip/:id', async (req, res) => {
       return res.status(404).json({ error: 'Trip not found' });
     }
 
-    res.json(result.rows[0]);
+    let updatedTrip = result.rows[0];
+    if (isStatusChange) {
+      const autoNext = AUTO_STATUS_TRANSITIONS[requestedStatus];
+      if (autoNext) {
+        const autoResult = await pool.query(
+          `UPDATE trips
+           SET status = $1, last_status_update_time = $2
+           WHERE id = $3
+           RETURNING *`,
+          [autoNext, new Date().toISOString(), id]
+        );
+        if (autoResult.rows.length > 0) {
+          updatedTrip = autoResult.rows[0];
+        }
+      }
+    }
+
+    res.json(updatedTrip);
   } catch (error) {
     console.error('Error updating trip', error);
     res.status(500).json({ error: 'Failed to update trip' });

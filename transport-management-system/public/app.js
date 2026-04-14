@@ -587,16 +587,10 @@ async function applyStatusChange(tripId, requestedStatus, extraFields = {}) {
   }
 
   try {
-    let updatedTrip = await putTrip(tripId, payload);
+    const updatedTrip = await putTrip(tripId, payload);
     const autoNext = AUTO_STATUS_TRANSITIONS[requestedStatus];
 
-    if (autoNext) {
-      const autoPayload = {
-        ...getBaseTripPayload(updatedTrip),
-        status: autoNext,
-        last_status_update_time: getCurrentISTTimestampISO()
-      };
-      updatedTrip = await putTrip(tripId, autoPayload);
+    if (autoNext && normalizeStatus(updatedTrip.status) === autoNext) {
       showMessage(`Status updated to ${requestedStatus} and auto-moved to ${autoNext}`);
     } else {
       showMessage(`Status updated to ${requestedStatus}`);
@@ -781,13 +775,28 @@ function getWeightsView(trip) {
 }
 
 function getDispatchDetailsView(trip) {
+  const status = normalizeStatus(trip.status);
+  const showLoadingDetailsHintStatuses = new Set([
+    'READY_FOR_LOADING',
+    'LOADING_IN_PROGRESS',
+    'LOADING_COMPLETED',
+    'GROSS_WEIGHT_PENDING',
+    'GROSS_WEIGHT_DONE',
+    'BILLING_PENDING',
+    'BILLING_COMPLETED',
+    'COMPLETED',
+    'EXITED'
+  ]);
   const items = [];
   if (trip.loading_point) items.push(`Loading: ${escapeHtml(trip.loading_point)}`);
   if (trip.labour_team) items.push(`Team: ${escapeHtml(trip.labour_team)}`);
   if (trip.material_type) items.push(`Material: ${escapeHtml(trip.material_type)}`);
   if (trip.grade) items.push(`Grade: ${escapeHtml(trip.grade)}`);
   if (trip.eta) items.push(`ETA: ${formatDateTime(trip.eta)}`);
-  if (!items.length) return '<div class="mini-muted">No dispatch details</div>';
+  if (!items.length) {
+    if (!showLoadingDetailsHintStatuses.has(status)) return '';
+    return '<div class="mini-muted">Loading details not added yet</div>';
+  }
   return `<div class="workflow-details">${items.map((item) => `<div>${item}</div>`).join('')}</div>`;
 }
 
@@ -843,12 +852,16 @@ function getAllowedManualTargets(trip) {
   const role = getCurrentRole();
   const status = normalizeStatus(trip.status);
   const nextStrictTargets = STATUS_TRANSITIONS[status] || [];
-  return nextStrictTargets.filter((target) => {
+  const filteredTargets = nextStrictTargets.filter((target) => {
+    // Weighbridge stages already render explicit "Save" + "Mark Done" controls.
+    if (status === 'SENT_FOR_TARE_WEIGHT' && target === 'TARE_WEIGHT_DONE') return false;
+    if (status === 'GROSS_WEIGHT_PENDING' && target === 'GROSS_WEIGHT_DONE') return false;
     if (target === 'EXITED') {
       return role === 'Gate';
     }
     return isRoleAllowedForStatus(role, target);
   });
+  return filteredTargets;
 }
 
 function getWorkflowActions(trip) {
@@ -888,7 +901,7 @@ function getWorkflowActions(trip) {
     `);
   }
 
-  if (status === 'READY_FOR_LOADING') {
+  if (status === 'READY_FOR_LOADING' && hasRoleAccess(['Loading', 'Admin'])) {
     actionBlocks.push(getDispatchEditor(trip));
   }
 
@@ -1241,15 +1254,8 @@ document.addEventListener('DOMContentLoaded', () => {
         throw new Error(error.error || 'Failed to create trip');
       }
 
-      const createdTrip = await response.json();
-      const autoPayload = {
-        ...getBaseTripPayload(createdTrip),
-        status: 'SENT_FOR_TARE_WEIGHT',
-        last_status_update_time: getCurrentISTTimestampISO()
-      };
-      await putTrip(createdTrip.id, autoPayload);
-
-      showMessage('Gate entry recorded and auto-moved to SENT_FOR_TARE_WEIGHT');
+      await response.json();
+      showMessage('Gate entry recorded and moved to SENT_FOR_TARE_WEIGHT');
       resetForm();
       await loadTrips();
     } catch (error) {

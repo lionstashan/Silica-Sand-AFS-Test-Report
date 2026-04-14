@@ -203,13 +203,16 @@ function getStatusWithCancelReason(trip) {
   `;
 }
 
-function createSummaryCard(title, count, colorClass, truckNumbers = []) {
+function createSummaryCard(title, count, colorClass, truckNumbers = [], showTruckList = true) {
   const trucksText = truckNumbers.length ? truckNumbers.join(', ') : '-';
+  const trucksHtml = showTruckList
+    ? `<div class="card-trucks" title="${escapeHtml(trucksText)}">Trucks: ${escapeHtml(trucksText)}</div>`
+    : '';
   return `
     <div class="summary-card ${colorClass}">
       <div class="card-number">${count}</div>
       <div class="card-title">${title}</div>
-      <div class="card-trucks" title="${escapeHtml(trucksText)}">Trucks: ${escapeHtml(trucksText)}</div>
+      ${trucksHtml}
     </div>
   `;
 }
@@ -313,12 +316,12 @@ function updateSummaryCards(trips) {
   const over24TruckNumbers = getTruckNumbers(over24HourTrips);
 
   const cardsHtml = `
-    ${createSummaryCard('Completed (Month)', completedMonth, 'card-green')}
-    ${createSummaryCard('Completed (Year)', completedYear, 'card-green')}
-    ${createSummaryCard('Quantity (Month)', formatTons(quantityMonthKg), 'card-light-blue')}
-    ${createSummaryCard('Quantity (Year)', formatTons(quantityYearKg), 'card-purple')}
-    ${createSummaryCard('Cancelled (Exited)', cancelledExited, 'card-red')}
-    ${createSummaryCard('In Plant', inPlantTrips.length, 'card-blue')}
+    ${createSummaryCard('Completed (Month)', completedMonth, 'card-green', [], false)}
+    ${createSummaryCard('Completed (Year)', completedYear, 'card-green', [], false)}
+    ${createSummaryCard('Quantity (Month)', formatTons(quantityMonthKg), 'card-light-blue', [], false)}
+    ${createSummaryCard('Quantity (Year)', formatTons(quantityYearKg), 'card-purple', [], false)}
+    ${createSummaryCard('Cancelled (Exited)', cancelledExited, 'card-red', [], false)}
+    ${createSummaryCard('In Plant', inPlantTrips.length, 'card-blue', [], false)}
     ${createSummaryCard('Dispatch', dispatchCount, 'card-light-blue', dispatchTruckNumbers)}
     ${createSummaryCard('Loading', loadingCount, 'card-blue', loadingTruckNumbers)}
     ${createSummaryCard('Weighbridge', weighbridgeCount, 'card-orange', weighbridgeTruckNumbers)}
