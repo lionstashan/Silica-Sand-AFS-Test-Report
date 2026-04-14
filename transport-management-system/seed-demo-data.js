@@ -62,95 +62,177 @@ async function run() {
 
   const trips = [
     {
-      truck: 'DEMO-COMP-001',
+      truck: 'RJ14GH9821',
       status: 'EXITED',
       finalStatus: 'COMPLETED',
       inTime: inCurrentMonthA,
       outTime: addHours(inCurrentMonthA, 10),
-      netWeight: 25000
+      tareWeight: 14500,
+      grossWeight: 40000,
+      netWeight: 25500,
+      materialType: 'Silica A',
+      grade: 'Grade 1',
+      loadingPoint: 'L1',
+      labourTeam: 'T1',
+      eta: addHours(inCurrentMonthA, 2)
     },
     {
-      truck: 'DEMO-COMP-002',
+      truck: 'GJ05TX7743',
       status: 'EXITED',
       finalStatus: 'COMPLETED',
       inTime: inCurrentMonthB,
       outTime: addHours(inCurrentMonthB, 12),
-      netWeight: 18000
+      tareWeight: 14200,
+      grossWeight: 32600,
+      netWeight: 18400,
+      materialType: 'Silica B',
+      grade: 'Grade 2',
+      loadingPoint: 'L2',
+      labourTeam: 'T2',
+      eta: addHours(inCurrentMonthB, 1.5)
     },
     {
-      truck: 'DEMO-CANX-001',
+      truck: 'MH04KU1188',
       status: 'EXITED',
       finalStatus: 'CANCELLED',
       inTime: inCancelledExited,
       outTime: addHours(inCancelledExited, 6),
-      cancelReason: 'Truck document mismatch',
+      cancelReason: 'E-way bill mismatch at dispatch',
       isCancelled: true
     },
     {
-      truck: 'DEMO-COMP-PM',
+      truck: 'RJ19QA6620',
       status: 'EXITED',
       finalStatus: 'COMPLETED',
       inTime: inPrevMonth,
       outTime: addHours(inPrevMonth, 9),
-      netWeight: 22000
+      tareWeight: 14600,
+      grossWeight: 36900,
+      netWeight: 22300,
+      materialType: 'Silica A',
+      grade: 'Grade 1',
+      loadingPoint: 'L3',
+      labourTeam: 'T3',
+      eta: addHours(inPrevMonth, 1)
     },
     {
-      truck: 'DEMO-COMP-PY',
+      truck: 'HR38AF4402',
       status: 'EXITED',
       finalStatus: 'COMPLETED',
       inTime: inPrevYear,
       outTime: addHours(inPrevYear, 8),
-      netWeight: 30000
+      tareWeight: 15000,
+      grossWeight: 45200,
+      netWeight: 30200,
+      materialType: 'Silica B',
+      grade: 'Grade 2',
+      loadingPoint: 'L1',
+      labourTeam: 'T2',
+      eta: addHours(inPrevYear, 1.25)
     },
-    { truck: 'DEMO-DISP-INGATE', status: 'IN_GATE', inTime: subHours(now, 2) },
-    { truck: 'DEMO-DISP-ATDSP', status: 'AT_DISPATCH', inTime: subHours(now, 5) },
-    { truck: 'DEMO-DISP-WAIT', status: 'WAITING', inTime: subHours(now, 13), waitingReason: 'Queue' },
+    { truck: 'RJ14GL4100', status: 'SENT_FOR_TARE_WEIGHT', inTime: subHours(now, 2), statusAgeHours: 0.5 },
+    { truck: 'GJ01HV9034', status: 'TARE_WEIGHT_DONE', inTime: subHours(now, 3), tareWeight: 14100, statusAgeHours: 0.75 },
+    { truck: 'RJ27TB2401', status: 'AT_DISPATCH', inTime: subHours(now, 5), tareWeight: 14450, statusAgeHours: 1.5 },
+    { truck: 'UP78CM5531', status: 'WAITING', inTime: subHours(now, 13), tareWeight: 14300, waitingReason: 'Loading bay occupied', statusAgeHours: 2 },
     {
-      truck: 'DEMO-DISP-READY',
+      truck: 'RJ09PC7722',
       status: 'READY_FOR_LOADING',
       inTime: subHours(now, 26),
       loadingPoint: 'L1',
       labourTeam: 'T1',
       materialType: 'Silica A',
       grade: 'Grade 1',
-      eta: addHours(now, 2)
+      eta: addHours(now, 2),
+      tareWeight: 14000,
+      statusAgeHours: 3
     },
-    { truck: 'DEMO-DISP-LOADIP', status: 'LOADING_IN_PROGRESS', inTime: subHours(now, 8) },
-    { truck: 'DEMO-DISP-LOADDONE', status: 'LOADING_COMPLETED', inTime: subHours(now, 30) },
-    { truck: 'DEMO-WB-SENT', status: 'SENT_FOR_TARE_WEIGHT', inTime: subHours(now, 4) },
-    { truck: 'DEMO-WB-TARE', status: 'TARE_WEIGHT_DONE', inTime: subHours(now, 14), tareWeight: 4200 },
-    { truck: 'DEMO-WB-GROSSP', status: 'GROSS_WEIGHT_PENDING', inTime: subHours(now, 25), tareWeight: 4100 },
     {
-      truck: 'DEMO-WB-GROSSD',
+      truck: 'RJ14NS1289',
+      status: 'LOADING_IN_PROGRESS',
+      inTime: subHours(now, 8),
+      loadingPoint: 'L2',
+      labourTeam: 'T2',
+      materialType: 'Silica B',
+      grade: 'Grade 2',
+      eta: addHours(now, 1),
+      tareWeight: 13900,
+      statusAgeHours: 1
+    },
+    {
+      truck: 'DL1LU8765',
+      status: 'LOADING_COMPLETED',
+      inTime: subHours(now, 30),
+      loadingPoint: 'L3',
+      labourTeam: 'T3',
+      materialType: 'Silica A',
+      grade: 'Grade 1',
+      eta: addHours(now, 0.5),
+      tareWeight: 14700,
+      statusAgeHours: 0.8
+    },
+    {
+      truck: 'CG04LP5510',
+      status: 'GROSS_WEIGHT_PENDING',
+      inTime: subHours(now, 25),
+      tareWeight: 14650,
+      statusAgeHours: 1.75
+    },
+    {
+      truck: 'PB10DM2190',
       status: 'GROSS_WEIGHT_DONE',
       inTime: subHours(now, 1),
-      tareWeight: 4300,
-      grossWeight: 9800,
-      netWeight: 5500
+      tareWeight: 14200,
+      grossWeight: 36500,
+      netWeight: 22300,
+      statusAgeHours: 0.4
     },
-    { truck: 'DEMO-FIN-PEND', status: 'BILLING_PENDING', inTime: subHours(now, 3), netWeight: 6400 },
-    { truck: 'DEMO-FIN-DONE', status: 'BILLING_COMPLETED', inTime: subHours(now, 15), netWeight: 7100 },
+    { truck: 'RJ45TA9923', status: 'BILLING_PENDING', inTime: subHours(now, 3), tareWeight: 14100, grossWeight: 35900, netWeight: 21800, statusAgeHours: 1.25 },
+    { truck: 'MH12RW6007', status: 'BILLING_COMPLETED', inTime: subHours(now, 15), tareWeight: 14400, grossWeight: 37200, netWeight: 22800, statusAgeHours: 2.5 },
     {
-      truck: 'DEMO-COMP-NOEXIT',
+      truck: 'RJ04NA3312',
       status: 'COMPLETED',
       finalStatus: 'COMPLETED',
       inTime: subHours(now, 6),
       outTime: subHours(now, 1),
-      netWeight: 12000
+      tareWeight: 14000,
+      grossWeight: 35200,
+      netWeight: 21200
     },
     {
-      truck: 'DEMO-CANX-NOEXIT',
+      truck: 'GJ18PR4471',
       status: 'CANCELLED',
       finalStatus: 'CANCELLED',
       inTime: subHours(now, 7),
       outTime: subHours(now, 1),
-      cancelReason: 'Driver unavailable',
+      cancelReason: 'Customer hold at dispatch',
       isCancelled: true
     },
     {
-      truck: 'DEMO-DISP-OLD24',
+      truck: 'RJ14MK2234',
       status: 'AT_DISPATCH',
-      inTime: subHours(now, 49)
+      inTime: subHours(now, 49),
+      tareWeight: 14500,
+      statusAgeHours: 10
+    },
+    {
+      truck: 'UP32HZ1176',
+      status: 'WAITING',
+      inTime: subHours(now, 22),
+      tareWeight: 13800,
+      waitingReason: 'Loading team shift change',
+      statusAgeHours: 5
+    },
+    {
+      truck: 'KA03MN7742',
+      status: 'READY_FOR_LOADING',
+      inTime: subHours(now, 11),
+      loadingPoint: 'L2',
+      labourTeam: 'T1',
+      materialType: 'Silica B',
+      grade: 'Grade 2',
+      eta: addHours(now, 1),
+      tareWeight: 13950,
+      statusAgeHours: 2
     }
   ];
 
@@ -164,7 +246,7 @@ async function run() {
       const outTime = trip.outTime || null;
       const isCancelled = Boolean(trip.isCancelled);
       const finalStatus = trip.finalStatus || null;
-      const lastStatusUpdate = outTime || inTime;
+      const lastStatusUpdate = trip.statusAgeHours ? subHours(now, trip.statusAgeHours) : (outTime || inTime);
       await client.query(
         `INSERT INTO trips (
           truck_number, customer_name, transporter, driver_name, driver_phone, gate_person_name,
@@ -178,13 +260,13 @@ async function run() {
         )`,
         [
           trip.truck,
-          'ABC Cement',
-          'XYZ Transport',
-          'Demo Driver',
-          '9999999999',
-          'Sohan',
-          'Demo Dispatch',
-          'Demo Operator',
+          trip.customerName || (trip.materialType === 'Silica B' ? 'Shree Cement' : 'UltraTech Cement'),
+          trip.transporter || 'Shree Ram Logistics',
+          trip.driverName || 'Ramesh Kumar',
+          trip.driverPhone || '9876543210',
+          trip.gatePersonName || 'Sohan',
+          trip.dispatchManagerName || 'Amit Sharma',
+          trip.weightOperatorName || 'Vikas Yadav',
           trip.materialType || null,
           trip.grade || null,
           trip.loadingPoint || null,
@@ -218,9 +300,11 @@ async function run() {
   console.log('Expected key demo metrics:');
   console.log('- Completed (Month): 2');
   console.log('- Completed (Year): 3');
-  console.log('- Quantity (Month): 43.00 tons');
-  console.log('- Quantity (Year): 65.00 tons');
+  console.log('- Quantity (Month): 43.90 tons');
+  console.log('- Quantity (Year): 66.20 tons');
   console.log('- Cancelled (Exited): 1');
+  console.log('- Loading zone should have READY_FOR_LOADING / LOADING_IN_PROGRESS / LOADING_COMPLETED entries');
+  console.log('- Accounts zone should have BILLING_PENDING / BILLING_COMPLETED entries');
 }
 
 run().catch((error) => {

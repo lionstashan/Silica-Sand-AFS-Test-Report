@@ -2,12 +2,13 @@
 let userRole = null;
 let refreshInterval;
 const IST_TIMEZONE = 'Asia/Kolkata';
-const VALID_ROLES = ['Gate', 'Dispatch', 'Weighbridge', 'Finance', 'Admin'];
+const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Admin'];
 const BILLING_VISIBLE_STATUSES = ['BILLING_PENDING', 'BILLING_COMPLETED', 'COMPLETED', 'EXITED'];
 const DISPATCH_ZONE_STATUSES = [
-  'IN_GATE',
   'AT_DISPATCH',
-  'WAITING',
+  'WAITING'
+];
+const LOADING_ZONE_STATUSES = [
   'READY_FOR_LOADING',
   'LOADING_IN_PROGRESS',
   'LOADING_COMPLETED'
@@ -18,7 +19,7 @@ const WEIGHBRIDGE_ZONE_STATUSES = [
   'GROSS_WEIGHT_PENDING',
   'GROSS_WEIGHT_DONE'
 ];
-const FINANCE_ZONE_STATUSES = ['BILLING_PENDING', 'BILLING_COMPLETED'];
+const ACCOUNTS_ZONE_STATUSES = ['BILLING_PENDING', 'BILLING_COMPLETED'];
 const istDatePartsFormatter = new Intl.DateTimeFormat('en-CA', {
   timeZone: IST_TIMEZONE,
   year: 'numeric',
@@ -30,8 +31,9 @@ const istDatePartsFormatter = new Intl.DateTimeFormat('en-CA', {
 const rolePINs = {
   'Gate': '1111',
   'Dispatch': '2222',
+  'Loading': '5555',
   'Weighbridge': '3333',
-  'Finance': '4444',
+  'Accounts': '4444',
   'Admin': '9999'
 };
 
@@ -242,7 +244,7 @@ function getTruckNumbers(trips) {
 }
 
 function updateSummaryCards(trips) {
-  const visibleTrips = getCurrentRole() === 'Finance'
+  const visibleTrips = getCurrentRole() === 'Accounts'
     ? trips.filter((trip) => BILLING_VISIBLE_STATUSES.includes(trip.status))
     : trips;
   const nowIst = getIstDateParts(new Date());
@@ -281,12 +283,14 @@ function updateSummaryCards(trips) {
     trip.status === 'EXITED' && getExitedOutcome(trip) === 'CANCELLED'
   )).length;
 
-  const dispatchCount = inPlantTrips.filter((trip) => DISPATCH_ZONE_STATUSES.includes(trip.status)).length;
   const dispatchTrips = inPlantTrips.filter((trip) => DISPATCH_ZONE_STATUSES.includes(trip.status));
+  const loadingTrips = inPlantTrips.filter((trip) => LOADING_ZONE_STATUSES.includes(trip.status));
   const weighbridgeTrips = inPlantTrips.filter((trip) => WEIGHBRIDGE_ZONE_STATUSES.includes(trip.status));
-  const financeTrips = inPlantTrips.filter((trip) => FINANCE_ZONE_STATUSES.includes(trip.status));
+  const accountsTrips = inPlantTrips.filter((trip) => ACCOUNTS_ZONE_STATUSES.includes(trip.status));
+  const dispatchCount = dispatchTrips.length;
+  const loadingCount = loadingTrips.length;
   const weighbridgeCount = weighbridgeTrips.length;
-  const financeCount = financeTrips.length;
+  const accountsCount = accountsTrips.length;
 
   const over12HourTrips = inPlantTrips.filter((trip) => {
     const inTime = parseTripDate(trip.in_time);
@@ -302,8 +306,9 @@ function updateSummaryCards(trips) {
   const over24Hours = over24HourTrips.length;
 
   const dispatchTruckNumbers = getTruckNumbers(dispatchTrips);
+  const loadingTruckNumbers = getTruckNumbers(loadingTrips);
   const weighbridgeTruckNumbers = getTruckNumbers(weighbridgeTrips);
-  const financeTruckNumbers = getTruckNumbers(financeTrips);
+  const accountsTruckNumbers = getTruckNumbers(accountsTrips);
   const over12TruckNumbers = getTruckNumbers(over12HourTrips);
   const over24TruckNumbers = getTruckNumbers(over24HourTrips);
 
@@ -315,8 +320,9 @@ function updateSummaryCards(trips) {
     ${createSummaryCard('Cancelled (Exited)', cancelledExited, 'card-red')}
     ${createSummaryCard('In Plant', inPlantTrips.length, 'card-blue')}
     ${createSummaryCard('Dispatch', dispatchCount, 'card-light-blue', dispatchTruckNumbers)}
+    ${createSummaryCard('Loading', loadingCount, 'card-blue', loadingTruckNumbers)}
     ${createSummaryCard('Weighbridge', weighbridgeCount, 'card-orange', weighbridgeTruckNumbers)}
-    ${createSummaryCard('Finance', financeCount, 'card-purple', financeTruckNumbers)}
+    ${createSummaryCard('Accounts', accountsCount, 'card-purple', accountsTruckNumbers)}
     ${createSummaryCard('>12 Hours', over12Hours, 'card-yellow', over12TruckNumbers)}
     ${createSummaryCard('>24 Hours', over24Hours, 'card-red', over24TruckNumbers)}
   `;
@@ -397,7 +403,7 @@ function formatMinutes(totalMinutes) {
 }
 
 function updateActiveTripsTable(trips) {
-  const sourceTrips = getCurrentRole() === 'Finance'
+  const sourceTrips = getCurrentRole() === 'Accounts'
     ? trips.filter((trip) => BILLING_VISIBLE_STATUSES.includes(trip.status))
     : trips;
 

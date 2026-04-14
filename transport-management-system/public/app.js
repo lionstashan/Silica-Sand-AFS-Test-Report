@@ -3,15 +3,15 @@ let allTrips = [];
 
 const IST_TIMEZONE = 'Asia/Kolkata';
 const IST_OFFSET = '+05:30';
-const VALID_ROLES = ['Gate', 'Dispatch', 'Weighbridge', 'Finance', 'Admin'];
-const BILLING_VISIBLE_STATUSES = ['BILLING_PENDING', 'BILLING_COMPLETED', 'COMPLETED'];
+const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Admin'];
+const BILLING_VISIBLE_STATUSES = ['BILLING_PENDING', 'BILLING_COMPLETED', 'COMPLETED', 'EXITED'];
 
 const STATUS_FLOW = [
   'IN_GATE',
-  'AT_DISPATCH',
-  'WAITING',
   'SENT_FOR_TARE_WEIGHT',
   'TARE_WEIGHT_DONE',
+  'AT_DISPATCH',
+  'WAITING',
   'READY_FOR_LOADING',
   'LOADING_IN_PROGRESS',
   'LOADING_COMPLETED',
@@ -25,11 +25,11 @@ const STATUS_FLOW = [
 ];
 
 const STATUS_TRANSITIONS = {
-  IN_GATE: ['AT_DISPATCH'],
-  AT_DISPATCH: ['WAITING', 'SENT_FOR_TARE_WEIGHT'],
-  WAITING: ['SENT_FOR_TARE_WEIGHT'],
+  IN_GATE: ['SENT_FOR_TARE_WEIGHT'],
   SENT_FOR_TARE_WEIGHT: ['TARE_WEIGHT_DONE'],
-  TARE_WEIGHT_DONE: ['READY_FOR_LOADING'],
+  TARE_WEIGHT_DONE: ['AT_DISPATCH'],
+  AT_DISPATCH: ['WAITING', 'READY_FOR_LOADING'],
+  WAITING: ['READY_FOR_LOADING'],
   READY_FOR_LOADING: ['LOADING_IN_PROGRESS'],
   LOADING_IN_PROGRESS: ['LOADING_COMPLETED'],
   LOADING_COMPLETED: ['GROSS_WEIGHT_PENDING'],
@@ -43,7 +43,7 @@ const STATUS_TRANSITIONS = {
 };
 
 const AUTO_STATUS_TRANSITIONS = {
-  TARE_WEIGHT_DONE: 'READY_FOR_LOADING',
+  TARE_WEIGHT_DONE: 'AT_DISPATCH',
   LOADING_COMPLETED: 'GROSS_WEIGHT_PENDING',
   GROSS_WEIGHT_DONE: 'BILLING_PENDING'
 };
@@ -51,16 +51,18 @@ const AUTO_STATUS_TRANSITIONS = {
 const ROLE_PINS = {
   Gate: '1111',
   Dispatch: '2222',
+  Loading: '5555',
   Weighbridge: '3333',
-  Finance: '4444',
+  Accounts: '4444',
   Admin: '9999'
 };
 
 const ROLE_ALLOWED_TARGETS = {
   Gate: ['EXITED'],
-  Dispatch: ['AT_DISPATCH', 'WAITING', 'SENT_FOR_TARE_WEIGHT', 'LOADING_IN_PROGRESS', 'LOADING_COMPLETED', 'CANCELLED'],
+  Dispatch: ['AT_DISPATCH', 'WAITING', 'READY_FOR_LOADING', 'CANCELLED'],
+  Loading: ['LOADING_IN_PROGRESS', 'LOADING_COMPLETED'],
   Weighbridge: ['TARE_WEIGHT_DONE', 'GROSS_WEIGHT_DONE'],
-  Finance: ['BILLING_COMPLETED', 'COMPLETED'],
+  Accounts: ['BILLING_COMPLETED', 'COMPLETED'],
   Admin: STATUS_FLOW
 };
 
@@ -115,6 +117,16 @@ function getCurrentRole() {
 function hasRoleAccess(allowedRoles) {
   const role = getCurrentRole();
   return !!role && allowedRoles.includes(role);
+}
+
+function getAuthHeaders() {
+  const role = getCurrentRole();
+  const pin = role ? ROLE_PINS[role] : null;
+  if (!role || !pin) return {};
+  return {
+    'x-user-role': role,
+    'x-user-pin': pin
+  };
 }
 
 function escapeHtml(value) {
@@ -297,7 +309,7 @@ function getDelayClass(timeSpent) {
 
 function getVisibleTripsForRole(trips) {
   const role = getCurrentRole();
-  if (role === 'Finance') {
+  if (role === 'Accounts') {
     return trips.filter((trip) => BILLING_VISIBLE_STATUSES.includes(trip.status));
   }
   return trips;
@@ -399,7 +411,9 @@ function isRoleAllowedForStatus(role, targetStatus) {
 }
 
 function isValidStrictTransition(currentStatus, nextStatus) {
-  if (nextStatus === 'CANCELLED') return true;
+  if (nextStatus === 'CANCELLED') {
+    return !['COMPLETED', 'CANCELLED', 'EXITED'].includes(currentStatus);
+  }
   const allowed = STATUS_TRANSITIONS[currentStatus] || [];
   return allowed.includes(nextStatus);
 }
@@ -443,7 +457,7 @@ function getMergedDispatchDetails(tripId) {
 
 function getDispatchValidationError(details) {
   if (!details.loading_point) return 'Loading point is required before starting loading';
-  if (!details.labour_team) return 'Labour team is required before starting loading';
+  if (!details.labour_team) return 'Loading team is required before starting loading';
   if (!details.material_type) return 'Material type is required before starting loading';
   if (!details.grade) return 'Grade is required before starting loading';
   if (!details.eta) return 'ETA is required before starting loading';
@@ -465,7 +479,10 @@ function getTextFromRow(tripId, field) {
 async function putTrip(tripId, payload) {
   const response = await fetch(`/trip/${tripId}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders()
+    },
     body: JSON.stringify(payload)
   });
 
@@ -602,6 +619,10 @@ async function cancelTrip(tripId) {
   const existingTrip = getTripById(tripId);
   if (!existingTrip) {
     showMessage('Trip not found', false);
+    return;
+  }
+  if (['COMPLETED', 'CANCELLED', 'EXITED'].includes(normalizeStatus(existingTrip.status))) {
+    showMessage('Cannot cancel a final status trip', false);
     return;
   }
 
@@ -800,7 +821,7 @@ function renderDispatchSelect(fieldName, tripId, savedValue) {
 }
 
 function getDispatchEditor(trip) {
-  if (!hasRoleAccess(['Dispatch', 'Admin'])) {
+  if (!hasRoleAccess(['Loading', 'Admin'])) {
     return getDispatchDetailsView(trip);
   }
   const etaValue = trip.eta ? new Date(trip.eta).toLocaleString('sv-SE', { timeZone: IST_TIMEZONE }).slice(0, 16) : '';
@@ -808,7 +829,7 @@ function getDispatchEditor(trip) {
   return `
     <div class="dispatch-editor">
       <label>Loading Point ${renderDispatchSelect('loading_point', trip.id, trip.loading_point || '')}</label>
-      <label>Labour Team ${renderDispatchSelect('labour_team', trip.id, trip.labour_team || '')}</label>
+      <label>Loading Team ${renderDispatchSelect('labour_team', trip.id, trip.labour_team || '')}</label>
       <label>Material ${renderDispatchSelect('material_type', trip.id, trip.material_type || '')}</label>
       <label>Grade ${renderDispatchSelect('grade', trip.id, trip.grade || '')}</label>
       <label>ETA
@@ -835,7 +856,7 @@ function getWorkflowActions(trip) {
   const status = normalizeStatus(trip.status);
   const actionBlocks = [];
 
-  if ((role === 'Dispatch' || role === 'Admin') && status !== 'CANCELLED' && status !== 'COMPLETED') {
+  if ((role === 'Dispatch' || role === 'Admin') && status !== 'CANCELLED' && status !== 'COMPLETED' && status !== 'EXITED') {
     actionBlocks.push(`<button class="workflow-btn danger" data-action="cancel" data-trip-id="${trip.id}">Cancel Trip</button>`);
   }
 
@@ -1021,7 +1042,7 @@ function updateTimeMetrics() {
 function refreshStatusFilterOptions() {
   const statusFilter = document.getElementById('status-filter');
   const role = getCurrentRole();
-  const statuses = role === 'Finance' ? BILLING_VISIBLE_STATUSES : STATUS_FLOW;
+  const statuses = role === 'Accounts' ? BILLING_VISIBLE_STATUSES : STATUS_FLOW;
 
   statusFilter.innerHTML = [
     '<option value="">All Statuses</option>',
@@ -1054,7 +1075,7 @@ async function handleStatusTargetClick(button) {
     }
     await applyStatusChange(tripId, 'LOADING_IN_PROGRESS', {
       ...dispatchDetails,
-      dispatch_manager_name: trip.dispatch_manager_name || 'Dispatch Team',
+      dispatch_manager_name: trip.dispatch_manager_name || 'Loading Team',
       waiting_reason: trip.waiting_reason || null
     });
     return;
@@ -1208,7 +1229,10 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const response = await fetch('/trip', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
         body: JSON.stringify(payload)
       });
 
@@ -1217,7 +1241,15 @@ document.addEventListener('DOMContentLoaded', () => {
         throw new Error(error.error || 'Failed to create trip');
       }
 
-      showMessage('Gate entry recorded successfully');
+      const createdTrip = await response.json();
+      const autoPayload = {
+        ...getBaseTripPayload(createdTrip),
+        status: 'SENT_FOR_TARE_WEIGHT',
+        last_status_update_time: getCurrentISTTimestampISO()
+      };
+      await putTrip(createdTrip.id, autoPayload);
+
+      showMessage('Gate entry recorded and auto-moved to SENT_FOR_TARE_WEIGHT');
       resetForm();
       await loadTrips();
     } catch (error) {
