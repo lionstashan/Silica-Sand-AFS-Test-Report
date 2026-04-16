@@ -432,7 +432,7 @@ app.post('/trip', async (req, res) => {
 
 app.get('/trips', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM trips ORDER BY id DESC');
+    const result = await pool.query('SELECT * FROM trips ORDER BY updated_at DESC, id DESC');
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching trips', error);
@@ -699,9 +699,10 @@ app.put('/trip/:id', async (req, res) => {
     }
   }
 
-  const setClause = providedFields
-    .map((field, index) => `${field} = $${index + 1}`)
-    .join(', ');
+  const setClause = [
+    ...providedFields.map((field, index) => `${field} = $${index + 1}`),
+    'updated_at = NOW()'
+  ].join(', ');
   const values = providedFields.map((field) => (
     field === 'status_history' ? JSON.stringify(req.body[field]) : req.body[field]
   ));

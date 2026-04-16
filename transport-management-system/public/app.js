@@ -89,11 +89,11 @@ const PERSON_FIELD_BY_ROLE = {
   Accounts: 'accounts_person_name'
 };
 const STATUS_ASSIGNEE_RULES = [
-  { statuses: ['AT_DISPATCH', 'WAITING', 'READY_FOR_LOADING'], roleLabel: 'Dispatch', field: 'dispatch_done_by' },
-  { statuses: ['SENT_FOR_TARE_WEIGHT', 'TARE_WEIGHT_DONE'], roleLabel: 'Weighbridge (Tare)', field: 'tare_done_by' },
-  { statuses: ['LOADING_IN_PROGRESS', 'LOADING_COMPLETED'], roleLabel: 'Loading', field: 'loading_done_by' },
-  { statuses: ['GROSS_WEIGHT_PENDING', 'GROSS_WEIGHT_DONE'], roleLabel: 'Weighbridge (Gross)', field: 'gross_done_by' },
-  { statuses: ['BILLING_PENDING', 'BILLING_COMPLETED', 'COMPLETED'], roleLabel: 'Accounts', field: 'billing_done_by' }
+  { statuses: ['AT_DISPATCH', 'WAITING', 'READY_FOR_LOADING'], roleLabel: 'Dispatch Manager', field: 'dispatch_done_by' },
+  { statuses: ['SENT_FOR_TARE_WEIGHT', 'TARE_WEIGHT_DONE'], roleLabel: 'WB Operator (Tare)', field: 'tare_done_by' },
+  { statuses: ['LOADING_IN_PROGRESS', 'LOADING_COMPLETED'], roleLabel: 'Loading Manager', field: 'loading_done_by' },
+  { statuses: ['GROSS_WEIGHT_PENDING', 'GROSS_WEIGHT_DONE'], roleLabel: 'WB Operator (Gross)', field: 'gross_done_by' },
+  { statuses: ['BILLING_PENDING', 'BILLING_COMPLETED', 'COMPLETED'], roleLabel: 'Accounts Manager', field: 'billing_done_by' }
 ];
 
 const form = document.getElementById('trip-form');
@@ -117,7 +117,7 @@ const gatePersonOther = document.getElementById('gate-person-other');
 const MAIN_TABLE_COLUMNS = [
   'Truck Number',
   'Status',
-  'Assigned Person',
+  'Assigned Manager/Operator',
   'Customer',
   'In Time',
   'Workflow / Actions'
@@ -261,10 +261,10 @@ function statusDetailLabel(key) {
     tare_weight: 'Tare',
     gross_weight: 'Gross',
     net_weight: 'Net',
-    dispatch_manager_name: 'Dispatch By',
-    loading_person_name: 'Loading By',
-    weight_operator_name: 'Weighbridge By',
-    accounts_person_name: 'Accounts By',
+    dispatch_manager_name: 'Dispatch Manager',
+    loading_person_name: 'Loading Manager',
+    weight_operator_name: 'Weighbridge Operator',
+    accounts_person_name: 'Accounts Manager',
     dispatch_done_by: 'Dispatch Done By',
     tare_done_by: 'Tare Done By',
     gross_done_by: 'Gross Done By',
@@ -369,11 +369,11 @@ function openTimelineModal(tripId) {
       <div><strong>Transporter:</strong> ${escapeHtml(trip.transporter || '-')}</div>
       <div><strong>Driver:</strong> ${escapeHtml(trip.driver_name || '-')}</div>
       <div><strong>Driver Phone:</strong> ${escapeHtml(trip.driver_phone || '-')}</div>
-      <div><strong>Gate Person:</strong> ${escapeHtml(trip.gate_person_name || '-')}</div>
-      <div><strong>Dispatch:</strong> ${escapeHtml(trip.dispatch_manager_name || '-')}</div>
-      <div><strong>Loading:</strong> ${escapeHtml(trip.loading_person_name || '-')}</div>
-      <div><strong>Weighbridge:</strong> ${escapeHtml(trip.weight_operator_name || '-')}</div>
-      <div><strong>Accounts:</strong> ${escapeHtml(trip.accounts_person_name || '-')}</div>
+      <div><strong>Gate Operator:</strong> ${escapeHtml(trip.gate_person_name || '-')}</div>
+      <div><strong>Dispatch Manager:</strong> ${escapeHtml(trip.dispatch_manager_name || '-')}</div>
+      <div><strong>Loading Manager:</strong> ${escapeHtml(trip.loading_person_name || '-')}</div>
+      <div><strong>Weighbridge Operator:</strong> ${escapeHtml(trip.weight_operator_name || '-')}</div>
+      <div><strong>Accounts Manager:</strong> ${escapeHtml(trip.accounts_person_name || '-')}</div>
       <div><strong>Dispatch Done By:</strong> ${escapeHtml(trip.dispatch_done_by || '-')}</div>
       <div><strong>Tare Done By:</strong> ${escapeHtml(trip.tare_done_by || '-')}</div>
       <div><strong>Gross Done By:</strong> ${escapeHtml(trip.gross_done_by || '-')}</div>
@@ -751,7 +751,7 @@ function renderPersonSelect(roleName, tripId, savedValue) {
         data-trip-id="${tripId}"
         data-person-other-role="${roleName}"
         class="person-other-input"
-        placeholder="Enter ${roleName} person name"
+        placeholder="Enter ${roleName} name"
         value="${isSavedOther ? escapeHtml(savedValue) : ''}"
         style="${selectedValue === 'Other' ? 'display:block;' : 'display:none;'}"
       />
@@ -969,7 +969,7 @@ async function saveTareWeight(tripId) {
   }
   const operatorName = getPersonValueFromRow(tripId, 'Weighbridge', trip.weight_operator_name || '');
   if (!operatorName) {
-    showMessage('Select weighbridge person name', false);
+    showMessage('Select weighbridge operator name', false);
     return;
   }
 
@@ -999,7 +999,7 @@ async function markTareDone(tripId) {
   }
   const operatorName = getPersonValueFromRow(tripId, 'Weighbridge', trip.weight_operator_name || '');
   if (!operatorName) {
-    showMessage('Select weighbridge person name', false);
+    showMessage('Select weighbridge operator name', false);
     return;
   }
 
@@ -1036,7 +1036,7 @@ async function saveGrossWeight(tripId) {
   }
   const operatorName = getPersonValueFromRow(tripId, 'Weighbridge', trip.weight_operator_name || '');
   if (!operatorName) {
-    showMessage('Select weighbridge person name', false);
+    showMessage('Select weighbridge operator name', false);
     return;
   }
 
@@ -1078,7 +1078,7 @@ async function markGrossDone(tripId) {
   }
   const operatorName = getPersonValueFromRow(tripId, 'Weighbridge', trip.weight_operator_name || '');
   if (!operatorName) {
-    showMessage('Select weighbridge person name', false);
+    showMessage('Select weighbridge operator name', false);
     return;
   }
 
@@ -1122,10 +1122,10 @@ function getDispatchDetailsView(trip) {
   if (trip.packing) items.push(`Packing: ${escapeHtml(trip.packing)}`);
   if (trip.loading_point) items.push(`Loading: ${escapeHtml(trip.loading_point)}`);
   if (trip.labour_team) items.push(`Team: ${escapeHtml(trip.labour_team)}`);
-  if (trip.dispatch_manager_name) items.push(`Dispatch By: ${escapeHtml(trip.dispatch_manager_name)}`);
-  if (trip.loading_person_name) items.push(`Loading By: ${escapeHtml(trip.loading_person_name)}`);
-  if (trip.weight_operator_name) items.push(`Weighbridge By: ${escapeHtml(trip.weight_operator_name)}`);
-  if (trip.accounts_person_name) items.push(`Accounts By: ${escapeHtml(trip.accounts_person_name)}`);
+  if (trip.dispatch_manager_name) items.push(`Dispatch Manager: ${escapeHtml(trip.dispatch_manager_name)}`);
+  if (trip.loading_person_name) items.push(`Loading Manager: ${escapeHtml(trip.loading_person_name)}`);
+  if (trip.weight_operator_name) items.push(`Weighbridge Operator: ${escapeHtml(trip.weight_operator_name)}`);
+  if (trip.accounts_person_name) items.push(`Accounts Manager: ${escapeHtml(trip.accounts_person_name)}`);
   if (trip.dispatch_done_by) items.push(`Dispatch Done By: ${escapeHtml(trip.dispatch_done_by)}`);
   if (trip.tare_done_by) items.push(`Tare Done By: ${escapeHtml(trip.tare_done_by)}`);
   if (trip.gross_done_by) items.push(`Gross Done By: ${escapeHtml(trip.gross_done_by)}`);
@@ -1181,11 +1181,11 @@ const ADMIN_EDITABLE_FIELDS = [
   { key: 'transporter', label: 'Transporter', type: 'text' },
   { key: 'driver_name', label: 'Driver', type: 'text' },
   { key: 'driver_phone', label: 'Driver Phone', type: 'text' },
-  { key: 'gate_person_name', label: 'Gate Person', type: 'text' },
-  { key: 'dispatch_manager_name', label: 'Dispatch Person', type: 'text' },
-  { key: 'loading_person_name', label: 'Loading Person', type: 'text' },
-  { key: 'weight_operator_name', label: 'Weighbridge Person', type: 'text' },
-  { key: 'accounts_person_name', label: 'Accounts Person', type: 'text' },
+  { key: 'gate_person_name', label: 'Gate Operator', type: 'text' },
+  { key: 'dispatch_manager_name', label: 'Dispatch Manager', type: 'text' },
+  { key: 'loading_person_name', label: 'Loading Manager', type: 'text' },
+  { key: 'weight_operator_name', label: 'Weighbridge Operator', type: 'text' },
+  { key: 'accounts_person_name', label: 'Accounts Manager', type: 'text' },
   { key: 'dispatch_done_by', label: 'Dispatch Done By', type: 'text' },
   { key: 'tare_done_by', label: 'Tare Done By', type: 'text' },
   { key: 'gross_done_by', label: 'Gross Done By', type: 'text' },
@@ -1339,7 +1339,7 @@ function getDispatchEditor(trip) {
       <label>Packing ${renderDispatchSelect('packing', trip.id, packingValue)}</label>
       <label>Loading Point ${renderDispatchSelect('loading_point', trip.id, loadingPointValue)}</label>
       <label>Loading Team ${renderDispatchSelect('labour_team', trip.id, loadingTeamValue)}</label>
-      <label>Loading Person ${renderPersonSelect('Loading', trip.id, loadingPersonValue)}</label>
+      <label>Loading Manager ${renderPersonSelect('Loading', trip.id, loadingPersonValue)}</label>
       <label>ETA
         <input type="datetime-local" data-trip-id="${trip.id}" data-dispatch-field="eta" class="dispatch-input" value="${etaValue}" />
       </label>
@@ -1384,7 +1384,7 @@ function getWorkflowActions(trip) {
   if ((role === 'Weighbridge' || role === 'Admin') && status === 'SENT_FOR_TARE_WEIGHT') {
     actionBlocks.push(`
       <div class="workflow-group">
-        <label>Weighbridge Person
+        <label>Weighbridge Operator
           ${renderPersonSelect('Weighbridge', trip.id, trip.weight_operator_name || '')}
         </label>
         <label>Tare Weight
@@ -1401,7 +1401,7 @@ function getWorkflowActions(trip) {
   if ((role === 'Weighbridge' || role === 'Admin') && status === 'GROSS_WEIGHT_PENDING') {
     actionBlocks.push(`
       <div class="workflow-group">
-        <label>Weighbridge Person
+        <label>Weighbridge Operator
           ${renderPersonSelect('Weighbridge', trip.id, trip.weight_operator_name || '')}
         </label>
         <label>Gross Weight
@@ -1422,7 +1422,7 @@ function getWorkflowActions(trip) {
   if (hasRoleAccess(['Dispatch', 'Admin']) && ['AT_DISPATCH', 'WAITING', 'READY_FOR_LOADING'].includes(status)) {
     actionBlocks.push(`
       <div class="workflow-group">
-        <label>Dispatch Person
+        <label>Dispatch Manager
           ${renderPersonSelect('Dispatch', trip.id, trip.dispatch_manager_name || '')}
         </label>
       </div>
@@ -1432,7 +1432,7 @@ function getWorkflowActions(trip) {
   if (hasRoleAccess(['Accounts', 'Admin']) && ['BILLING_PENDING', 'BILLING_COMPLETED'].includes(status)) {
     actionBlocks.push(`
       <div class="workflow-group">
-        <label>Accounts Person
+        <label>Accounts Manager
           ${renderPersonSelect('Accounts', trip.id, trip.accounts_person_name || '')}
         </label>
       </div>
@@ -1516,7 +1516,7 @@ function renderTripsMobileList(trips) {
         </div>
         <div class="mobile-trip-grid">
           <div><strong>Customer:</strong> ${escapeHtml(trip.customer_name || '-')}</div>
-          <div><strong>Assigned:</strong> ${escapeHtml(getAssignedPersonByStatus(trip).name || '-')}</div>
+          <div><strong>Assigned Manager/Operator:</strong> ${escapeHtml(getAssignedPersonByStatus(trip).name || '-')}</div>
           <div><strong>In Time:</strong> ${formatDateTime(trip.in_time)}</div>
         </div>
         <div class="mobile-trip-actions">
@@ -1601,7 +1601,7 @@ async function handleStatusTargetClick(button) {
   if (targetStatus === 'WAITING') {
     const dispatchName = getPersonValueFromRow(tripId, 'Dispatch', trip.dispatch_manager_name || '');
     if (!dispatchName) {
-      showMessage('Select dispatch person name', false);
+      showMessage('Select dispatch manager name', false);
       return;
     }
     const reason = window.prompt('Enter waiting reason:');
@@ -1621,7 +1621,7 @@ async function handleStatusTargetClick(button) {
     const draft = getLoadingDraft(tripId);
     const loadingPersonName = getPersonValueFromRow(tripId, 'Loading', draft.loading_person_name || trip.loading_person_name || '');
     if (!loadingPersonName) {
-      showMessage('Select loading person name', false);
+      showMessage('Select loading manager name', false);
       return;
     }
     const dispatchDetails = getMergedDispatchDetails(tripId);
@@ -1638,7 +1638,7 @@ async function handleStatusTargetClick(button) {
   if (targetStatus === 'READY_FOR_LOADING') {
     const dispatchName = getPersonValueFromRow(tripId, 'Dispatch', trip.dispatch_manager_name || '');
     if (!dispatchName) {
-      showMessage('Select dispatch person name', false);
+      showMessage('Select dispatch manager name', false);
       return;
     }
     extraFields.dispatch_manager_name = dispatchName;
@@ -1648,7 +1648,7 @@ async function handleStatusTargetClick(button) {
   if (targetStatus === 'LOADING_COMPLETED') {
     const loadingName = getPersonValueFromRow(tripId, 'Loading', trip.loading_person_name || '');
     if (!loadingName) {
-      showMessage('Select loading person name', false);
+      showMessage('Select loading manager name', false);
       return;
     }
     extraFields.loading_person_name = loadingName;
@@ -1658,7 +1658,7 @@ async function handleStatusTargetClick(button) {
   if (targetStatus === 'BILLING_COMPLETED' || targetStatus === 'COMPLETED') {
     const accountsName = getPersonValueFromRow(tripId, 'Accounts', trip.accounts_person_name || '');
     if (!accountsName) {
-      showMessage('Select accounts person name', false);
+      showMessage('Select accounts manager name', false);
       return;
     }
     extraFields.accounts_person_name = accountsName;

@@ -24,11 +24,11 @@ const WEIGHBRIDGE_ZONE_STATUSES = [
 ];
 const ACCOUNTS_ZONE_STATUSES = ['BILLING_PENDING', 'BILLING_COMPLETED'];
 const STATUS_ASSIGNEE_RULES = [
-  { statuses: ['AT_DISPATCH', 'WAITING', 'READY_FOR_LOADING'], roleLabel: 'Dispatch', field: 'dispatch_done_by' },
-  { statuses: ['SENT_FOR_TARE_WEIGHT', 'TARE_WEIGHT_DONE'], roleLabel: 'Weighbridge (Tare)', field: 'tare_done_by' },
-  { statuses: ['LOADING_IN_PROGRESS', 'LOADING_COMPLETED'], roleLabel: 'Loading', field: 'loading_done_by' },
-  { statuses: ['GROSS_WEIGHT_PENDING', 'GROSS_WEIGHT_DONE'], roleLabel: 'Weighbridge (Gross)', field: 'gross_done_by' },
-  { statuses: ['BILLING_PENDING', 'BILLING_COMPLETED', 'COMPLETED'], roleLabel: 'Accounts', field: 'billing_done_by' }
+  { statuses: ['AT_DISPATCH', 'WAITING', 'READY_FOR_LOADING'], roleLabel: 'Dispatch Manager', field: 'dispatch_done_by' },
+  { statuses: ['SENT_FOR_TARE_WEIGHT', 'TARE_WEIGHT_DONE'], roleLabel: 'WB Operator (Tare)', field: 'tare_done_by' },
+  { statuses: ['LOADING_IN_PROGRESS', 'LOADING_COMPLETED'], roleLabel: 'Loading Manager', field: 'loading_done_by' },
+  { statuses: ['GROSS_WEIGHT_PENDING', 'GROSS_WEIGHT_DONE'], roleLabel: 'WB Operator (Gross)', field: 'gross_done_by' },
+  { statuses: ['BILLING_PENDING', 'BILLING_COMPLETED', 'COMPLETED'], roleLabel: 'Accounts Manager', field: 'billing_done_by' }
 ];
 const istDatePartsFormatter = new Intl.DateTimeFormat('en-CA', {
   timeZone: IST_TIMEZONE,
@@ -524,10 +524,10 @@ function statusDetailLabel(key) {
     tare_weight: 'Tare',
     gross_weight: 'Gross',
     net_weight: 'Net',
-    dispatch_manager_name: 'Dispatch By',
-    loading_person_name: 'Loading By',
-    weight_operator_name: 'Weighbridge By',
-    accounts_person_name: 'Accounts By',
+    dispatch_manager_name: 'Dispatch Manager',
+    loading_person_name: 'Loading Manager',
+    weight_operator_name: 'Weighbridge Operator',
+    accounts_person_name: 'Accounts Manager',
     dispatch_done_by: 'Dispatch Done By',
     tare_done_by: 'Tare Done By',
     gross_done_by: 'Gross Done By',
@@ -590,11 +590,11 @@ function openTimelineModal(tripId) {
       <div><strong>Transporter:</strong> ${escapeHtml(trip.transporter || '-')}</div>
       <div><strong>Driver:</strong> ${escapeHtml(trip.driver_name || '-')}</div>
       <div><strong>Driver Phone:</strong> ${escapeHtml(trip.driver_phone || '-')}</div>
-      <div><strong>Gate Person:</strong> ${escapeHtml(trip.gate_person_name || '-')}</div>
-      <div><strong>Dispatch:</strong> ${escapeHtml(trip.dispatch_manager_name || '-')}</div>
-      <div><strong>Loading:</strong> ${escapeHtml(trip.loading_person_name || '-')}</div>
-      <div><strong>Weighbridge:</strong> ${escapeHtml(trip.weight_operator_name || '-')}</div>
-      <div><strong>Accounts:</strong> ${escapeHtml(trip.accounts_person_name || '-')}</div>
+      <div><strong>Gate Operator:</strong> ${escapeHtml(trip.gate_person_name || '-')}</div>
+      <div><strong>Dispatch Manager:</strong> ${escapeHtml(trip.dispatch_manager_name || '-')}</div>
+      <div><strong>Loading Manager:</strong> ${escapeHtml(trip.loading_person_name || '-')}</div>
+      <div><strong>Weighbridge Operator:</strong> ${escapeHtml(trip.weight_operator_name || '-')}</div>
+      <div><strong>Accounts Manager:</strong> ${escapeHtml(trip.accounts_person_name || '-')}</div>
       <div><strong>Dispatch Done By:</strong> ${escapeHtml(trip.dispatch_done_by || '-')}</div>
       <div><strong>Tare Done By:</strong> ${escapeHtml(trip.tare_done_by || '-')}</div>
       <div><strong>Gross Done By:</strong> ${escapeHtml(trip.gross_done_by || '-')}</div>
@@ -682,7 +682,7 @@ function updateActiveTripsTable(trips) {
           </div>
           <div class="mobile-trip-grid">
             <div><strong>Customer:</strong> ${escapeHtml(trip.customer_name || '-')}</div>
-            <div><strong>Assigned:</strong> ${escapeHtml(getAssignedPersonByStatus(trip).name || '-')}</div>
+            <div><strong>Assigned Manager/Operator:</strong> ${escapeHtml(getAssignedPersonByStatus(trip).name || '-')}</div>
             <div><strong>Net:</strong> ${trip.net_weight ? `${trip.net_weight} kg` : '-'}</div>
             <div><strong>Time In:</strong> ${formatDateTime(trip.in_time)}</div>
             <div><strong>Total:</strong> <span data-time-scope="active" data-time-kind="total" data-trip-id="${trip.id}">${formatMinutes(totalTime)}</span></div>
@@ -816,11 +816,11 @@ function exportReportCsv() {
     'Transporter',
     'Driver Name',
     'Driver Phone',
-    'Gate Person',
+    'Gate Operator',
     'Dispatch Manager',
-    'Loading Person',
-    'Weight Operator',
-    'Accounts Person',
+    'Loading Manager',
+    'Weighbridge Operator',
+    'Accounts Manager',
     'Dispatch Done By',
     'Tare Done By',
     'Gross Done By',
