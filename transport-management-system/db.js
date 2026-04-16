@@ -66,6 +66,8 @@ async function initDb() {
     ADD COLUMN IF NOT EXISTS last_status_update_time TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS final_status TEXT,
     ADD COLUMN IF NOT EXISTS status_history JSONB DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW(),
     ADD COLUMN IF NOT EXISTS loading_person_name TEXT,
     ADD COLUMN IF NOT EXISTS accounts_person_name TEXT,
     ADD COLUMN IF NOT EXISTS dispatch_done_by TEXT,
@@ -80,6 +82,11 @@ async function initDb() {
     UPDATE trips
     SET status_history = '[]'::jsonb
     WHERE status_history IS NULL
+  `);
+  await pool.query(`
+    UPDATE trips
+    SET updated_at = COALESCE(updated_at, created_at, in_time, NOW())
+    WHERE updated_at IS NULL
   `);
   await pool.query(`
     ALTER TABLE trips
