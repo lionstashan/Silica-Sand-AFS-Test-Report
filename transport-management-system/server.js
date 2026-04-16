@@ -52,6 +52,7 @@ const STATUS_TRANSITIONS = {
 };
 
 const AUTO_STATUS_TRANSITIONS = {
+  IN_GATE: 'SENT_FOR_TARE_WEIGHT',
   TARE_WEIGHT_DONE: 'AT_DISPATCH',
   LOADING_COMPLETED: 'GROSS_WEIGHT_PENDING',
   GROSS_WEIGHT_DONE: 'BILLING_PENDING'
@@ -69,10 +70,163 @@ const ROLE_ALLOWED_TARGETS = {
 const FINAL_STATUSES = new Set(['COMPLETED', 'CANCELLED', 'EXITED']);
 
 app.use(express.json());
+app.use((req, res, next) => {
+  if (req.path.endsWith('.js') || req.path.endsWith('.css') || req.path.endsWith('.html')) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+  next();
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 function normalizeStatus(status) {
   return STATUS_FLOW.includes(status) ? status : 'IN_GATE';
+}
+
+function normalizeEmpty(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  return value;
+}
+
+function hasValue(value) {
+  return normalizeEmpty(value) !== null;
+}
+
+const TRACKED_DETAIL_FIELDS = [
+  'waiting_reason',
+  'cancel_reason',
+  'loading_point',
+  'labour_team',
+  'material_type',
+  'grade',
+  'condition',
+  'packing',
+  'eta',
+  'tare_weight',
+  'gross_weight',
+  'net_weight',
+  'dispatch_manager_name',
+  'weight_operator_name',
+  'loading_person_name',
+  'accounts_person_name',
+  'dispatch_done_by',
+  'tare_done_by',
+  'gross_done_by',
+  'loading_done_by',
+  'billing_done_by',
+  'final_status'
+];
+
+function getDetailChanges(beforeTripData, afterTripData) {
+  const changes = {};
+  TRACKED_DETAIL_FIELDS.forEach((field) => {
+    const beforeValue = normalizeEmpty(beforeTripData?.[field]);
+    const afterValue = normalizeEmpty(afterTripData?.[field]);
+
+    let changed = false;
+    if (field === 'eta') {
+      const beforeTs = beforeValue ? new Date(beforeValue).getTime() : null;
+      const afterTs = afterValue ? new Date(afterValue).getTime() : null;
+      changed = beforeTs !== afterTs;
+    } else {
+      changed = String(beforeValue) !== String(afterValue);
+    }
+
+    if (!changed) return;
+    if (afterValue === null) return;
+    changes[field] = afterValue;
+  });
+  return changes;
+}
+
+function getCurrentIstTimestamp() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).formatToParts(new Date());
+
+  const mapped = {};
+  parts.forEach((part) => {
+    if (part.type !== 'literal') mapped[part.type] = part.value;
+  });
+
+  return `${mapped.year}-${mapped.month}-${mapped.day}T${mapped.hour}:${mapped.minute}:${mapped.second}+05:30`;
+}
+
+function normalizeStatusHistory(history) {
+  if (!Array.isArray(history)) return [];
+  return history
+    .filter((entry) => entry && typeof entry === 'object' && entry.status)
+    .map((entry) => ({
+      status: normalizeStatus(entry.status),
+      entry_time: entry.entry_time || null,
+      exit_time: entry.exit_time || null,
+      details: entry.details && typeof entry.details === 'object' ? entry.details : {}
+    }));
+}
+
+function applyStatusHistoryTransition(existingHistory, nextStatus, nowIst, details = {}) {
+  const history = normalizeStatusHistory(existingHistory);
+  if (!history.length) {
+    return [{
+      status: normalizeStatus(nextStatus),
+      entry_time: nowIst,
+      exit_time: null,
+      details: { ...details }
+    }];
+  }
+
+  const cloned = history.map((entry) => ({ ...entry }));
+  const last = cloned[cloned.length - 1];
+  if (!last.exit_time) {
+    last.exit_time = nowIst;
+  }
+
+  if (last.status !== normalizeStatus(nextStatus)) {
+    cloned.push({
+      status: normalizeStatus(nextStatus),
+      entry_time: nowIst,
+      exit_time: null,
+      details: { ...details }
+    });
+  } else {
+    last.exit_time = null;
+    last.details = { ...details };
+  }
+
+  return cloned;
+}
+
+function buildInitialStatusHistory(initialStatus) {
+  const nowIst = getCurrentIstTimestamp();
+  const history = [
+    {
+      status: 'IN_GATE',
+      entry_time: nowIst,
+      exit_time: null,
+      details: {}
+    }
+  ];
+
+  if (initialStatus !== 'IN_GATE') {
+    history[0].exit_time = nowIst;
+    history.push({
+      status: normalizeStatus(initialStatus),
+      entry_time: nowIst,
+      exit_time: null,
+      details: {}
+    });
+  }
+
+  return history;
 }
 
 function readRoleFromRequest(req) {
@@ -92,6 +246,9 @@ function readRoleFromRequest(req) {
 }
 
 function valuesEqual(field, a, b) {
+  if (field === 'status_history') {
+    return JSON.stringify(normalizeStatusHistory(a)) === JSON.stringify(normalizeStatusHistory(b));
+  }
   if (field === 'in_time' || field === 'out_time' || field === 'last_status_update_time' || field === 'eta') {
     if (!a && !b) return true;
     if (!a || !b) return false;
@@ -101,6 +258,12 @@ function valuesEqual(field, a, b) {
     return aTime === bTime;
   }
   return a === b;
+}
+
+function toFiniteNumberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
 function isRoleAllowedForStatus(role, targetStatus) {
@@ -114,6 +277,13 @@ function isValidStatusTransition(currentStatus, nextStatus) {
   }
   const allowed = STATUS_TRANSITIONS[currentStatus] || [];
   return allowed.includes(nextStatus);
+}
+
+function isAdminRollbackAllowed(currentStatus, nextStatus) {
+  const currentIndex = STATUS_FLOW.indexOf(currentStatus);
+  const nextIndex = STATUS_FLOW.indexOf(nextStatus);
+  if (currentIndex === -1 || nextIndex === -1) return false;
+  return nextIndex < currentIndex;
 }
 
 app.get('/dashboard', (req, res) => {
@@ -139,8 +309,17 @@ app.post('/trip', async (req, res) => {
     gate_person_name,
     dispatch_manager_name,
     weight_operator_name,
+    loading_person_name,
+    accounts_person_name,
+    dispatch_done_by,
+    tare_done_by,
+    gross_done_by,
+    loading_done_by,
+    billing_done_by,
     material_type,
     grade,
+    condition,
+    packing,
     loading_point,
     labour_team,
     eta,
@@ -154,7 +333,8 @@ app.post('/trip', async (req, res) => {
     cancel_reason,
     in_time,
     out_time,
-    last_status_update_time
+    last_status_update_time,
+    status_history
   } = req.body;
 
   const requestedStatus = normalizeStatus(status || 'IN_GATE');
@@ -163,6 +343,7 @@ app.post('/trip', async (req, res) => {
   const safeInTime = new Date().toISOString();
   const safeLastStatusUpdateTime = safeInTime;
   const safeIsCancelled = is_cancelled ?? false;
+  const safeStatusHistory = buildInitialStatusHistory(safeStatus);
 
   try {
     const result = await pool.query(
@@ -176,8 +357,17 @@ app.post('/trip', async (req, res) => {
         gate_person_name,
         dispatch_manager_name,
         weight_operator_name,
+        loading_person_name,
+        accounts_person_name,
+        dispatch_done_by,
+        tare_done_by,
+        gross_done_by,
+        loading_done_by,
+        billing_done_by,
         material_type,
         grade,
+        condition,
+        packing,
         loading_point,
         labour_team,
         eta,
@@ -191,8 +381,9 @@ app.post('/trip', async (req, res) => {
         cancel_reason,
         in_time,
         out_time,
-        last_status_update_time
-      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+        last_status_update_time,
+        status_history
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35)
       RETURNING *`,
       [
         sequence_number,
@@ -204,8 +395,17 @@ app.post('/trip', async (req, res) => {
         gate_person_name,
         dispatch_manager_name,
         weight_operator_name,
+        loading_person_name,
+        accounts_person_name,
+        dispatch_done_by,
+        tare_done_by,
+        gross_done_by,
+        loading_done_by,
+        billing_done_by,
         material_type,
         grade,
+        condition,
+        packing,
         loading_point,
         labour_team,
         eta,
@@ -219,7 +419,8 @@ app.post('/trip', async (req, res) => {
         cancel_reason,
         safeInTime,
         out_time,
-        safeLastStatusUpdateTime
+        safeLastStatusUpdateTime,
+        JSON.stringify(safeStatusHistory)
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -268,8 +469,17 @@ app.put('/trip/:id', async (req, res) => {
     'gate_person_name',
     'dispatch_manager_name',
     'weight_operator_name',
+    'loading_person_name',
+    'accounts_person_name',
+    'dispatch_done_by',
+    'tare_done_by',
+    'gross_done_by',
+    'loading_done_by',
+    'billing_done_by',
     'material_type',
     'grade',
+    'condition',
+    'packing',
     'loading_point',
     'labour_team',
     'eta',
@@ -283,8 +493,175 @@ app.put('/trip/:id', async (req, res) => {
     'cancel_reason',
     'in_time',
     'out_time',
-    'last_status_update_time'
+    'last_status_update_time',
+    'status_history'
   ];
+
+  const currentStatus = normalizeStatus(existingTrip.status);
+  const requestedStatus = Object.prototype.hasOwnProperty.call(req.body, 'status')
+    ? normalizeStatus(req.body.status)
+    : currentStatus;
+  const isStatusChange = requestedStatus !== currentStatus;
+  const isAdminRollback = auth.role === 'Admin' && isStatusChange && isAdminRollbackAllowed(currentStatus, requestedStatus);
+  const mergedTripData = { ...existingTrip, ...req.body, status: requestedStatus };
+  let systemManagedStatusHistoryUpdate = false;
+
+  if (Object.prototype.hasOwnProperty.call(req.body, 'status')) {
+    if (isStatusChange) {
+      if (!isRoleAllowedForStatus(auth.role, requestedStatus)) {
+        return res.status(403).json({ error: `Role ${auth.role} cannot mark status ${requestedStatus}` });
+      }
+      if (!isAdminRollback && !isValidStatusTransition(currentStatus, requestedStatus)) {
+        return res.status(400).json({ error: `Invalid transition: ${currentStatus} -> ${requestedStatus}` });
+      }
+
+      if (requestedStatus === 'LOADING_IN_PROGRESS') {
+        const effective = {
+          material_type: normalizeEmpty(req.body.material_type ?? existingTrip.material_type),
+          grade: normalizeEmpty(req.body.grade ?? existingTrip.grade),
+          condition: normalizeEmpty(req.body.condition ?? existingTrip.condition),
+          packing: normalizeEmpty(req.body.packing ?? existingTrip.packing),
+          loading_point: normalizeEmpty(req.body.loading_point ?? existingTrip.loading_point),
+          labour_team: normalizeEmpty(req.body.labour_team ?? existingTrip.labour_team),
+          eta: normalizeEmpty(req.body.eta ?? existingTrip.eta)
+        };
+        const summarize = () => ({
+          material_type: effective.material_type || null,
+          grade: effective.grade || null,
+          condition: effective.condition || null,
+          packing: effective.packing || null,
+          loading_point: effective.loading_point || null,
+          labour_team: effective.labour_team || null,
+          eta: effective.eta || null
+        });
+
+        if (!hasValue(effective.material_type)) {
+          return res.status(400).json({ error: 'Material type is required before starting loading', received: summarize() });
+        }
+        if (!hasValue(effective.grade)) {
+          return res.status(400).json({ error: 'Grade is required before starting loading', received: summarize() });
+        }
+        if (!hasValue(effective.condition)) {
+          return res.status(400).json({ error: 'Condition is required before starting loading', received: summarize() });
+        }
+        if (!hasValue(effective.packing)) {
+          return res.status(400).json({ error: 'Packing is required before starting loading', received: summarize() });
+        }
+        if (!hasValue(effective.loading_point)) {
+          return res.status(400).json({ error: 'Loading point is required before starting loading', received: summarize() });
+        }
+        if (!hasValue(effective.labour_team)) {
+          return res.status(400).json({ error: 'Loading team is required before starting loading', received: summarize() });
+        }
+        if (!hasValue(effective.eta)) {
+          return res.status(400).json({ error: 'ETA is required before starting loading', received: summarize() });
+        }
+      }
+    }
+  }
+
+  // status_history is system-managed; ignore direct client writes unless generated below.
+  if (!isStatusChange && Object.prototype.hasOwnProperty.call(req.body, 'status_history')) {
+    delete req.body.status_history;
+  }
+
+  if (isStatusChange) {
+    const requestedDetailChanges = getDetailChanges(existingTrip, { ...mergedTripData, status: requestedStatus });
+    const requestedAtIst = getCurrentIstTimestamp();
+    let nextHistory = applyStatusHistoryTransition(
+      existingTrip.status_history,
+      requestedStatus,
+      requestedAtIst,
+      requestedDetailChanges
+    );
+    let finalStatus = requestedStatus;
+    const autoNext = AUTO_STATUS_TRANSITIONS[requestedStatus];
+
+    if (autoNext) {
+      const autoAtIst = getCurrentIstTimestamp();
+      nextHistory = applyStatusHistoryTransition(
+        nextHistory,
+        autoNext,
+        autoAtIst,
+        {}
+      );
+      finalStatus = autoNext;
+    }
+
+    req.body.status = finalStatus;
+    req.body.status_history = nextHistory;
+    req.body.last_status_update_time = new Date().toISOString();
+    systemManagedStatusHistoryUpdate = true;
+
+    const nowIso = new Date().toISOString();
+    if (finalStatus === 'CANCELLED') {
+      req.body.final_status = 'CANCELLED';
+      req.body.is_cancelled = true;
+      if (!req.body.cancel_reason) {
+        req.body.cancel_reason = existingTrip.cancel_reason || 'Cancelled';
+      }
+      req.body.out_time = nowIso;
+    } else if (finalStatus === 'COMPLETED') {
+      req.body.final_status = 'COMPLETED';
+      req.body.is_cancelled = false;
+      req.body.cancel_reason = null;
+      req.body.out_time = nowIso;
+    } else if (finalStatus === 'EXITED') {
+      const resolvedFinal = existingTrip.final_status || (existingTrip.is_cancelled ? 'CANCELLED' : 'COMPLETED');
+      req.body.final_status = resolvedFinal;
+      req.body.is_cancelled = resolvedFinal === 'CANCELLED';
+      if (resolvedFinal !== 'CANCELLED') {
+        req.body.cancel_reason = null;
+      }
+      req.body.out_time = nowIso;
+    } else if (isAdminRollback) {
+      req.body.final_status = null;
+      req.body.is_cancelled = false;
+      req.body.cancel_reason = null;
+      req.body.out_time = null;
+    }
+  } else {
+    const detailChanges = getDetailChanges(existingTrip, mergedTripData);
+    if (Object.keys(detailChanges).length) {
+      const nowIst = getCurrentIstTimestamp();
+      const history = normalizeStatusHistory(existingTrip.status_history);
+      const nextHistory = history.map((entry) => ({ ...entry }));
+      if (nextHistory.length) {
+        const last = nextHistory[nextHistory.length - 1];
+        if (!last.exit_time && last.status === currentStatus) {
+          last.exit_time = nowIst;
+        }
+      }
+      nextHistory.push({
+        status: currentStatus,
+        entry_time: nowIst,
+        exit_time: null,
+        details: detailChanges
+      });
+
+      req.body.status_history = nextHistory;
+      systemManagedStatusHistoryUpdate = true;
+    }
+  }
+
+  // Net weight is system-calculated from tare and gross whenever either changes.
+  if (
+    Object.prototype.hasOwnProperty.call(req.body, 'tare_weight') ||
+    Object.prototype.hasOwnProperty.call(req.body, 'gross_weight')
+  ) {
+    const effectiveTare = Object.prototype.hasOwnProperty.call(req.body, 'tare_weight')
+      ? toFiniteNumberOrNull(req.body.tare_weight)
+      : toFiniteNumberOrNull(existingTrip.tare_weight);
+    const effectiveGross = Object.prototype.hasOwnProperty.call(req.body, 'gross_weight')
+      ? toFiniteNumberOrNull(req.body.gross_weight)
+      : toFiniteNumberOrNull(existingTrip.gross_weight);
+
+    if (effectiveTare !== null && effectiveGross !== null) {
+      req.body.net_weight = Number((effectiveGross - effectiveTare).toFixed(2));
+    } else {
+      req.body.net_weight = null;
+    }
+  }
 
   const providedFields = allowedFields.filter((field) =>
     Object.prototype.hasOwnProperty.call(req.body, field) && req.body[field] !== undefined
@@ -294,37 +671,25 @@ app.put('/trip/:id', async (req, res) => {
     return res.status(400).json({ error: 'No valid fields provided for update' });
   }
 
-  const currentStatus = normalizeStatus(existingTrip.status);
-  const requestedStatus = Object.prototype.hasOwnProperty.call(req.body, 'status')
-    ? normalizeStatus(req.body.status)
-    : currentStatus;
-  const isStatusChange = requestedStatus !== currentStatus;
-
-  if (Object.prototype.hasOwnProperty.call(req.body, 'status')) {
-    if (isStatusChange) {
-      if (!isRoleAllowedForStatus(auth.role, requestedStatus)) {
-        return res.status(403).json({ error: `Role ${auth.role} cannot mark status ${requestedStatus}` });
-      }
-      if (!isValidStatusTransition(currentStatus, requestedStatus)) {
-        return res.status(400).json({ error: `Invalid transition: ${currentStatus} -> ${requestedStatus}` });
-      }
-    }
-  }
-
-  const restrictedFields = ['in_time', 'out_time', 'final_status', 'is_cancelled', 'cancel_reason'];
+  const restrictedFields = ['in_time', 'out_time', 'final_status', 'is_cancelled', 'cancel_reason', 'status_history'];
   if (auth.role !== 'Admin') {
     const allowedByTransition = {
-      CANCELLED: new Set(['out_time', 'final_status', 'is_cancelled', 'cancel_reason']),
-      COMPLETED: new Set(['out_time', 'final_status', 'is_cancelled', 'cancel_reason']),
-      EXITED: new Set(['out_time'])
+      CANCELLED: new Set(['out_time', 'final_status', 'is_cancelled', 'cancel_reason', 'status_history']),
+      COMPLETED: new Set(['out_time', 'final_status', 'is_cancelled', 'cancel_reason', 'status_history']),
+      EXITED: new Set(['out_time', 'status_history']),
+      AT_DISPATCH: new Set(['status_history']),
+      GROSS_WEIGHT_PENDING: new Set(['status_history']),
+      BILLING_PENDING: new Set(['status_history'])
     };
+    const finalRequestedStatus = normalizeStatus(req.body.status || requestedStatus);
     const allowedRestrictedFields = isStatusChange
-      ? (allowedByTransition[requestedStatus] || new Set())
+      ? (allowedByTransition[finalRequestedStatus] || new Set())
       : new Set();
 
     for (const field of restrictedFields) {
       if (!providedFields.includes(field)) continue;
       if (valuesEqual(field, req.body[field], existingTrip[field])) continue;
+      if (field === 'status_history' && systemManagedStatusHistoryUpdate) continue;
       if (field === 'in_time') {
         return res.status(403).json({ error: `Role ${auth.role} cannot modify in_time` });
       }
@@ -337,7 +702,9 @@ app.put('/trip/:id', async (req, res) => {
   const setClause = providedFields
     .map((field, index) => `${field} = $${index + 1}`)
     .join(', ');
-  const values = providedFields.map((field) => req.body[field]);
+  const values = providedFields.map((field) => (
+    field === 'status_history' ? JSON.stringify(req.body[field]) : req.body[field]
+  ));
 
   try {
     let result = await pool.query(
@@ -349,24 +716,7 @@ app.put('/trip/:id', async (req, res) => {
       return res.status(404).json({ error: 'Trip not found' });
     }
 
-    let updatedTrip = result.rows[0];
-    if (isStatusChange) {
-      const autoNext = AUTO_STATUS_TRANSITIONS[requestedStatus];
-      if (autoNext) {
-        const autoResult = await pool.query(
-          `UPDATE trips
-           SET status = $1, last_status_update_time = $2
-           WHERE id = $3
-           RETURNING *`,
-          [autoNext, new Date().toISOString(), id]
-        );
-        if (autoResult.rows.length > 0) {
-          updatedTrip = autoResult.rows[0];
-        }
-      }
-    }
-
-    res.json(updatedTrip);
+    res.json(result.rows[0]);
   } catch (error) {
     console.error('Error updating trip', error);
     res.status(500).json({ error: 'Failed to update trip' });

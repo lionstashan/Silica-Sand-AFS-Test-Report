@@ -51,6 +51,23 @@ header nav {
   background: rgba(255, 255, 255, 0.3);
 }
 
+.truck-link-btn {
+  border: none;
+  background: transparent;
+  color: #0f4c81;
+  text-decoration: underline;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  min-width: 0;
+  flex: none;
+  font-size: 0.92rem;
+}
+
+.truck-link-btn.mobile {
+  font-size: 1rem;
+}
+
 /* Role and PIN Modals */
 #role-modal,
 #pin-modal {
@@ -64,6 +81,139 @@ header nav {
   justify-content: center;
   align-items: center;
   z-index: 1000;
+}
+
+.timeline-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.56);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1100;
+  padding: 16px;
+}
+
+.timeline-modal-content {
+  width: min(740px, 96vw);
+  max-height: 86vh;
+  overflow: auto;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 12px 36px rgba(15, 23, 42, 0.24);
+  padding: 16px;
+}
+
+.timeline-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.timeline-modal-header h3 {
+  margin: 0;
+  color: #0f4c81;
+}
+
+.timeline-close-btn {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #1f2937;
+  border-radius: 8px;
+  min-width: 86px;
+  flex: none;
+  padding: 8px 12px;
+}
+
+.timeline-meta {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: 0.88rem;
+}
+
+.timeline-list {
+  display: grid;
+  gap: 8px;
+}
+
+.timeline-stage-summary {
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: #f8fbff;
+}
+
+.timeline-stage-summary h4 {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+  color: #0f4c81;
+}
+
+.timeline-summary-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.timeline-summary-chip {
+  font-size: 0.76rem;
+  color: #1f2937;
+  background: #e6f0ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+.timeline-item {
+  border-left: 4px solid #cbd5e1;
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.timeline-item-current {
+  border-left-color: #0f4c81;
+  background: #eff6ff;
+}
+
+.timeline-item-status {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.timeline-item-times {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: #334155;
+}
+
+.timeline-item-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.timeline-detail-chip {
+  font-size: 0.76rem;
+  color: #1f2937;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  padding: 2px 8px;
 }
 
 .role-modal-content,
@@ -597,6 +747,18 @@ tr:nth-child(even) {
   padding: 8px;
   display: grid;
   gap: 6px;
+}
+
+.admin-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 6px 8px;
+}
+
+.admin-edit-input {
+  margin-top: 4px;
+  padding: 6px 8px;
+  font-size: 0.78rem;
 }
 
 .workflow-row {

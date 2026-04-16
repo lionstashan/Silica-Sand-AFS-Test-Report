@@ -1,5 +1,6 @@
 let userRole = null;
 let allTrips = [];
+const loadingDetailsDrafts = new Map();
 
 const IST_TIMEZONE = 'Asia/Kolkata';
 const IST_OFFSET = '+05:30';
@@ -67,11 +68,33 @@ const ROLE_ALLOWED_TARGETS = {
 };
 
 const DISPATCH_DROPDOWNS = {
-  loading_point: ['L1', 'L2', 'L3', 'Other'],
-  labour_team: ['T1', 'T2', 'T3', 'Other'],
-  material_type: ['Silica A', 'Silica B', 'Other'],
-  grade: ['Grade 1', 'Grade 2', 'Other']
+  loading_point: ['Office Front', 'Warehouse', 'Old Dry Plant', 'Near Crusher Plant', 'Glass Plant', 'Other'],
+  labour_team: ['Dinesh', 'Shambhu', 'Chandan', 'JCB', 'Loader', 'Tractor', 'Other'],
+  material_type: ['Silica Sand', 'Ball Clay', 'Other'],
+  grade: ['Glass Grade', 'Foundry Grade', '30-150', '30-80', '18-30', '16-30', '14-16', '12-16', '14-12', 'Ball Clay', 'Raw', 'Other'],
+  condition: ['Dry', 'Wet', 'Other'],
+  packing: ['Loose', 'Old', '3G', '4G', 'Other']
 };
+const PERSON_DROPDOWNS = {
+  Gate: ['X', 'Y', 'Z', 'Other'],
+  Dispatch: ['Jitendra Yadav', 'Other'],
+  Loading: ['Rajesh Kumar', 'Jai Bhagwan', 'Other'],
+  Weighbridge: ['Anil Sharma', 'Ajay', 'Other'],
+  Accounts: ['Pooja', 'Neha', 'Kiran', 'Other']
+};
+const PERSON_FIELD_BY_ROLE = {
+  Dispatch: 'dispatch_manager_name',
+  Loading: 'loading_person_name',
+  Weighbridge: 'weight_operator_name',
+  Accounts: 'accounts_person_name'
+};
+const STATUS_ASSIGNEE_RULES = [
+  { statuses: ['AT_DISPATCH', 'WAITING', 'READY_FOR_LOADING'], roleLabel: 'Dispatch', field: 'dispatch_done_by' },
+  { statuses: ['SENT_FOR_TARE_WEIGHT', 'TARE_WEIGHT_DONE'], roleLabel: 'Weighbridge (Tare)', field: 'tare_done_by' },
+  { statuses: ['LOADING_IN_PROGRESS', 'LOADING_COMPLETED'], roleLabel: 'Loading', field: 'loading_done_by' },
+  { statuses: ['GROSS_WEIGHT_PENDING', 'GROSS_WEIGHT_DONE'], roleLabel: 'Weighbridge (Gross)', field: 'gross_done_by' },
+  { statuses: ['BILLING_PENDING', 'BILLING_COMPLETED', 'COMPLETED'], roleLabel: 'Accounts', field: 'billing_done_by' }
+];
 
 const form = document.getElementById('trip-form');
 const tripsTable = document.getElementById('trips-table');
@@ -80,6 +103,9 @@ const tripsHeaderRow = document.querySelector('.table-container table thead tr')
 const messageEl = document.getElementById('message');
 const clearButton = document.getElementById('clear-button');
 const roleIndicator = document.getElementById('role-indicator');
+const timelineModal = document.getElementById('timeline-modal');
+const timelineModalTitle = document.getElementById('timeline-modal-title');
+const timelineModalBody = document.getElementById('timeline-modal-body');
 
 const customerSelect = document.getElementById('customer-select');
 const customerOther = document.getElementById('customer-other');
@@ -91,15 +117,9 @@ const gatePersonOther = document.getElementById('gate-person-other');
 const MAIN_TABLE_COLUMNS = [
   'Truck Number',
   'Status',
+  'Assigned Person',
   'Customer',
-  'Transporter',
-  'Driver',
-  'Driver Phone',
-  'Gate Person',
-  'Weights',
-  'Time In',
-  'Total Time',
-  'Stage Time',
+  'In Time',
   'Workflow / Actions'
 ];
 
@@ -176,6 +196,18 @@ function formatDateTime(value) {
   return rawDate.toLocaleString('en-IN', { timeZone: IST_TIMEZONE });
 }
 
+function formatTimeOnly(value) {
+  if (!value) return '-';
+  const rawDate = new Date(value);
+  if (Number.isNaN(rawDate.getTime())) return '-';
+  return rawDate.toLocaleTimeString('en-IN', {
+    timeZone: IST_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  });
+}
+
 function parseTripDate(value) {
   if (!value) return null;
   const date = new Date(value);
@@ -195,6 +227,174 @@ function formatMinutes(totalMinutes) {
   const minutes = totalMinutes % 60;
   if (hours <= 0) return `${minutes}m`;
   return `${hours}h ${minutes}m`;
+}
+
+function parseStatusHistory(trip) {
+  if (!trip || trip.status_history == null) return [];
+  if (Array.isArray(trip.status_history)) return trip.status_history;
+  if (typeof trip.status_history === 'string') {
+    try {
+      const parsed = JSON.parse(trip.status_history);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      return [];
+    }
+  }
+  return [];
+}
+
+function statusToLabel(status) {
+  return String(status || '').replaceAll('_', ' ');
+}
+
+function statusDetailLabel(key) {
+  const labels = {
+    waiting_reason: 'Waiting',
+    cancel_reason: 'Cancel',
+    loading_point: 'Loading Point',
+    labour_team: 'Team',
+    material_type: 'Material',
+    grade: 'Grade',
+    condition: 'Condition',
+    packing: 'Packing',
+    eta: 'ETA',
+    tare_weight: 'Tare',
+    gross_weight: 'Gross',
+    net_weight: 'Net',
+    dispatch_manager_name: 'Dispatch By',
+    loading_person_name: 'Loading By',
+    weight_operator_name: 'Weighbridge By',
+    accounts_person_name: 'Accounts By',
+    dispatch_done_by: 'Dispatch Done By',
+    tare_done_by: 'Tare Done By',
+    gross_done_by: 'Gross Done By',
+    loading_done_by: 'Loading Done By',
+    billing_done_by: 'Billing Done By',
+    final_status: 'Final'
+  };
+  return labels[key] || key.replaceAll('_', ' ');
+}
+
+function formatStatusDetailValue(key, value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (key === 'eta') return formatDateTime(value);
+  if (['tare_weight', 'gross_weight', 'net_weight'].includes(key)) return `${value} kg`;
+  return String(value);
+}
+
+function renderStatusDetails(entry) {
+  const details = entry?.details && typeof entry.details === 'object' ? entry.details : null;
+  if (!details) return '';
+  const detailEntries = Object.entries(details)
+    .map(([key, value]) => {
+      const formatted = formatStatusDetailValue(key, value);
+      if (!formatted) return '';
+      return `<span class="timeline-detail-chip"><strong>${escapeHtml(statusDetailLabel(key))}:</strong> ${escapeHtml(formatted)}</span>`;
+    })
+    .filter(Boolean);
+  if (!detailEntries.length) return '';
+  return `<div class="timeline-item-details">${detailEntries.join('')}</div>`;
+}
+
+function getStatusDurationMinutes(entry) {
+  const entryTime = parseTripDate(entry?.entry_time);
+  if (!entryTime) return null;
+  const exitTime = parseTripDate(entry?.exit_time) || new Date();
+  const diffMs = exitTime.getTime() - entryTime.getTime();
+  if (diffMs <= 0) return 0;
+  return Math.floor(diffMs / (1000 * 60));
+}
+
+function getStageDurationSummary(trip) {
+  const history = parseStatusHistory(trip);
+  const totals = new Map();
+  history.forEach((entry) => {
+    const status = statusToLabel(entry?.status || '');
+    const minutes = getStatusDurationMinutes(entry);
+    if (!status || minutes === null || Number.isNaN(minutes)) return;
+    totals.set(status, (totals.get(status) || 0) + minutes);
+  });
+  return Array.from(totals.entries()).map(([status, minutes]) => ({ status, minutes }));
+}
+
+function renderStageSummary(trip) {
+  const summary = getStageDurationSummary(trip);
+  if (!summary.length) return '<div class="mini-muted">No stage timing available</div>';
+  const chips = summary.map((item) => (
+    `<span class="timeline-summary-chip"><strong>${escapeHtml(item.status)}:</strong> ${formatMinutes(item.minutes)}</span>`
+  )).join('');
+  return `
+    <div class="timeline-stage-summary">
+      <h4>Stage Time Summary</h4>
+      <div class="timeline-summary-grid">${chips}</div>
+    </div>
+  `;
+}
+
+function closeTimelineModal() {
+  if (!timelineModal) return;
+  timelineModal.style.display = 'none';
+  document.body.style.overflow = 'auto';
+}
+
+function renderStatusTimeline(trip) {
+  const history = parseStatusHistory(trip);
+  if (!history.length) {
+    return '<div class="mini-muted">No status history available</div>';
+  }
+
+  return history.map((entry) => {
+    const current = !entry.exit_time;
+    return `
+      <article class="timeline-item ${current ? 'timeline-item-current' : ''}">
+        <div class="timeline-item-status">${escapeHtml(statusToLabel(entry.status))}</div>
+        <div class="timeline-item-times">
+          <span>${formatTimeOnly(entry.entry_time)} → ${entry.exit_time ? formatTimeOnly(entry.exit_time) : 'Now'}</span>
+          <span>${formatMinutes(getStatusDurationMinutes(entry))}</span>
+        </div>
+        ${renderStatusDetails(entry)}
+      </article>
+    `;
+  }).join('');
+}
+
+function openTimelineModal(tripId) {
+  const trip = getTripById(tripId);
+  if (!trip || !timelineModal || !timelineModalBody || !timelineModalTitle) return;
+  timelineModalTitle.textContent = `Status Timeline - ${trip.truck_number || 'Truck'}`;
+  timelineModalBody.innerHTML = `
+    <div class="timeline-meta">
+      <div><strong>Current:</strong> ${escapeHtml(statusToLabel(trip.status || '-'))}</div>
+      <div><strong>In Time:</strong> ${formatDateTime(trip.in_time)}</div>
+      <div><strong>Transporter:</strong> ${escapeHtml(trip.transporter || '-')}</div>
+      <div><strong>Driver:</strong> ${escapeHtml(trip.driver_name || '-')}</div>
+      <div><strong>Driver Phone:</strong> ${escapeHtml(trip.driver_phone || '-')}</div>
+      <div><strong>Gate Person:</strong> ${escapeHtml(trip.gate_person_name || '-')}</div>
+      <div><strong>Dispatch:</strong> ${escapeHtml(trip.dispatch_manager_name || '-')}</div>
+      <div><strong>Loading:</strong> ${escapeHtml(trip.loading_person_name || '-')}</div>
+      <div><strong>Weighbridge:</strong> ${escapeHtml(trip.weight_operator_name || '-')}</div>
+      <div><strong>Accounts:</strong> ${escapeHtml(trip.accounts_person_name || '-')}</div>
+      <div><strong>Dispatch Done By:</strong> ${escapeHtml(trip.dispatch_done_by || '-')}</div>
+      <div><strong>Tare Done By:</strong> ${escapeHtml(trip.tare_done_by || '-')}</div>
+      <div><strong>Gross Done By:</strong> ${escapeHtml(trip.gross_done_by || '-')}</div>
+      <div><strong>Loading Done By:</strong> ${escapeHtml(trip.loading_done_by || '-')}</div>
+      <div><strong>Billing Done By:</strong> ${escapeHtml(trip.billing_done_by || '-')}</div>
+    </div>
+    ${renderStageSummary(trip)}
+    <div class="timeline-list">
+      ${renderStatusTimeline(trip)}
+    </div>
+  `;
+  timelineModal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function getTruckTimelineButton(trip) {
+  return `
+    <button class="truck-link-btn" data-action="view-timeline" data-trip-id="${trip.id}" type="button">
+      ${escapeHtml(trip.truck_number || '-')}
+    </button>
+  `;
 }
 
 function showMessage(text, success = true) {
@@ -286,12 +486,27 @@ function getStatusBadge(status, labelOverride = null) {
   return `<span class="status-badge status-${statusClass}">${displayValue}</span>`;
 }
 
+function getAssignedPersonByStatus(trip) {
+  const status = normalizeStatus(trip?.status);
+  const match = STATUS_ASSIGNEE_RULES.find((rule) => rule.statuses.includes(status));
+  if (!match) return { roleLabel: '-', name: '' };
+  return { roleLabel: match.roleLabel, name: trip?.[match.field] || '' };
+}
+
+function getAssignedPersonCell(trip) {
+  const assigned = getAssignedPersonByStatus(trip);
+  if (!assigned.name) {
+    return `<div class="mini-muted">${escapeHtml(assigned.roleLabel)}: -</div>`;
+  }
+  return `<div class="mini-muted">${escapeHtml(assigned.roleLabel)}: ${escapeHtml(assigned.name)}</div>`;
+}
+
 function getStatusWithReasonDetails(trip) {
   const statusLabel = trip.status === 'EXITED'
     ? (trip.final_status === 'CANCELLED' ? 'CANCELLED / EXITED' : 'COMPLETED / EXITED')
     : trip.status;
   const parts = [getStatusBadge(trip.status, statusLabel)];
-  if (trip.waiting_reason) {
+  if (normalizeStatus(trip.status) === 'WAITING' && trip.waiting_reason) {
     parts.push(`<div class="reason-chip">Waiting: ${escapeHtml(trip.waiting_reason)}</div>`);
   }
   if ((trip.status === 'CANCELLED' || trip.status === 'EXITED') && trip.cancel_reason) {
@@ -374,6 +589,20 @@ function getTripById(tripId) {
   return allTrips.find((trip) => String(trip.id) === String(tripId)) || null;
 }
 
+function getLoadingDraft(tripId) {
+  return loadingDetailsDrafts.get(String(tripId)) || {};
+}
+
+function setLoadingDraftField(tripId, field, value) {
+  const key = String(tripId);
+  const existing = getLoadingDraft(key);
+  loadingDetailsDrafts.set(key, { ...existing, [field]: value });
+}
+
+function clearLoadingDraft(tripId) {
+  loadingDetailsDrafts.delete(String(tripId));
+}
+
 function getBaseTripPayload(trip) {
   if (!trip) return {};
   return {
@@ -386,8 +615,17 @@ function getBaseTripPayload(trip) {
     gate_person_name: trip.gate_person_name,
     dispatch_manager_name: trip.dispatch_manager_name,
     weight_operator_name: trip.weight_operator_name,
+    loading_person_name: trip.loading_person_name,
+    accounts_person_name: trip.accounts_person_name,
+    dispatch_done_by: trip.dispatch_done_by,
+    tare_done_by: trip.tare_done_by,
+    gross_done_by: trip.gross_done_by,
+    loading_done_by: trip.loading_done_by,
+    billing_done_by: trip.billing_done_by,
     material_type: trip.material_type,
     grade: trip.grade,
+    condition: trip.condition,
+    packing: trip.packing,
     loading_point: trip.loading_point,
     labour_team: trip.labour_team,
     eta: trip.eta,
@@ -401,7 +639,8 @@ function getBaseTripPayload(trip) {
     cancel_reason: trip.cancel_reason,
     in_time: trip.in_time,
     out_time: trip.out_time,
-    last_status_update_time: trip.last_status_update_time
+    last_status_update_time: trip.last_status_update_time,
+    status_history: trip.status_history
   };
 }
 
@@ -416,6 +655,14 @@ function isValidStrictTransition(currentStatus, nextStatus) {
   }
   const allowed = STATUS_TRANSITIONS[currentStatus] || [];
   return allowed.includes(nextStatus);
+}
+
+function isAdminRollbackAllowed(currentStatus, nextStatus, role) {
+  if (role !== 'Admin') return false;
+  const currentIndex = STATUS_FLOW.indexOf(currentStatus);
+  const nextIndex = STATUS_FLOW.indexOf(nextStatus);
+  if (currentIndex === -1 || nextIndex === -1) return false;
+  return nextIndex < currentIndex;
 }
 
 function getDispatchDetailsFromRow(tripId) {
@@ -435,10 +682,12 @@ function getDispatchDetailsFromRow(tripId) {
   };
 
   return {
-    loading_point: resolveDropdown('loading_point'),
-    labour_team: resolveDropdown('labour_team'),
     material_type: resolveDropdown('material_type'),
     grade: resolveDropdown('grade'),
+    condition: resolveDropdown('condition'),
+    packing: resolveDropdown('packing'),
+    loading_point: resolveDropdown('loading_point'),
+    labour_team: resolveDropdown('labour_team'),
     eta: localInputToIstIso(readValue('eta'))
   };
 }
@@ -446,20 +695,25 @@ function getDispatchDetailsFromRow(tripId) {
 function getMergedDispatchDetails(tripId) {
   const trip = getTripById(tripId);
   const rowDetails = getDispatchDetailsFromRow(tripId);
+  const draft = getLoadingDraft(tripId);
   return {
-    loading_point: rowDetails.loading_point || trip?.loading_point || '',
-    labour_team: rowDetails.labour_team || trip?.labour_team || '',
-    material_type: rowDetails.material_type || trip?.material_type || '',
-    grade: rowDetails.grade || trip?.grade || '',
-    eta: rowDetails.eta || trip?.eta || null
+    material_type: rowDetails.material_type || draft.material_type || trip?.material_type || '',
+    grade: rowDetails.grade || draft.grade || trip?.grade || '',
+    condition: rowDetails.condition || draft.condition || trip?.condition || '',
+    packing: rowDetails.packing || draft.packing || trip?.packing || '',
+    loading_point: rowDetails.loading_point || draft.loading_point || trip?.loading_point || '',
+    labour_team: rowDetails.labour_team || draft.labour_team || trip?.labour_team || '',
+    eta: rowDetails.eta || draft.eta || trip?.eta || null
   };
 }
 
 function getDispatchValidationError(details) {
-  if (!details.loading_point) return 'Loading point is required before starting loading';
-  if (!details.labour_team) return 'Loading team is required before starting loading';
   if (!details.material_type) return 'Material type is required before starting loading';
   if (!details.grade) return 'Grade is required before starting loading';
+  if (!details.condition) return 'Condition is required before starting loading';
+  if (!details.packing) return 'Packing is required before starting loading';
+  if (!details.loading_point) return 'Loading point is required before starting loading';
+  if (!details.labour_team) return 'Loading team is required before starting loading';
   if (!details.eta) return 'ETA is required before starting loading';
   return null;
 }
@@ -476,6 +730,46 @@ function getTextFromRow(tripId, field) {
   return input ? input.value.trim() : '';
 }
 
+function renderPersonSelect(roleName, tripId, savedValue) {
+  const options = PERSON_DROPDOWNS[roleName] || [];
+  const isSavedOther = !!savedValue && !options.includes(savedValue);
+  const selectedValue = isSavedOther ? 'Other' : (savedValue || '');
+  const optionsHtml = [
+    '<option value="">Select</option>',
+    ...options.map((option) => (
+      `<option value="${option}" ${selectedValue === option ? 'selected' : ''}>${option}</option>`
+    ))
+  ].join('');
+
+  return `
+    <div class="field-inline">
+      <select data-trip-id="${tripId}" data-person-role="${roleName}" class="person-input">
+        ${optionsHtml}
+      </select>
+      <input
+        type="text"
+        data-trip-id="${tripId}"
+        data-person-other-role="${roleName}"
+        class="person-other-input"
+        placeholder="Enter ${roleName} person name"
+        value="${isSavedOther ? escapeHtml(savedValue) : ''}"
+        style="${selectedValue === 'Other' ? 'display:block;' : 'display:none;'}"
+      />
+    </div>
+  `;
+}
+
+function getPersonValueFromRow(tripId, roleName, fallbackValue = '') {
+  const select = document.querySelector(`[data-trip-id="${tripId}"][data-person-role="${roleName}"]`);
+  if (!select) return fallbackValue || '';
+  const selected = (select.value || '').trim();
+  if (!selected) return fallbackValue || '';
+  if (selected !== 'Other') return selected;
+  const otherInput = document.querySelector(`[data-trip-id="${tripId}"][data-person-other-role="${roleName}"]`);
+  const otherValue = otherInput ? otherInput.value.trim() : '';
+  return otherValue || fallbackValue || '';
+}
+
 async function putTrip(tripId, payload) {
   const response = await fetch(`/trip/${tripId}`, {
     method: 'PUT',
@@ -488,7 +782,8 @@ async function putTrip(tripId, payload) {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    throw new Error(error.error || 'Trip update failed');
+    const received = error.received ? ` | Received: ${JSON.stringify(error.received)}` : '';
+    throw new Error((error.error || 'Trip update failed') + received);
   }
 
   return response.json();
@@ -509,17 +804,23 @@ async function applyStatusChange(tripId, requestedStatus, extraFields = {}) {
   }
 
   if (!isValidStrictTransition(currentStatus, requestedStatus)) {
-    showMessage(`Invalid transition: ${currentStatus} -> ${requestedStatus}`, false);
-    return;
+    const isAdminRollback = isAdminRollbackAllowed(currentStatus, requestedStatus, role);
+    if (!isAdminRollback) {
+      showMessage(`Invalid transition: ${currentStatus} -> ${requestedStatus}`, false);
+      return;
+    }
   }
 
   if (requestedStatus === 'LOADING_IN_PROGRESS') {
+    const draft = getLoadingDraft(tripId);
     const pendingDetails = {
-      loading_point: extraFields.loading_point || existingTrip.loading_point,
-      labour_team: extraFields.labour_team || existingTrip.labour_team,
-      material_type: extraFields.material_type || existingTrip.material_type,
-      grade: extraFields.grade || existingTrip.grade,
-      eta: extraFields.eta || existingTrip.eta
+      material_type: extraFields.material_type || draft.material_type || existingTrip.material_type,
+      grade: extraFields.grade || draft.grade || existingTrip.grade,
+      condition: extraFields.condition || draft.condition || existingTrip.condition,
+      packing: extraFields.packing || draft.packing || existingTrip.packing,
+      loading_point: extraFields.loading_point || draft.loading_point || existingTrip.loading_point,
+      labour_team: extraFields.labour_team || draft.labour_team || existingTrip.labour_team,
+      eta: extraFields.eta || draft.eta || existingTrip.eta
     };
     const dispatchError = getDispatchValidationError(pendingDetails);
     if (dispatchError) {
@@ -666,10 +967,16 @@ async function saveTareWeight(tripId) {
     showMessage('Enter a valid tare weight', false);
     return;
   }
+  const operatorName = getPersonValueFromRow(tripId, 'Weighbridge', trip.weight_operator_name || '');
+  if (!operatorName) {
+    showMessage('Select weighbridge person name', false);
+    return;
+  }
 
   const payload = {
     ...getBaseTripPayload(trip),
-    tare_weight: tare
+    tare_weight: tare,
+    weight_operator_name: operatorName
   };
 
   try {
@@ -690,8 +997,13 @@ async function markTareDone(tripId) {
     showMessage('Tare weight is required before marking tare done', false);
     return;
   }
+  const operatorName = getPersonValueFromRow(tripId, 'Weighbridge', trip.weight_operator_name || '');
+  if (!operatorName) {
+    showMessage('Select weighbridge person name', false);
+    return;
+  }
 
-  const extraFields = {};
+  const extraFields = { weight_operator_name: operatorName, tare_done_by: operatorName };
   if (!trip.tare_weight) {
     extraFields.tare_weight = tare;
   }
@@ -722,12 +1034,18 @@ async function saveGrossWeight(tripId) {
     showMessage('Gross weight must be greater than tare weight', false);
     return;
   }
+  const operatorName = getPersonValueFromRow(tripId, 'Weighbridge', trip.weight_operator_name || '');
+  if (!operatorName) {
+    showMessage('Select weighbridge person name', false);
+    return;
+  }
 
   const net = computeNetWeight(tare, gross);
   const payload = {
     ...getBaseTripPayload(trip),
     gross_weight: gross,
-    net_weight: net
+    net_weight: net,
+    weight_operator_name: operatorName
   };
 
   try {
@@ -758,9 +1076,19 @@ async function markGrossDone(tripId) {
     showMessage('Gross weight must be greater than tare weight', false);
     return;
   }
+  const operatorName = getPersonValueFromRow(tripId, 'Weighbridge', trip.weight_operator_name || '');
+  if (!operatorName) {
+    showMessage('Select weighbridge person name', false);
+    return;
+  }
 
   const net = computeNetWeight(tare, gross);
-  const extraFields = { gross_weight: gross, net_weight: net };
+  const extraFields = {
+    gross_weight: gross,
+    net_weight: net,
+    weight_operator_name: operatorName,
+    gross_done_by: operatorName
+  };
   await applyStatusChange(tripId, 'GROSS_WEIGHT_DONE', extraFields);
 }
 
@@ -788,10 +1116,21 @@ function getDispatchDetailsView(trip) {
     'EXITED'
   ]);
   const items = [];
-  if (trip.loading_point) items.push(`Loading: ${escapeHtml(trip.loading_point)}`);
-  if (trip.labour_team) items.push(`Team: ${escapeHtml(trip.labour_team)}`);
   if (trip.material_type) items.push(`Material: ${escapeHtml(trip.material_type)}`);
   if (trip.grade) items.push(`Grade: ${escapeHtml(trip.grade)}`);
+  if (trip.condition) items.push(`Condition: ${escapeHtml(trip.condition)}`);
+  if (trip.packing) items.push(`Packing: ${escapeHtml(trip.packing)}`);
+  if (trip.loading_point) items.push(`Loading: ${escapeHtml(trip.loading_point)}`);
+  if (trip.labour_team) items.push(`Team: ${escapeHtml(trip.labour_team)}`);
+  if (trip.dispatch_manager_name) items.push(`Dispatch By: ${escapeHtml(trip.dispatch_manager_name)}`);
+  if (trip.loading_person_name) items.push(`Loading By: ${escapeHtml(trip.loading_person_name)}`);
+  if (trip.weight_operator_name) items.push(`Weighbridge By: ${escapeHtml(trip.weight_operator_name)}`);
+  if (trip.accounts_person_name) items.push(`Accounts By: ${escapeHtml(trip.accounts_person_name)}`);
+  if (trip.dispatch_done_by) items.push(`Dispatch Done By: ${escapeHtml(trip.dispatch_done_by)}`);
+  if (trip.tare_done_by) items.push(`Tare Done By: ${escapeHtml(trip.tare_done_by)}`);
+  if (trip.gross_done_by) items.push(`Gross Done By: ${escapeHtml(trip.gross_done_by)}`);
+  if (trip.loading_done_by) items.push(`Loading Done By: ${escapeHtml(trip.loading_done_by)}`);
+  if (trip.billing_done_by) items.push(`Billing Done By: ${escapeHtml(trip.billing_done_by)}`);
   if (trip.eta) items.push(`ETA: ${formatDateTime(trip.eta)}`);
   if (!items.length) {
     if (!showLoadingDetailsHintStatuses.has(status)) return '';
@@ -829,18 +1168,178 @@ function renderDispatchSelect(fieldName, tripId, savedValue) {
   `;
 }
 
+function toLocalDateTimeValue(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('sv-SE', { timeZone: IST_TIMEZONE }).slice(0, 16);
+}
+
+const ADMIN_EDITABLE_FIELDS = [
+  { key: 'truck_number', label: 'Truck No', type: 'text' },
+  { key: 'customer_name', label: 'Customer', type: 'text' },
+  { key: 'transporter', label: 'Transporter', type: 'text' },
+  { key: 'driver_name', label: 'Driver', type: 'text' },
+  { key: 'driver_phone', label: 'Driver Phone', type: 'text' },
+  { key: 'gate_person_name', label: 'Gate Person', type: 'text' },
+  { key: 'dispatch_manager_name', label: 'Dispatch Person', type: 'text' },
+  { key: 'loading_person_name', label: 'Loading Person', type: 'text' },
+  { key: 'weight_operator_name', label: 'Weighbridge Person', type: 'text' },
+  { key: 'accounts_person_name', label: 'Accounts Person', type: 'text' },
+  { key: 'dispatch_done_by', label: 'Dispatch Done By', type: 'text' },
+  { key: 'tare_done_by', label: 'Tare Done By', type: 'text' },
+  { key: 'gross_done_by', label: 'Gross Done By', type: 'text' },
+  { key: 'loading_done_by', label: 'Loading Done By', type: 'text' },
+  { key: 'billing_done_by', label: 'Billing Done By', type: 'text' },
+  { key: 'loading_point', label: 'Loading Point', type: 'text' },
+  { key: 'labour_team', label: 'Loading Team', type: 'text' },
+  { key: 'material_type', label: 'Material', type: 'text' },
+  { key: 'grade', label: 'Grade', type: 'text' },
+  { key: 'condition', label: 'Condition', type: 'text' },
+  { key: 'packing', label: 'Packing', type: 'text' },
+  { key: 'eta', label: 'ETA', type: 'datetime-local' },
+  { key: 'waiting_reason', label: 'Waiting Reason', type: 'text' },
+  { key: 'tare_weight', label: 'Tare', type: 'number' },
+  { key: 'gross_weight', label: 'Gross', type: 'number' },
+  { key: 'cancel_reason', label: 'Cancel Reason', type: 'text' }
+];
+
+const ADMIN_DROPDOWN_FIELDS = new Set([
+  'gate_person_name',
+  'dispatch_manager_name',
+  'loading_person_name',
+  'weight_operator_name',
+  'accounts_person_name',
+  'dispatch_done_by',
+  'tare_done_by',
+  'gross_done_by',
+  'loading_done_by',
+  'billing_done_by',
+  'loading_point',
+  'labour_team',
+  'material_type',
+  'grade',
+  'condition',
+  'packing'
+]);
+
+function getAdminDropdownOptions(fieldKey) {
+  if (fieldKey === 'gate_person_name') return PERSON_DROPDOWNS.Gate;
+  if (PERSON_FIELD_BY_ROLE.Dispatch === fieldKey) return PERSON_DROPDOWNS.Dispatch;
+  if (PERSON_FIELD_BY_ROLE.Loading === fieldKey) return PERSON_DROPDOWNS.Loading;
+  if (PERSON_FIELD_BY_ROLE.Weighbridge === fieldKey) return PERSON_DROPDOWNS.Weighbridge;
+  if (PERSON_FIELD_BY_ROLE.Accounts === fieldKey) return PERSON_DROPDOWNS.Accounts;
+  if (fieldKey === 'dispatch_done_by') return PERSON_DROPDOWNS.Dispatch;
+  if (fieldKey === 'tare_done_by') return PERSON_DROPDOWNS.Weighbridge;
+  if (fieldKey === 'gross_done_by') return PERSON_DROPDOWNS.Weighbridge;
+  if (fieldKey === 'loading_done_by') return PERSON_DROPDOWNS.Loading;
+  if (fieldKey === 'billing_done_by') return PERSON_DROPDOWNS.Accounts;
+  return DISPATCH_DROPDOWNS[fieldKey] || [];
+}
+
+function renderAdminFieldControl(field, trip) {
+  if (ADMIN_DROPDOWN_FIELDS.has(field.key)) {
+    const options = getAdminDropdownOptions(field.key);
+    const currentValue = trip[field.key] || '';
+    const isOtherValue = !!currentValue && !options.includes(currentValue);
+    const selectedValue = isOtherValue ? 'Other' : currentValue;
+    const optionsHtml = [
+      '<option value="">Select</option>',
+      ...options.map((option) => (
+        `<option value="${option}" ${selectedValue === option ? 'selected' : ''}>${option}</option>`
+      ))
+    ].join('');
+
+    return `
+      <div class="field-inline">
+        <select
+          class="admin-edit-input admin-edit-select"
+          data-trip-id="${trip.id}"
+          data-admin-field="${field.key}"
+          data-admin-select-field="${field.key}"
+        >
+          ${optionsHtml}
+        </select>
+        <input
+          type="text"
+          class="admin-edit-input"
+          data-trip-id="${trip.id}"
+          data-admin-other="${field.key}"
+          placeholder="Enter ${field.label}"
+          value="${isOtherValue ? escapeHtml(currentValue) : ''}"
+          style="${selectedValue === 'Other' ? 'display:block;' : 'display:none;'}"
+        />
+      </div>
+    `;
+  }
+
+  const rawValue = trip[field.key];
+  const value = field.type === 'datetime-local'
+    ? toLocalDateTimeValue(rawValue)
+    : (rawValue ?? '');
+  return `
+    <input
+      type="${field.type}"
+      step="${field.type === 'number' ? '0.01' : ''}"
+      class="admin-edit-input"
+      data-trip-id="${trip.id}"
+      data-admin-field="${field.key}"
+      value="${escapeHtml(value)}"
+    />
+  `;
+}
+
+function renderAdminManualEditor(trip) {
+  if (!hasRoleAccess(['Admin'])) return '';
+  const fieldsHtml = ADMIN_EDITABLE_FIELDS.map((field) => {
+    return `
+      <label>
+        ${field.label}
+        ${renderAdminFieldControl(field, trip)}
+      </label>
+    `;
+  }).join('');
+
+  return `
+    <div class="workflow-group admin-editor">
+      <div class="mini-muted"><strong>Admin Manual Data Editor</strong></div>
+      <div class="mini-muted"><strong>Net Weight:</strong> ${trip.net_weight ? `${escapeHtml(String(trip.net_weight))} kg` : '-'}</div>
+      <div class="admin-editor-grid">
+        ${fieldsHtml}
+      </div>
+      <div class="workflow-row">
+        <button class="workflow-btn primary" data-action="admin-save" data-trip-id="${trip.id}" type="button">
+          Save Manual Data
+        </button>
+      </div>
+    </div>
+  `;
+}
+
 function getDispatchEditor(trip) {
   if (!hasRoleAccess(['Loading', 'Admin'])) {
     return getDispatchDetailsView(trip);
   }
-  const etaValue = trip.eta ? new Date(trip.eta).toLocaleString('sv-SE', { timeZone: IST_TIMEZONE }).slice(0, 16) : '';
+  const draft = getLoadingDraft(trip.id);
+  const etaSource = draft.eta || trip.eta || null;
+  const etaValue = etaSource ? new Date(etaSource).toLocaleString('sv-SE', { timeZone: IST_TIMEZONE }).slice(0, 16) : '';
+  const materialValue = draft.material_type ?? trip.material_type ?? '';
+  const gradeValue = draft.grade ?? trip.grade ?? '';
+  const conditionValue = draft.condition ?? trip.condition ?? '';
+  const packingValue = draft.packing ?? trip.packing ?? '';
+  const loadingPointValue = draft.loading_point ?? trip.loading_point ?? '';
+  const loadingTeamValue = draft.labour_team ?? trip.labour_team ?? '';
+  const loadingPersonValue = draft.loading_person_name ?? trip.loading_person_name ?? '';
 
   return `
     <div class="dispatch-editor">
-      <label>Loading Point ${renderDispatchSelect('loading_point', trip.id, trip.loading_point || '')}</label>
-      <label>Loading Team ${renderDispatchSelect('labour_team', trip.id, trip.labour_team || '')}</label>
-      <label>Material ${renderDispatchSelect('material_type', trip.id, trip.material_type || '')}</label>
-      <label>Grade ${renderDispatchSelect('grade', trip.id, trip.grade || '')}</label>
+      <label>Material ${renderDispatchSelect('material_type', trip.id, materialValue)}</label>
+      <label>Grade ${renderDispatchSelect('grade', trip.id, gradeValue)}</label>
+      <label>Condition ${renderDispatchSelect('condition', trip.id, conditionValue)}</label>
+      <label>Packing ${renderDispatchSelect('packing', trip.id, packingValue)}</label>
+      <label>Loading Point ${renderDispatchSelect('loading_point', trip.id, loadingPointValue)}</label>
+      <label>Loading Team ${renderDispatchSelect('labour_team', trip.id, loadingTeamValue)}</label>
+      <label>Loading Person ${renderPersonSelect('Loading', trip.id, loadingPersonValue)}</label>
       <label>ETA
         <input type="datetime-local" data-trip-id="${trip.id}" data-dispatch-field="eta" class="dispatch-input" value="${etaValue}" />
       </label>
@@ -861,7 +1360,16 @@ function getAllowedManualTargets(trip) {
     }
     return isRoleAllowedForStatus(role, target);
   });
-  return filteredTargets;
+  if (role !== 'Admin') {
+    return filteredTargets;
+  }
+
+  const currentIndex = STATUS_FLOW.indexOf(status);
+  const previousTargets = currentIndex > 0
+    ? STATUS_FLOW.slice(0, currentIndex).reverse().filter((target) => target !== status)
+    : [];
+  const deduped = new Set([...filteredTargets, ...previousTargets]);
+  return Array.from(deduped);
 }
 
 function getWorkflowActions(trip) {
@@ -876,6 +1384,9 @@ function getWorkflowActions(trip) {
   if ((role === 'Weighbridge' || role === 'Admin') && status === 'SENT_FOR_TARE_WEIGHT') {
     actionBlocks.push(`
       <div class="workflow-group">
+        <label>Weighbridge Person
+          ${renderPersonSelect('Weighbridge', trip.id, trip.weight_operator_name || '')}
+        </label>
         <label>Tare Weight
           <input type="number" step="0.01" data-trip-id="${trip.id}" data-weight-field="tare_weight" value="${trip.tare_weight ?? ''}" class="weight-input" />
         </label>
@@ -890,6 +1401,9 @@ function getWorkflowActions(trip) {
   if ((role === 'Weighbridge' || role === 'Admin') && status === 'GROSS_WEIGHT_PENDING') {
     actionBlocks.push(`
       <div class="workflow-group">
+        <label>Weighbridge Person
+          ${renderPersonSelect('Weighbridge', trip.id, trip.weight_operator_name || '')}
+        </label>
         <label>Gross Weight
           <input type="number" step="0.01" data-trip-id="${trip.id}" data-weight-field="gross_weight" value="${trip.gross_weight ?? ''}" class="weight-input" />
         </label>
@@ -905,6 +1419,26 @@ function getWorkflowActions(trip) {
     actionBlocks.push(getDispatchEditor(trip));
   }
 
+  if (hasRoleAccess(['Dispatch', 'Admin']) && ['AT_DISPATCH', 'WAITING', 'READY_FOR_LOADING'].includes(status)) {
+    actionBlocks.push(`
+      <div class="workflow-group">
+        <label>Dispatch Person
+          ${renderPersonSelect('Dispatch', trip.id, trip.dispatch_manager_name || '')}
+        </label>
+      </div>
+    `);
+  }
+
+  if (hasRoleAccess(['Accounts', 'Admin']) && ['BILLING_PENDING', 'BILLING_COMPLETED'].includes(status)) {
+    actionBlocks.push(`
+      <div class="workflow-group">
+        <label>Accounts Person
+          ${renderPersonSelect('Accounts', trip.id, trip.accounts_person_name || '')}
+        </label>
+      </div>
+    `);
+  }
+
   const allowedTargets = getAllowedManualTargets(trip);
   if (allowedTargets.length) {
     const buttons = allowedTargets.map((target) => {
@@ -913,6 +1447,10 @@ function getWorkflowActions(trip) {
     }).join('');
 
     actionBlocks.push(`<div class="workflow-row">${buttons}</div>`);
+  }
+
+  if (role === 'Admin') {
+    actionBlocks.push(renderAdminManualEditor(trip));
   }
 
   if (!actionBlocks.length) {
@@ -940,17 +1478,11 @@ function renderTripsTable(trips) {
 
       return `
         <tr class="${delayClass}" data-trip-row="${trip.id}">
-          <td>${escapeHtml(trip.truck_number || '')}</td>
+          <td>${getTruckTimelineButton(trip)}</td>
           <td>${getStatusWithReasonDetails(trip)}</td>
+          <td>${getAssignedPersonCell(trip)}</td>
           <td>${escapeHtml(trip.customer_name || '')}</td>
-          <td>${escapeHtml(trip.transporter || '')}</td>
-          <td>${escapeHtml(trip.driver_name || '')}</td>
-          <td>${escapeHtml(trip.driver_phone || '')}</td>
-          <td>${escapeHtml(trip.gate_person_name || '')}</td>
-          <td>${getWeightsView(trip)}</td>
           <td>${formatDateTime(trip.in_time)}</td>
-          <td><span data-time-scope="main" data-time-kind="total" data-trip-id="${trip.id}">${formatMinutes(totalTime)}</span></td>
-          <td><span data-time-scope="main" data-time-kind="stage" data-trip-id="${trip.id}">${formatMinutes(stageTime)}</span></td>
           <td>${getWorkflowActions(trip)}</td>
         </tr>
       `;
@@ -977,19 +1509,15 @@ function renderTripsMobileList(trips) {
     return `
       <article class="mobile-trip-card ${delayClass}" data-trip-row="${trip.id}">
         <div class="mobile-trip-head">
-          <div class="mobile-trip-truck">${escapeHtml(trip.truck_number || '-')}</div>
+          <button class="truck-link-btn mobile" data-action="view-timeline" data-trip-id="${trip.id}" type="button">
+            ${escapeHtml(trip.truck_number || '-')}
+          </button>
           <div>${getStatusWithReasonDetails(trip)}</div>
         </div>
         <div class="mobile-trip-grid">
           <div><strong>Customer:</strong> ${escapeHtml(trip.customer_name || '-')}</div>
-          <div><strong>Transporter:</strong> ${escapeHtml(trip.transporter || '-')}</div>
-          <div><strong>Driver:</strong> ${escapeHtml(trip.driver_name || '-')}</div>
-          <div><strong>Phone:</strong> ${escapeHtml(trip.driver_phone || '-')}</div>
-          <div><strong>Gate:</strong> ${escapeHtml(trip.gate_person_name || '-')}</div>
-          <div><strong>Weights:</strong> ${escapeHtml(`${trip.tare_weight ?? '-'} / ${trip.gross_weight ?? '-'} / ${trip.net_weight ?? '-'}`)}</div>
-          <div><strong>Time In:</strong> ${formatDateTime(trip.in_time)}</div>
-          <div><strong>Total:</strong> <span data-time-scope="main" data-time-kind="total" data-trip-id="${trip.id}">${formatMinutes(totalTime)}</span></div>
-          <div><strong>Stage:</strong> <span data-time-scope="main" data-time-kind="stage" data-trip-id="${trip.id}">${formatMinutes(stageTime)}</span></div>
+          <div><strong>Assigned:</strong> ${escapeHtml(getAssignedPersonByStatus(trip).name || '-')}</div>
+          <div><strong>In Time:</strong> ${formatDateTime(trip.in_time)}</div>
         </div>
         <div class="mobile-trip-actions">
           ${getWorkflowActions(trip)}
@@ -1068,33 +1596,76 @@ async function handleStatusTargetClick(button) {
   const targetStatus = button.dataset.targetStatus;
   const trip = getTripById(tripId);
   if (!trip) return;
+  const extraFields = {};
 
   if (targetStatus === 'WAITING') {
+    const dispatchName = getPersonValueFromRow(tripId, 'Dispatch', trip.dispatch_manager_name || '');
+    if (!dispatchName) {
+      showMessage('Select dispatch person name', false);
+      return;
+    }
     const reason = window.prompt('Enter waiting reason:');
     if (!reason || !reason.trim()) {
       showMessage('Waiting reason is mandatory', false);
       return;
     }
-    await applyStatusChange(tripId, 'WAITING', { waiting_reason: reason.trim() });
-    return;
-  }
-
-  if (targetStatus === 'LOADING_IN_PROGRESS') {
-    const dispatchDetails = getMergedDispatchDetails(tripId);
-    const validationError = getDispatchValidationError(dispatchDetails);
-    if (validationError) {
-      showMessage(validationError, false);
-      return;
-    }
-    await applyStatusChange(tripId, 'LOADING_IN_PROGRESS', {
-      ...dispatchDetails,
-      dispatch_manager_name: trip.dispatch_manager_name || 'Loading Team',
-      waiting_reason: trip.waiting_reason || null
+    await applyStatusChange(tripId, 'WAITING', {
+      waiting_reason: reason.trim(),
+      dispatch_manager_name: dispatchName,
+      dispatch_done_by: dispatchName
     });
     return;
   }
 
-  await applyStatusChange(tripId, targetStatus);
+  if (targetStatus === 'LOADING_IN_PROGRESS') {
+    const draft = getLoadingDraft(tripId);
+    const loadingPersonName = getPersonValueFromRow(tripId, 'Loading', draft.loading_person_name || trip.loading_person_name || '');
+    if (!loadingPersonName) {
+      showMessage('Select loading person name', false);
+      return;
+    }
+    const dispatchDetails = getMergedDispatchDetails(tripId);
+    await applyStatusChange(tripId, 'LOADING_IN_PROGRESS', {
+      ...dispatchDetails,
+      loading_person_name: loadingPersonName,
+      loading_done_by: loadingPersonName,
+      waiting_reason: trip.waiting_reason || null
+    });
+    clearLoadingDraft(tripId);
+    return;
+  }
+
+  if (targetStatus === 'READY_FOR_LOADING') {
+    const dispatchName = getPersonValueFromRow(tripId, 'Dispatch', trip.dispatch_manager_name || '');
+    if (!dispatchName) {
+      showMessage('Select dispatch person name', false);
+      return;
+    }
+    extraFields.dispatch_manager_name = dispatchName;
+    extraFields.dispatch_done_by = dispatchName;
+  }
+
+  if (targetStatus === 'LOADING_COMPLETED') {
+    const loadingName = getPersonValueFromRow(tripId, 'Loading', trip.loading_person_name || '');
+    if (!loadingName) {
+      showMessage('Select loading person name', false);
+      return;
+    }
+    extraFields.loading_person_name = loadingName;
+    extraFields.loading_done_by = loadingName;
+  }
+
+  if (targetStatus === 'BILLING_COMPLETED' || targetStatus === 'COMPLETED') {
+    const accountsName = getPersonValueFromRow(tripId, 'Accounts', trip.accounts_person_name || '');
+    if (!accountsName) {
+      showMessage('Select accounts person name', false);
+      return;
+    }
+    extraFields.accounts_person_name = accountsName;
+    extraFields.billing_done_by = accountsName;
+  }
+
+  await applyStatusChange(tripId, targetStatus, extraFields);
 }
 
 function handleDispatchInputChange(selectEl) {
@@ -1115,6 +1686,37 @@ function handleDispatchInputChange(selectEl) {
   updateLoadingButtonState(tripId);
 }
 
+function persistDispatchDraft(inputEl) {
+  const tripId = inputEl.dataset.tripId;
+  if (!tripId) return;
+
+  const field = inputEl.dataset.dispatchField;
+  if (field) {
+    if (field === 'eta') {
+      setLoadingDraftField(tripId, 'eta', localInputToIstIso(inputEl.value.trim()));
+      return;
+    }
+    if (inputEl.tagName === 'SELECT') {
+      if (inputEl.value === 'Other') {
+        const otherInput = document.querySelector(`[data-trip-id="${tripId}"][data-dispatch-other="${field}"]`);
+        setLoadingDraftField(tripId, field, otherInput ? otherInput.value.trim() : '');
+      } else {
+        setLoadingDraftField(tripId, field, inputEl.value.trim());
+      }
+      return;
+    }
+    setLoadingDraftField(tripId, field, inputEl.value.trim());
+    return;
+  }
+
+  const otherField = inputEl.dataset.dispatchOther;
+  if (!otherField) return;
+  const select = document.querySelector(`[data-trip-id="${tripId}"][data-dispatch-field="${otherField}"]`);
+  if (select && select.value === 'Other') {
+    setLoadingDraftField(tripId, otherField, inputEl.value.trim());
+  }
+}
+
 function updateLoadingButtonState(tripId) {
   const button = document.querySelector(
     `[data-action="status-change"][data-target-status="LOADING_IN_PROGRESS"][data-trip-id="${tripId}"]`
@@ -1123,13 +1725,18 @@ function updateLoadingButtonState(tripId) {
 
   const details = getMergedDispatchDetails(tripId);
   const trip = getTripById(tripId);
-  const dispatchError = getDispatchValidationError(details);
+  const draft = getLoadingDraft(tripId);
+  const loadingPerson = getPersonValueFromRow(tripId, 'Loading', draft.loading_person_name || trip?.loading_person_name || '');
   const tare = Number(trip?.tare_weight);
   const hasTare = Number.isFinite(tare) && tare > 0;
-  button.disabled = !!dispatchError || !hasTare;
+  button.disabled = !hasTare || !loadingPerson;
 }
 
 function wireRowEvents() {
+  document.querySelectorAll('[data-action="view-timeline"]').forEach((button) => {
+    button.addEventListener('click', () => openTimelineModal(button.dataset.tripId));
+  });
+
   document.querySelectorAll('[data-action="status-change"]').forEach((button) => {
     button.addEventListener('click', () => handleStatusTargetClick(button));
   });
@@ -1156,15 +1763,153 @@ function wireRowEvents() {
 
   document.querySelectorAll('.dispatch-input[data-dispatch-field]').forEach((input) => {
     input.addEventListener('change', () => handleDispatchInputChange(input));
-    input.addEventListener('input', () => updateLoadingButtonState(input.dataset.tripId));
+    input.addEventListener('change', () => persistDispatchDraft(input));
+    input.addEventListener('input', () => {
+      persistDispatchDraft(input);
+      updateLoadingButtonState(input.dataset.tripId);
+    });
   });
 
   document.querySelectorAll('.dispatch-other-input').forEach((input) => {
-    input.addEventListener('input', () => updateLoadingButtonState(input.dataset.tripId));
+    input.addEventListener('input', () => {
+      persistDispatchDraft(input);
+      updateLoadingButtonState(input.dataset.tripId);
+    });
+  });
+
+  document.querySelectorAll('.person-input[data-person-role]').forEach((selectEl) => {
+    selectEl.addEventListener('change', () => {
+      const tripId = selectEl.dataset.tripId;
+      const roleName = selectEl.dataset.personRole;
+      const otherInput = document.querySelector(`[data-trip-id="${tripId}"][data-person-other-role="${roleName}"]`);
+      if (!otherInput) return;
+      if (selectEl.value === 'Other') {
+        otherInput.style.display = 'block';
+      } else {
+        otherInput.style.display = 'none';
+        otherInput.value = '';
+      }
+      if (roleName === 'Loading') {
+        setLoadingDraftField(tripId, 'loading_person_name', getPersonValueFromRow(tripId, 'Loading', ''));
+        updateLoadingButtonState(tripId);
+      }
+    });
+  });
+
+  document.querySelectorAll('.person-other-input').forEach((input) => {
+    input.addEventListener('input', () => {
+      const roleName = input.dataset.personOtherRole;
+      if (roleName === 'Loading') {
+        setLoadingDraftField(input.dataset.tripId, 'loading_person_name', getPersonValueFromRow(input.dataset.tripId, 'Loading', ''));
+        updateLoadingButtonState(input.dataset.tripId);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-admin-select-field]').forEach((selectEl) => {
+    selectEl.addEventListener('change', () => {
+      const tripId = selectEl.dataset.tripId;
+      const field = selectEl.dataset.adminSelectField;
+      const otherInput = document.querySelector(`[data-trip-id="${tripId}"][data-admin-other="${field}"]`);
+      if (!otherInput) return;
+      if (selectEl.value === 'Other') {
+        otherInput.style.display = 'block';
+      } else {
+        otherInput.style.display = 'none';
+        otherInput.value = '';
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-action="admin-save"]').forEach((button) => {
+    button.addEventListener('click', () => saveAdminManualData(button.dataset.tripId));
   });
 }
 
+function valuesEquivalentForAdmin(field, newValue, oldValue) {
+  if (field === 'eta') {
+    const a = newValue ? new Date(newValue).getTime() : null;
+    const b = oldValue ? new Date(oldValue).getTime() : null;
+    return a === b;
+  }
+  if (['tare_weight', 'gross_weight', 'net_weight'].includes(field)) {
+    const a = newValue === null ? null : Number(newValue);
+    const b = oldValue === null || oldValue === undefined || oldValue === '' ? null : Number(oldValue);
+    return (a === null && b === null) || (Number.isFinite(a) && Number.isFinite(b) && a === b);
+  }
+  return String(newValue ?? '') === String(oldValue ?? '');
+}
+
+function readAdminFieldValue(fieldKey, inputValue) {
+  if (ADMIN_DROPDOWN_FIELDS.has(fieldKey)) {
+    if (!inputValue || !inputValue.trim()) return null;
+    if (inputValue === 'Other') return null;
+    return inputValue.trim();
+  }
+  if (fieldKey === 'eta') {
+    return inputValue ? localInputToIstIso(inputValue) : null;
+  }
+  if (['tare_weight', 'gross_weight'].includes(fieldKey)) {
+    if (inputValue === '') return null;
+    const parsed = Number.parseFloat(inputValue);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return inputValue.trim() === '' ? null : inputValue.trim();
+}
+
+async function saveAdminManualData(tripId) {
+  if (!hasRoleAccess(['Admin'])) {
+    showMessage('Only Admin can edit manual data', false);
+    return;
+  }
+  const trip = getTripById(tripId);
+  if (!trip) {
+    showMessage('Trip not found', false);
+    return;
+  }
+
+  const payload = {};
+  ADMIN_EDITABLE_FIELDS.forEach((field) => {
+    const input = document.querySelector(`[data-trip-id="${tripId}"][data-admin-field="${field.key}"]`);
+    if (!input) return;
+    let nextValue = readAdminFieldValue(field.key, input.value);
+    if (ADMIN_DROPDOWN_FIELDS.has(field.key) && input.value === 'Other') {
+      const otherInput = document.querySelector(`[data-trip-id="${tripId}"][data-admin-other="${field.key}"]`);
+      nextValue = otherInput && otherInput.value.trim() ? otherInput.value.trim() : null;
+    }
+    if (!valuesEquivalentForAdmin(field.key, nextValue, trip[field.key])) {
+      payload[field.key] = nextValue;
+    }
+  });
+
+  if (!Object.keys(payload).length) {
+    showMessage('No manual changes detected');
+    return;
+  }
+
+  try {
+    await putTrip(tripId, payload);
+    showMessage('Manual data updated successfully');
+    await loadTrips();
+  } catch (error) {
+    showMessage(error.message, false);
+    console.error(error);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  document.querySelector('[data-action="close-timeline"]')?.addEventListener('click', closeTimelineModal);
+  timelineModal?.addEventListener('click', (event) => {
+    if (event.target === timelineModal) {
+      closeTimelineModal();
+    }
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      closeTimelineModal();
+    }
+  });
+
   document.querySelectorAll('.role-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       showPINEntry(btn.getAttribute('data-role'));

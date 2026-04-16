@@ -26,8 +26,17 @@ async function initDb() {
       gate_person_name TEXT,
       dispatch_manager_name TEXT,
       weight_operator_name TEXT,
+      loading_person_name TEXT,
+      accounts_person_name TEXT,
+      dispatch_done_by TEXT,
+      tare_done_by TEXT,
+      gross_done_by TEXT,
+      loading_done_by TEXT,
+      billing_done_by TEXT,
       material_type TEXT,
       grade TEXT,
+      condition TEXT,
+      packing TEXT,
       loading_point TEXT,
       labour_team TEXT,
       eta TIMESTAMPTZ,
@@ -42,6 +51,7 @@ async function initDb() {
       in_time TIMESTAMPTZ,
       out_time TIMESTAMPTZ,
       last_status_update_time TIMESTAMPTZ,
+      status_history JSONB DEFAULT '[]'::jsonb,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
@@ -54,7 +64,22 @@ async function initDb() {
     ADD COLUMN IF NOT EXISTS eta TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS waiting_reason TEXT,
     ADD COLUMN IF NOT EXISTS last_status_update_time TIMESTAMPTZ,
-    ADD COLUMN IF NOT EXISTS final_status TEXT
+    ADD COLUMN IF NOT EXISTS final_status TEXT,
+    ADD COLUMN IF NOT EXISTS status_history JSONB DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS loading_person_name TEXT,
+    ADD COLUMN IF NOT EXISTS accounts_person_name TEXT,
+    ADD COLUMN IF NOT EXISTS dispatch_done_by TEXT,
+    ADD COLUMN IF NOT EXISTS tare_done_by TEXT,
+    ADD COLUMN IF NOT EXISTS gross_done_by TEXT,
+    ADD COLUMN IF NOT EXISTS loading_done_by TEXT,
+    ADD COLUMN IF NOT EXISTS billing_done_by TEXT,
+    ADD COLUMN IF NOT EXISTS condition TEXT,
+    ADD COLUMN IF NOT EXISTS packing TEXT
+  `);
+  await pool.query(`
+    UPDATE trips
+    SET status_history = '[]'::jsonb
+    WHERE status_history IS NULL
   `);
   await pool.query(`
     ALTER TABLE trips

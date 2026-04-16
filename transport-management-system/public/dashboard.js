@@ -1,6 +1,9 @@
 // Role-based access control with PIN authentication
 let userRole = null;
 let refreshInterval;
+const timelineModal = document.getElementById('timeline-modal');
+const timelineModalTitle = document.getElementById('timeline-modal-title');
+const timelineModalBody = document.getElementById('timeline-modal-body');
 const IST_TIMEZONE = 'Asia/Kolkata';
 const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Admin'];
 const BILLING_VISIBLE_STATUSES = ['BILLING_PENDING', 'BILLING_COMPLETED', 'COMPLETED', 'EXITED'];
@@ -20,6 +23,13 @@ const WEIGHBRIDGE_ZONE_STATUSES = [
   'GROSS_WEIGHT_DONE'
 ];
 const ACCOUNTS_ZONE_STATUSES = ['BILLING_PENDING', 'BILLING_COMPLETED'];
+const STATUS_ASSIGNEE_RULES = [
+  { statuses: ['AT_DISPATCH', 'WAITING', 'READY_FOR_LOADING'], roleLabel: 'Dispatch', field: 'dispatch_done_by' },
+  { statuses: ['SENT_FOR_TARE_WEIGHT', 'TARE_WEIGHT_DONE'], roleLabel: 'Weighbridge (Tare)', field: 'tare_done_by' },
+  { statuses: ['LOADING_IN_PROGRESS', 'LOADING_COMPLETED'], roleLabel: 'Loading', field: 'loading_done_by' },
+  { statuses: ['GROSS_WEIGHT_PENDING', 'GROSS_WEIGHT_DONE'], roleLabel: 'Weighbridge (Gross)', field: 'gross_done_by' },
+  { statuses: ['BILLING_PENDING', 'BILLING_COMPLETED', 'COMPLETED'], roleLabel: 'Accounts', field: 'billing_done_by' }
+];
 const istDatePartsFormatter = new Intl.DateTimeFormat('en-CA', {
   timeZone: IST_TIMEZONE,
   year: 'numeric',
@@ -184,35 +194,44 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function getAssignedPersonByStatus(trip) {
+  const match = STATUS_ASSIGNEE_RULES.find((rule) => rule.statuses.includes(trip?.status));
+  if (!match) return { roleLabel: '-', name: '' };
+  return { roleLabel: match.roleLabel, name: trip?.[match.field] || '' };
+}
+
+function getAssignedPersonCell(trip) {
+  const assigned = getAssignedPersonByStatus(trip);
+  if (!assigned.name) return `<div class="mini-muted">${escapeHtml(assigned.roleLabel)}: -</div>`;
+  return `<div class="mini-muted">${escapeHtml(assigned.roleLabel)}: ${escapeHtml(assigned.name)}</div>`;
+}
+
 function getStatusWithCancelReason(trip) {
   const exitedOutcome = getExitedOutcome(trip);
   const displayStatus = trip.status === 'EXITED'
     ? (exitedOutcome === 'CANCELLED' ? 'CANCELLED / EXITED' : 'COMPLETED / EXITED')
     : trip.status;
   const statusBadge = getStatusBadge(trip.status, displayStatus);
-  if ((trip.status !== 'CANCELLED' && !(trip.status === 'EXITED' && exitedOutcome === 'CANCELLED')) || !trip.cancel_reason) {
-    return statusBadge;
+  const parts = [statusBadge];
+  if (trip.status === 'WAITING' && trip.waiting_reason) {
+    parts.push(`<div class="reason-chip">Waiting: ${escapeHtml(trip.waiting_reason)}</div>`);
   }
-
-  const fullReason = escapeHtml(trip.cancel_reason.trim());
+  if ((trip.status === 'CANCELLED' || (trip.status === 'EXITED' && exitedOutcome === 'CANCELLED')) && trip.cancel_reason) {
+    const fullReason = escapeHtml(trip.cancel_reason.trim());
+    parts.push(`<div class="cancel-reason-text" title="${fullReason}">${fullReason}</div>`);
+  }
   return `
     <div class="status-cell">
-      ${statusBadge}
-      <div class="cancel-reason-text" title="${fullReason}">${fullReason}</div>
+      ${parts.join('')}
     </div>
   `;
 }
 
-function createSummaryCard(title, count, colorClass, truckNumbers = [], showTruckList = true) {
-  const trucksText = truckNumbers.length ? truckNumbers.join(', ') : '-';
-  const trucksHtml = showTruckList
-    ? `<div class="card-trucks" title="${escapeHtml(trucksText)}">Trucks: ${escapeHtml(trucksText)}</div>`
-    : '';
+function createSummaryCard(title, count, colorClass) {
   return `
     <div class="summary-card ${colorClass}">
       <div class="card-number">${count}</div>
       <div class="card-title">${title}</div>
-      ${trucksHtml}
     </div>
   `;
 }
@@ -252,6 +271,13 @@ function updateSummaryCards(trips) {
     : trips;
   const nowIst = getIstDateParts(new Date());
   const inPlantTrips = visibleTrips.filter((trip) => trip.status !== 'EXITED');
+  const completedToday = visibleTrips.filter((trip) => {
+    if (!(trip.status === 'EXITED' && getExitedOutcome(trip) === 'COMPLETED')) return false;
+    const completedDate = parseTripDate(trip.out_time || trip.in_time);
+    if (!completedDate) return false;
+    const completedIst = getIstDateParts(completedDate);
+    return completedIst.year === nowIst.year && completedIst.month === nowIst.month && completedIst.day === nowIst.day;
+  }).length;
   const completedMonth = visibleTrips.filter((trip) => {
     if (!(trip.status === 'EXITED' && getExitedOutcome(trip) === 'COMPLETED')) return false;
     const tripDate = parseTripDate(trip.in_time);
@@ -259,6 +285,14 @@ function updateSummaryCards(trips) {
     const tripIst = getIstDateParts(tripDate);
     return tripIst.year === nowIst.year && tripIst.month === nowIst.month;
   }).length;
+  const quantityTodayKg = visibleTrips.reduce((total, trip) => {
+    if (!(trip.status === 'EXITED' && getExitedOutcome(trip) === 'COMPLETED')) return total;
+    const completedDate = parseTripDate(trip.out_time || trip.in_time);
+    if (!completedDate) return total;
+    const completedIst = getIstDateParts(completedDate);
+    if (completedIst.year !== nowIst.year || completedIst.month !== nowIst.month || completedIst.day !== nowIst.day) return total;
+    return total + parseWeight(trip.net_weight);
+  }, 0);
   const completedYear = visibleTrips.filter((trip) => {
     if (!(trip.status === 'EXITED' && getExitedOutcome(trip) === 'COMPLETED')) return false;
     const tripDate = parseTripDate(trip.in_time);
@@ -316,8 +350,10 @@ function updateSummaryCards(trips) {
   const over24TruckNumbers = getTruckNumbers(over24HourTrips);
 
   const cardsHtml = `
+    ${createSummaryCard('Completed (Today)', completedToday, 'card-green')}
     ${createSummaryCard('Completed (Month)', completedMonth, 'card-green', [], false)}
     ${createSummaryCard('Completed (Year)', completedYear, 'card-green', [], false)}
+    ${createSummaryCard('Quantity (Today)', formatTons(quantityTodayKg), 'card-light-blue')}
     ${createSummaryCard('Quantity (Month)', formatTons(quantityMonthKg), 'card-light-blue', [], false)}
     ${createSummaryCard('Quantity (Year)', formatTons(quantityYearKg), 'card-purple', [], false)}
     ${createSummaryCard('Cancelled (Exited)', cancelledExited, 'card-red', [], false)}
@@ -338,11 +374,15 @@ let reportTrips = []; // finalized trips for reports
 let filteredReportTrips = [];
 
 function isCancelledTrip(trip) {
-  return trip?.status === 'CANCELLED' || trip?.final_status === 'CANCELLED' || getExitedOutcome(trip) === 'CANCELLED';
+  if (!trip) return false;
+  if (trip.status === 'EXITED') return getExitedOutcome(trip) === 'CANCELLED';
+  return trip.status === 'CANCELLED';
 }
 
 function isCompletedTrip(trip) {
-  return trip?.status === 'COMPLETED' || trip?.final_status === 'COMPLETED' || getExitedOutcome(trip) === 'COMPLETED';
+  if (!trip) return false;
+  if (trip.status === 'EXITED') return getExitedOutcome(trip) === 'COMPLETED';
+  return trip.status === 'COMPLETED';
 }
 
 function getExitedOutcome(trip) {
@@ -405,6 +445,192 @@ function formatMinutes(totalMinutes) {
   return `${hours}h ${minutes}m`;
 }
 
+function parseStatusHistory(trip) {
+  if (!trip || trip.status_history == null) return [];
+  if (Array.isArray(trip.status_history)) return trip.status_history;
+  if (typeof trip.status_history === 'string') {
+    try {
+      const parsed = JSON.parse(trip.status_history);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      return [];
+    }
+  }
+  return [];
+}
+
+function formatTimeOnly(value) {
+  if (!value) return '-';
+  const rawDate = new Date(value);
+  if (Number.isNaN(rawDate.getTime())) return '-';
+  return rawDate.toLocaleTimeString('en-IN', {
+    timeZone: IST_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  });
+}
+
+function getStatusDurationMinutes(entry) {
+  const entryTime = parseTripDate(entry?.entry_time);
+  if (!entryTime) return null;
+  const exitTime = parseTripDate(entry?.exit_time) || new Date();
+  const diffMs = exitTime.getTime() - entryTime.getTime();
+  if (diffMs <= 0) return 0;
+  return Math.floor(diffMs / (1000 * 60));
+}
+
+function statusToLabel(status) {
+  return String(status || '').replaceAll('_', ' ');
+}
+
+function getStageDurationSummary(trip) {
+  const history = parseStatusHistory(trip);
+  const totals = new Map();
+  history.forEach((entry) => {
+    const status = statusToLabel(entry?.status || '');
+    const minutes = getStatusDurationMinutes(entry);
+    if (!status || minutes === null || Number.isNaN(minutes)) return;
+    totals.set(status, (totals.get(status) || 0) + minutes);
+  });
+  return Array.from(totals.entries()).map(([status, minutes]) => ({ status, minutes }));
+}
+
+function renderStageSummary(trip) {
+  const summary = getStageDurationSummary(trip);
+  if (!summary.length) return '<div class="mini-muted">No stage timing available</div>';
+  const chips = summary.map((item) => (
+    `<span class="timeline-summary-chip"><strong>${escapeHtml(item.status)}:</strong> ${formatMinutes(item.minutes)}</span>`
+  )).join('');
+  return `
+    <div class="timeline-stage-summary">
+      <h4>Stage Time Summary</h4>
+      <div class="timeline-summary-grid">${chips}</div>
+    </div>
+  `;
+}
+
+function statusDetailLabel(key) {
+  const labels = {
+    waiting_reason: 'Waiting',
+    cancel_reason: 'Cancel',
+    loading_point: 'Loading Point',
+    labour_team: 'Team',
+    material_type: 'Material',
+    grade: 'Grade',
+    condition: 'Condition',
+    packing: 'Packing',
+    eta: 'ETA',
+    tare_weight: 'Tare',
+    gross_weight: 'Gross',
+    net_weight: 'Net',
+    dispatch_manager_name: 'Dispatch By',
+    loading_person_name: 'Loading By',
+    weight_operator_name: 'Weighbridge By',
+    accounts_person_name: 'Accounts By',
+    dispatch_done_by: 'Dispatch Done By',
+    tare_done_by: 'Tare Done By',
+    gross_done_by: 'Gross Done By',
+    loading_done_by: 'Loading Done By',
+    billing_done_by: 'Billing Done By',
+    final_status: 'Final'
+  };
+  return labels[key] || key.replaceAll('_', ' ');
+}
+
+function formatStatusDetailValue(key, value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (key === 'eta') return formatDateTime(value);
+  if (['tare_weight', 'gross_weight', 'net_weight'].includes(key)) return `${value} kg`;
+  return String(value);
+}
+
+function renderStatusDetails(entry) {
+  const details = entry?.details && typeof entry.details === 'object' ? entry.details : null;
+  if (!details) return '';
+  const detailEntries = Object.entries(details)
+    .map(([key, value]) => {
+      const formatted = formatStatusDetailValue(key, value);
+      if (!formatted) return '';
+      return `<span class="timeline-detail-chip"><strong>${escapeHtml(statusDetailLabel(key))}:</strong> ${escapeHtml(formatted)}</span>`;
+    })
+    .filter(Boolean);
+  if (!detailEntries.length) return '';
+  return `<div class="timeline-item-details">${detailEntries.join('')}</div>`;
+}
+
+function renderStatusTimeline(trip) {
+  const history = parseStatusHistory(trip);
+  if (!history.length) {
+    return '<div class="mini-muted">No status history available</div>';
+  }
+  return history.map((entry) => {
+    const isCurrent = !entry.exit_time;
+    return `
+      <article class="timeline-item ${isCurrent ? 'timeline-item-current' : ''}">
+        <div class="timeline-item-status">${escapeHtml(statusToLabel(entry.status))}</div>
+        <div class="timeline-item-times">
+          <span>${formatTimeOnly(entry.entry_time)} → ${entry.exit_time ? formatTimeOnly(entry.exit_time) : 'Now'}</span>
+          <span>${formatMinutes(getStatusDurationMinutes(entry))}</span>
+        </div>
+        ${renderStatusDetails(entry)}
+      </article>
+    `;
+  }).join('');
+}
+
+function openTimelineModal(tripId) {
+  const trip = allTrips.find((item) => String(item.id) === String(tripId));
+  if (!trip || !timelineModal || !timelineModalTitle || !timelineModalBody) return;
+  timelineModalTitle.textContent = `Status Timeline - ${trip.truck_number || 'Truck'}`;
+  timelineModalBody.innerHTML = `
+    <div class="timeline-meta">
+      <div><strong>Current:</strong> ${escapeHtml(statusToLabel(trip.status || '-'))}</div>
+      <div><strong>In Time:</strong> ${formatDateTime(trip.in_time)}</div>
+      <div><strong>Transporter:</strong> ${escapeHtml(trip.transporter || '-')}</div>
+      <div><strong>Driver:</strong> ${escapeHtml(trip.driver_name || '-')}</div>
+      <div><strong>Driver Phone:</strong> ${escapeHtml(trip.driver_phone || '-')}</div>
+      <div><strong>Gate Person:</strong> ${escapeHtml(trip.gate_person_name || '-')}</div>
+      <div><strong>Dispatch:</strong> ${escapeHtml(trip.dispatch_manager_name || '-')}</div>
+      <div><strong>Loading:</strong> ${escapeHtml(trip.loading_person_name || '-')}</div>
+      <div><strong>Weighbridge:</strong> ${escapeHtml(trip.weight_operator_name || '-')}</div>
+      <div><strong>Accounts:</strong> ${escapeHtml(trip.accounts_person_name || '-')}</div>
+      <div><strong>Dispatch Done By:</strong> ${escapeHtml(trip.dispatch_done_by || '-')}</div>
+      <div><strong>Tare Done By:</strong> ${escapeHtml(trip.tare_done_by || '-')}</div>
+      <div><strong>Gross Done By:</strong> ${escapeHtml(trip.gross_done_by || '-')}</div>
+      <div><strong>Loading Done By:</strong> ${escapeHtml(trip.loading_done_by || '-')}</div>
+      <div><strong>Billing Done By:</strong> ${escapeHtml(trip.billing_done_by || '-')}</div>
+    </div>
+    ${renderStageSummary(trip)}
+    <div class="timeline-list">
+      ${renderStatusTimeline(trip)}
+    </div>
+  `;
+  timelineModal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeTimelineModal() {
+  if (!timelineModal) return;
+  timelineModal.style.display = 'none';
+  document.body.style.overflow = 'auto';
+}
+
+function wireTruckTimelineEvents() {
+  document.querySelectorAll('[data-action="view-timeline"]').forEach((button) => {
+    button.addEventListener('click', () => openTimelineModal(button.dataset.tripId));
+  });
+}
+
+function getTruckDetailLink(trip) {
+  const label = escapeHtml(trip?.truck_number || '-');
+  return `
+    <button type="button" class="truck-link-btn" data-action="view-timeline" data-trip-id="${trip?.id}">
+      ${label}
+    </button>
+  `;
+}
+
 function updateActiveTripsTable(trips) {
   const sourceTrips = getCurrentRole() === 'Accounts'
     ? trips.filter((trip) => BILLING_VISIBLE_STATUSES.includes(trip.status))
@@ -429,8 +655,9 @@ function updateActiveTripsTable(trips) {
 
     return `
       <tr class="${delayClass}" data-active-trip-row="${trip.id}">
-        <td>${trip.truck_number || ''}</td>
+        <td>${getTruckDetailLink(trip)}</td>
         <td>${getStatusWithCancelReason(trip)}</td>
+        <td>${getAssignedPersonCell(trip)}</td>
         <td>${trip.customer_name || ''}</td>
         <td>${trip.net_weight ? trip.net_weight + ' kg' : ''}</td>
         <td>${formatDateTime(trip.in_time)}</td>
@@ -450,11 +677,12 @@ function updateActiveTripsTable(trips) {
       return `
         <article class="mobile-trip-card ${delayClass}" data-active-trip-row="${trip.id}">
           <div class="mobile-trip-head">
-            <div class="mobile-trip-truck">${escapeHtml(trip.truck_number || '-')}</div>
+            <div class="mobile-trip-truck">${getTruckDetailLink(trip)}</div>
             <div>${getStatusWithCancelReason(trip)}</div>
           </div>
           <div class="mobile-trip-grid">
             <div><strong>Customer:</strong> ${escapeHtml(trip.customer_name || '-')}</div>
+            <div><strong>Assigned:</strong> ${escapeHtml(getAssignedPersonByStatus(trip).name || '-')}</div>
             <div><strong>Net:</strong> ${trip.net_weight ? `${trip.net_weight} kg` : '-'}</div>
             <div><strong>Time In:</strong> ${formatDateTime(trip.in_time)}</div>
             <div><strong>Total:</strong> <span data-time-scope="active" data-time-kind="total" data-trip-id="${trip.id}">${formatMinutes(totalTime)}</span></div>
@@ -464,6 +692,8 @@ function updateActiveTripsTable(trips) {
       `;
     }).join('');
   }
+
+  wireTruckTimelineEvents();
 }
 
 function getFinalizedTotalMinutes(trip) {
@@ -496,7 +726,7 @@ function renderReportTable(trips) {
       : (isCancelledTrip(trip) ? 'CANCELLED' : 'COMPLETED');
     return `
       <tr>
-        <td>${trip.truck_number || ''}</td>
+        <td>${getTruckDetailLink(trip)}</td>
         <td>${trip.customer_name || ''}</td>
         <td>${statusLabel}</td>
         <td>${trip.net_weight ? `${trip.net_weight} kg` : ''}</td>
@@ -519,7 +749,7 @@ function renderReportTable(trips) {
       return `
         <article class="mobile-trip-card">
           <div class="mobile-trip-head">
-            <div class="mobile-trip-truck">${escapeHtml(trip.truck_number || '-')}</div>
+            <div class="mobile-trip-truck">${getTruckDetailLink(trip)}</div>
             <div>${getStatusBadge(trip.status, statusLabel)}</div>
           </div>
           <div class="mobile-trip-grid">
@@ -536,6 +766,7 @@ function renderReportTable(trips) {
   }
 
   updateReportRecordCount();
+  wireTruckTimelineEvents();
 }
 
 function applyReportFilters() {
@@ -578,12 +809,41 @@ function csvEscape(value) {
 
 function exportReportCsv() {
   const headers = [
+    'ID',
+    'Sequence Number',
     'Truck Number',
     'Customer',
-    'Status',
+    'Transporter',
+    'Driver Name',
+    'Driver Phone',
+    'Gate Person',
+    'Dispatch Manager',
+    'Loading Person',
+    'Weight Operator',
+    'Accounts Person',
+    'Dispatch Done By',
+    'Tare Done By',
+    'Gross Done By',
+    'Loading Done By',
+    'Billing Done By',
+    'Status (Display)',
+    'Status (Raw)',
+    'Final Status',
+    'Is Cancelled',
+    'Material Type',
+    'Grade',
+    'Condition',
+    'Packing',
+    'Loading Point',
+    'Labour Team',
+    'ETA',
+    'Waiting Reason',
+    'Tare Weight',
+    'Gross Weight',
     'Net Weight',
     'In Time',
     'Out Time',
+    'Last Status Update',
     'Total Time',
     'Cancel Reason'
   ];
@@ -595,12 +855,41 @@ function exportReportCsv() {
       : (isCancelledTrip(trip) ? 'CANCELLED' : 'COMPLETED');
     const totalTime = formatMinutes(getFinalizedTotalMinutes(trip));
     const row = [
+      trip.id || '',
+      trip.sequence_number || '',
       trip.truck_number || '',
       trip.customer_name || '',
+      trip.transporter || '',
+      trip.driver_name || '',
+      trip.driver_phone || '',
+      trip.gate_person_name || '',
+      trip.dispatch_manager_name || '',
+      trip.loading_person_name || '',
+      trip.weight_operator_name || '',
+      trip.accounts_person_name || '',
+      trip.dispatch_done_by || '',
+      trip.tare_done_by || '',
+      trip.gross_done_by || '',
+      trip.loading_done_by || '',
+      trip.billing_done_by || '',
       status,
+      trip.status || '',
+      trip.final_status || '',
+      trip.is_cancelled ? 'true' : 'false',
+      trip.material_type || '',
+      trip.grade || '',
+      trip.condition || '',
+      trip.packing || '',
+      trip.loading_point || '',
+      trip.labour_team || '',
+      formatDateTime(trip.eta),
+      trip.waiting_reason || '',
+      trip.tare_weight || '',
+      trip.gross_weight || '',
       trip.net_weight || '',
       formatDateTime(trip.in_time),
       formatDateTime(trip.out_time),
+      formatDateTime(trip.last_status_update_time),
       totalTime,
       (isCancelledTrip(trip)) ? (trip.cancel_reason || '') : ''
     ];
@@ -684,6 +973,14 @@ function stopAutoRefresh() {
 
 // Start the dashboard when page loads
 document.addEventListener('DOMContentLoaded', () => {
+  document.querySelector('[data-action="close-timeline"]')?.addEventListener('click', closeTimelineModal);
+  timelineModal?.addEventListener('click', (event) => {
+    if (event.target === timelineModal) closeTimelineModal();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeTimelineModal();
+  });
+
   startAutoRefresh();
   loadReportData();
 

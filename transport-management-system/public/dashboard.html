@@ -59,6 +59,7 @@
           <tr>
             <th>Truck Number</th>
             <th>Status</th>
+            <th>Assigned Person</th>
             <th>Customer</th>
             <th>Net Weight</th>
             <th>Time In</th>
@@ -117,6 +118,16 @@
     <div id="report-mobile-list" class="mobile-trip-list mobile-only"></div>
   </section>
 
-  <script src="dashboard.js"></script>
+  <div id="timeline-modal" class="timeline-modal" style="display: none;">
+    <div class="timeline-modal-content">
+      <div class="timeline-modal-header">
+        <h3 id="timeline-modal-title">Status Timeline</h3>
+        <button type="button" class="timeline-close-btn" data-action="close-timeline">Close</button>
+      </div>
+      <div id="timeline-modal-body"></div>
+    </div>
+  </div>
+
+  <script src="dashboard.js?v=20260416-2"></script>
 </body>
 </html>

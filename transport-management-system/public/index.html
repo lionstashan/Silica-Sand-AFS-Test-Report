@@ -55,9 +55,21 @@
         <label>Customer Name
           <select name="customer_name_select" id="customer-select" required>
             <option value="">Select Customer</option>
-            <option value="ABC Cement">ABC Cement</option>
-            <option value="UltraTech">UltraTech</option>
-            <option value="JK Cement">JK Cement</option>
+            <option value="Bhagwat Minerals">Bhagwat Minerals</option>
+            <option value="Kamdhenu Minerals*">Kamdhenu Minerals*</option>
+            <option value="Ganesh Minerals*">Ganesh Minerals*</option>
+            <option value="JMD*">JMD*</option>
+            <option value="Jaipur Silica Sand Pvt Ltd">Jaipur Silica Sand Pvt Ltd</option>
+            <option value="Dashmesh Minerals Pvt Ltd">Dashmesh Minerals Pvt Ltd</option>
+            <option value="Silica Sand India Pvt Ltd">Silica Sand India Pvt Ltd</option>
+            <option value="Meenakshi Minerals">Meenakshi Minerals</option>
+            <option value="R.R. Minerals">R.R. Minerals</option>
+            <option value="Ojaswi Mines and Minerals">Ojaswi Mines and Minerals</option>
+            <option value="SKM">SKM</option>
+            <option value="RP Mines">RP Mines</option>
+            <option value="Vishwakarma Minerals">Vishwakarma Minerals</option>
+            <option value="Harsidhi Harbel">Harsidhi Harbel</option>
+            <option value="Tejaswi Minerals">Tejaswi Minerals</option>
             <option value="other">Other</option>
           </select>
           <input type="text" name="customer_name" id="customer-other" placeholder="Enter customer name" style="display: none;" />
@@ -84,8 +96,9 @@
         <label>Gate Person Name
           <select name="gate_person_select" id="gate-person-select" required>
             <option value="">Select Gate Person</option>
-            <option value="Sohan">Sohan</option>
-            <option value="Ramesh">Ramesh</option>
+            <option value="X">X</option>
+            <option value="Y">Y</option>
+            <option value="Z">Z</option>
             <option value="other">Other</option>
           </select>
           <input type="text" name="gate_person_name" id="gate-person-other" placeholder="Enter gate person name" style="display: none;" />
@@ -120,15 +133,9 @@
           <tr>
             <th>Truck Number</th>
             <th>Status</th>
+            <th>Assigned Person</th>
             <th>Customer</th>
-            <th>Transporter</th>
-            <th>Driver</th>
-            <th>Driver Phone</th>
-            <th>Gate Person</th>
-            <th>Weights</th>
-            <th>Time In</th>
-            <th>Total Time</th>
-            <th>Stage Time</th>
+            <th>In Time</th>
             <th>Workflow / Actions</th>
           </tr>
         </thead>
@@ -138,6 +145,16 @@
     <div id="trips-mobile-list" class="mobile-trip-list mobile-only"></div>
   </section>
 
-  <script src="app.js"></script>
+  <div id="timeline-modal" class="timeline-modal" style="display: none;">
+    <div class="timeline-modal-content">
+      <div class="timeline-modal-header">
+        <h3 id="timeline-modal-title">Status Timeline</h3>
+        <button type="button" class="timeline-close-btn" data-action="close-timeline">Close</button>
+      </div>
+      <div id="timeline-modal-body"></div>
+    </div>
+  </div>
+
+  <script src="app.js?v=20260416-6"></script>
 </body>
 </html>
