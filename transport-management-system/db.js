@@ -41,9 +41,11 @@ async function initDb() {
       labour_team TEXT,
       eta TIMESTAMPTZ,
       waiting_reason TEXT,
+      load_fix_reason TEXT,
       tare_weight NUMERIC,
       gross_weight NUMERIC,
       net_weight NUMERIC,
+      gross_weight_attempts JSONB DEFAULT '[]'::jsonb,
       status TEXT,
       final_status TEXT,
       is_cancelled BOOLEAN DEFAULT false,
@@ -63,9 +65,11 @@ async function initDb() {
     ADD COLUMN IF NOT EXISTS labour_team TEXT,
     ADD COLUMN IF NOT EXISTS eta TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS waiting_reason TEXT,
+    ADD COLUMN IF NOT EXISTS load_fix_reason TEXT,
     ADD COLUMN IF NOT EXISTS last_status_update_time TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS final_status TEXT,
     ADD COLUMN IF NOT EXISTS status_history JSONB DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS gross_weight_attempts JSONB DEFAULT '[]'::jsonb,
     ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
     ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW(),
     ADD COLUMN IF NOT EXISTS loading_person_name TEXT,
@@ -82,6 +86,11 @@ async function initDb() {
     UPDATE trips
     SET status_history = '[]'::jsonb
     WHERE status_history IS NULL
+  `);
+  await pool.query(`
+    UPDATE trips
+    SET gross_weight_attempts = '[]'::jsonb
+    WHERE gross_weight_attempts IS NULL
   `);
   await pool.query(`
     UPDATE trips

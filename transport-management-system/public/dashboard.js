@@ -13,6 +13,7 @@ const DISPATCH_ZONE_STATUSES = [
 ];
 const LOADING_ZONE_STATUSES = [
   'READY_FOR_LOADING',
+  'LOAD_FIX_REQUIRED',
   'LOADING_IN_PROGRESS',
   'LOADING_COMPLETED'
 ];
@@ -26,7 +27,7 @@ const ACCOUNTS_ZONE_STATUSES = ['BILLING_PENDING', 'BILLING_COMPLETED'];
 const STATUS_ASSIGNEE_RULES = [
   { statuses: ['AT_DISPATCH', 'WAITING', 'READY_FOR_LOADING'], roleLabel: 'Dispatch Manager', field: 'dispatch_done_by' },
   { statuses: ['SENT_FOR_TARE_WEIGHT', 'TARE_WEIGHT_DONE'], roleLabel: 'WB Operator (Tare)', field: 'tare_done_by' },
-  { statuses: ['LOADING_IN_PROGRESS', 'LOADING_COMPLETED'], roleLabel: 'Loading Manager', field: 'loading_done_by' },
+  { statuses: ['LOAD_FIX_REQUIRED', 'LOADING_IN_PROGRESS', 'LOADING_COMPLETED'], roleLabel: 'Loading Manager', field: 'loading_done_by' },
   { statuses: ['GROSS_WEIGHT_PENDING', 'GROSS_WEIGHT_DONE'], roleLabel: 'WB Operator (Gross)', field: 'gross_done_by' },
   { statuses: ['BILLING_PENDING', 'BILLING_COMPLETED', 'COMPLETED'], roleLabel: 'Accounts Manager', field: 'billing_done_by' }
 ];
@@ -228,6 +229,9 @@ function getStatusWithCancelReason(trip) {
   const parts = [statusBadge];
   if (trip.status === 'WAITING' && trip.waiting_reason) {
     parts.push(`<div class="reason-chip">Waiting: ${escapeHtml(trip.waiting_reason)}</div>`);
+  }
+  if (trip.status === 'LOAD_FIX_REQUIRED' && trip.load_fix_reason) {
+    parts.push(`<div class="reason-chip reason-chip-error">Load Fix: ${escapeHtml(trip.load_fix_reason)}</div>`);
   }
   if ((trip.status === 'CANCELLED' || (trip.status === 'EXITED' && exitedOutcome === 'CANCELLED')) && trip.cancel_reason) {
     const fullReason = escapeHtml(trip.cancel_reason.trim());
@@ -472,6 +476,20 @@ function parseStatusHistory(trip) {
   return [];
 }
 
+function parseGrossWeightAttempts(trip) {
+  if (!trip || trip.gross_weight_attempts == null) return [];
+  if (Array.isArray(trip.gross_weight_attempts)) return trip.gross_weight_attempts;
+  if (typeof trip.gross_weight_attempts === 'string') {
+    try {
+      const parsed = JSON.parse(trip.gross_weight_attempts);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_error) {
+      return [];
+    }
+  }
+  return [];
+}
+
 function formatTimeOnly(value) {
   if (!value) return '-';
   const rawDate = new Date(value);
@@ -526,6 +544,7 @@ function renderStageSummary(trip) {
 function statusDetailLabel(key) {
   const labels = {
     waiting_reason: 'Waiting',
+    load_fix_reason: 'Load Fix',
     cancel_reason: 'Cancel',
     loading_point: 'Loading Point',
     labour_team: 'Team',
@@ -537,6 +556,7 @@ function statusDetailLabel(key) {
     tare_weight: 'Tare',
     gross_weight: 'Gross',
     net_weight: 'Net',
+    gross_weight_attempts: 'Gross Attempts',
     dispatch_manager_name: 'Dispatch Manager',
     loading_person_name: 'Loading Manager',
     weight_operator_name: 'Weighbridge Operator',
@@ -554,6 +574,10 @@ function statusDetailLabel(key) {
 function formatStatusDetailValue(key, value) {
   if (value === null || value === undefined || value === '') return null;
   if (key === 'eta') return formatDateTime(value);
+  if (key === 'gross_weight_attempts') {
+    const attempts = Array.isArray(value) ? value : [];
+    return `${attempts.length} entries`;
+  }
   if (['tare_weight', 'gross_weight', 'net_weight'].includes(key)) return `${value} kg`;
   return String(value);
 }
@@ -613,6 +637,8 @@ function openTimelineModal(tripId) {
       <div><strong>Gross Done By:</strong> ${escapeHtml(trip.gross_done_by || '-')}</div>
       <div><strong>Loading Done By:</strong> ${escapeHtml(trip.loading_done_by || '-')}</div>
       <div><strong>Billing Done By:</strong> ${escapeHtml(trip.billing_done_by || '-')}</div>
+      <div><strong>Load Fix Reason:</strong> ${escapeHtml(trip.load_fix_reason || '-')}</div>
+      <div><strong>Gross Attempts:</strong> ${parseGrossWeightAttempts(trip).length}</div>
     </div>
     ${renderStageSummary(trip)}
     <div class="timeline-list">
@@ -848,9 +874,11 @@ function exportReportCsv() {
     'Labour Team',
     'ETA',
     'Waiting Reason',
+    'Load Fix Reason',
     'Tare Weight',
     'Gross Weight',
     'Net Weight',
+    'Gross Attempts Count',
     'In Time',
     'Out Time',
     'Last Status Update',
@@ -894,9 +922,22 @@ function exportReportCsv() {
       trip.labour_team || '',
       formatDateTime(trip.eta),
       trip.waiting_reason || '',
+      trip.load_fix_reason || '',
       trip.tare_weight || '',
       trip.gross_weight || '',
       trip.net_weight || '',
+      Array.isArray(trip.gross_weight_attempts)
+        ? trip.gross_weight_attempts.length
+        : ((typeof trip.gross_weight_attempts === 'string' && trip.gross_weight_attempts)
+          ? (() => {
+            try {
+              const parsed = JSON.parse(trip.gross_weight_attempts);
+              return Array.isArray(parsed) ? parsed.length : 0;
+            } catch (_error) {
+              return 0;
+            }
+          })()
+          : 0),
       formatDateTime(trip.in_time),
       formatDateTime(trip.out_time),
       formatDateTime(trip.last_status_update_time),

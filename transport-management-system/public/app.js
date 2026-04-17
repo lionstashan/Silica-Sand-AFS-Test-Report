@@ -17,6 +17,7 @@ const STATUS_FLOW = [
   'LOADING_IN_PROGRESS',
   'LOADING_COMPLETED',
   'GROSS_WEIGHT_PENDING',
+  'LOAD_FIX_REQUIRED',
   'GROSS_WEIGHT_DONE',
   'BILLING_PENDING',
   'BILLING_COMPLETED',
@@ -34,7 +35,8 @@ const STATUS_TRANSITIONS = {
   READY_FOR_LOADING: ['LOADING_IN_PROGRESS'],
   LOADING_IN_PROGRESS: ['LOADING_COMPLETED'],
   LOADING_COMPLETED: ['GROSS_WEIGHT_PENDING'],
-  GROSS_WEIGHT_PENDING: ['GROSS_WEIGHT_DONE'],
+  GROSS_WEIGHT_PENDING: ['LOAD_FIX_REQUIRED', 'GROSS_WEIGHT_DONE'],
+  LOAD_FIX_REQUIRED: ['LOADING_IN_PROGRESS'],
   GROSS_WEIGHT_DONE: ['BILLING_PENDING'],
   BILLING_PENDING: ['BILLING_COMPLETED'],
   BILLING_COMPLETED: ['COMPLETED'],
@@ -62,7 +64,7 @@ const ROLE_ALLOWED_TARGETS = {
   Gate: ['EXITED'],
   Dispatch: ['AT_DISPATCH', 'WAITING', 'READY_FOR_LOADING', 'CANCELLED'],
   Loading: ['LOADING_IN_PROGRESS', 'LOADING_COMPLETED'],
-  Weighbridge: ['TARE_WEIGHT_DONE', 'GROSS_WEIGHT_DONE'],
+  Weighbridge: ['TARE_WEIGHT_DONE', 'LOAD_FIX_REQUIRED', 'GROSS_WEIGHT_DONE'],
   Accounts: ['BILLING_COMPLETED', 'COMPLETED'],
   Admin: STATUS_FLOW
 };
@@ -91,7 +93,7 @@ const PERSON_FIELD_BY_ROLE = {
 const STATUS_ASSIGNEE_RULES = [
   { statuses: ['AT_DISPATCH', 'WAITING', 'READY_FOR_LOADING'], roleLabel: 'Dispatch Manager', field: 'dispatch_done_by' },
   { statuses: ['SENT_FOR_TARE_WEIGHT', 'TARE_WEIGHT_DONE'], roleLabel: 'WB Operator (Tare)', field: 'tare_done_by' },
-  { statuses: ['LOADING_IN_PROGRESS', 'LOADING_COMPLETED'], roleLabel: 'Loading Manager', field: 'loading_done_by' },
+  { statuses: ['LOADING_IN_PROGRESS', 'LOADING_COMPLETED', 'LOAD_FIX_REQUIRED'], roleLabel: 'Loading Manager', field: 'loading_done_by' },
   { statuses: ['GROSS_WEIGHT_PENDING', 'GROSS_WEIGHT_DONE'], roleLabel: 'WB Operator (Gross)', field: 'gross_done_by' },
   { statuses: ['BILLING_PENDING', 'BILLING_COMPLETED', 'COMPLETED'], roleLabel: 'Accounts Manager', field: 'billing_done_by' }
 ];
@@ -249,6 +251,7 @@ function statusToLabel(status) {
 function statusDetailLabel(key) {
   const labels = {
     waiting_reason: 'Waiting',
+    load_fix_reason: 'Load Fix',
     cancel_reason: 'Cancel',
     loading_point: 'Loading Point',
     labour_team: 'Team',
@@ -260,6 +263,7 @@ function statusDetailLabel(key) {
     tare_weight: 'Tare',
     gross_weight: 'Gross',
     net_weight: 'Net',
+    gross_weight_attempts: 'Gross Attempts',
     dispatch_manager_name: 'Dispatch Manager',
     loading_person_name: 'Loading Manager',
     weight_operator_name: 'Weighbridge Operator',
@@ -277,6 +281,10 @@ function statusDetailLabel(key) {
 function formatStatusDetailValue(key, value) {
   if (value === null || value === undefined || value === '') return null;
   if (key === 'eta') return formatDateTime(value);
+  if (key === 'gross_weight_attempts') {
+    const attempts = Array.isArray(value) ? value : [];
+    return `${attempts.length} entries`;
+  }
   if (['tare_weight', 'gross_weight', 'net_weight'].includes(key)) return `${value} kg`;
   return String(value);
 }
@@ -378,6 +386,8 @@ function openTimelineModal(tripId) {
       <div><strong>Gross Done By:</strong> ${escapeHtml(trip.gross_done_by || '-')}</div>
       <div><strong>Loading Done By:</strong> ${escapeHtml(trip.loading_done_by || '-')}</div>
       <div><strong>Billing Done By:</strong> ${escapeHtml(trip.billing_done_by || '-')}</div>
+      <div><strong>Load Fix Reason:</strong> ${escapeHtml(trip.load_fix_reason || '-')}</div>
+      <div><strong>Gross Attempts:</strong> ${parseGrossWeightAttempts(trip).length}</div>
     </div>
     ${renderStageSummary(trip)}
     <div class="timeline-list">
@@ -521,6 +531,9 @@ function getStatusWithReasonDetails(trip) {
   if (normalizeStatus(trip.status) === 'WAITING' && trip.waiting_reason) {
     parts.push(`<div class="reason-chip">Waiting: ${escapeHtml(trip.waiting_reason)}</div>`);
   }
+  if (normalizeStatus(trip.status) === 'LOAD_FIX_REQUIRED' && trip.load_fix_reason) {
+    parts.push(`<div class="reason-chip reason-chip-error">Load Fix: ${escapeHtml(trip.load_fix_reason)}</div>`);
+  }
   if ((trip.status === 'CANCELLED' || trip.status === 'EXITED') && trip.cancel_reason) {
     parts.push(`<div class="reason-chip reason-chip-error">Cancel: ${escapeHtml(trip.cancel_reason)}</div>`);
   }
@@ -642,9 +655,11 @@ function getBaseTripPayload(trip) {
     labour_team: trip.labour_team,
     eta: trip.eta,
     waiting_reason: trip.waiting_reason,
+    load_fix_reason: trip.load_fix_reason,
     tare_weight: trip.tare_weight,
     gross_weight: trip.gross_weight,
     net_weight: trip.net_weight,
+    gross_weight_attempts: trip.gross_weight_attempts,
     status: normalizeStatus(trip.status),
     final_status: trip.final_status,
     is_cancelled: trip.is_cancelled,
@@ -719,14 +734,18 @@ function getMergedDispatchDetails(tripId) {
   };
 }
 
-function getDispatchValidationError(details) {
-  if (!details.material_type) return 'Material type is required before starting loading';
-  if (!details.grade) return 'Grade is required before starting loading';
-  if (!details.condition) return 'Condition is required before starting loading';
-  if (!details.packing) return 'Packing is required before starting loading';
-  if (!details.loading_point) return 'Loading point is required before starting loading';
+function getReadyForLoadingValidationError(details) {
+  if (!details.material_type) return 'Material type is required before moving to ready for loading';
+  if (!details.grade) return 'Grade is required before moving to ready for loading';
+  if (!details.condition) return 'Condition is required before moving to ready for loading';
+  if (!details.packing) return 'Packing is required before moving to ready for loading';
+  if (!details.loading_point) return 'Loading point is required before moving to ready for loading';
+  if (!details.eta) return 'ETA is required before moving to ready for loading';
+  return null;
+}
+
+function getLoadingStartValidationError(details) {
   if (!details.labour_team) return 'Loading team is required before starting loading';
-  if (!details.eta) return 'ETA is required before starting loading';
   return null;
 }
 
@@ -823,7 +842,7 @@ async function applyStatusChange(tripId, requestedStatus, extraFields = {}) {
     }
   }
 
-  if (requestedStatus === 'LOADING_IN_PROGRESS') {
+  if (requestedStatus === 'READY_FOR_LOADING') {
     const draft = getLoadingDraft(tripId);
     const pendingDetails = {
       material_type: extraFields.material_type || draft.material_type || existingTrip.material_type,
@@ -831,12 +850,23 @@ async function applyStatusChange(tripId, requestedStatus, extraFields = {}) {
       condition: extraFields.condition || draft.condition || existingTrip.condition,
       packing: extraFields.packing || draft.packing || existingTrip.packing,
       loading_point: extraFields.loading_point || draft.loading_point || existingTrip.loading_point,
-      labour_team: extraFields.labour_team || draft.labour_team || existingTrip.labour_team,
       eta: extraFields.eta || draft.eta || existingTrip.eta
     };
-    const dispatchError = getDispatchValidationError(pendingDetails);
-    if (dispatchError) {
-      showMessage(dispatchError, false);
+    const readyError = getReadyForLoadingValidationError(pendingDetails);
+    if (readyError) {
+      showMessage(readyError, false);
+      return;
+    }
+  }
+
+  if (requestedStatus === 'LOADING_IN_PROGRESS') {
+    const draft = getLoadingDraft(tripId);
+    const pendingDetails = {
+      labour_team: extraFields.labour_team || draft.labour_team || existingTrip.labour_team,
+    };
+    const loadingError = getLoadingStartValidationError(pendingDetails);
+    if (loadingError) {
+      showMessage(loadingError, false);
       return;
     }
     if (!existingTrip.tare_weight) {
@@ -858,6 +888,28 @@ async function applyStatusChange(tripId, requestedStatus, extraFields = {}) {
     }
     if (gross <= tare) {
       showMessage('Gross weight must be greater than tare weight', false);
+      return;
+    }
+  }
+
+  if (requestedStatus === 'LOAD_FIX_REQUIRED') {
+    const tare = Number(extraFields.tare_weight ?? existingTrip.tare_weight);
+    const gross = Number(extraFields.gross_weight ?? existingTrip.gross_weight);
+    const reason = String(extraFields.load_fix_reason || '').trim();
+    if (!Number.isFinite(gross) || gross <= 0) {
+      showMessage('Gross weight is required before sending for load fix', false);
+      return;
+    }
+    if (!Number.isFinite(tare) || tare <= 0) {
+      showMessage('Tare weight is required before sending for load fix', false);
+      return;
+    }
+    if (gross <= tare) {
+      showMessage('Gross weight must be greater than tare weight', false);
+      return;
+    }
+    if (!reason) {
+      showMessage('Load fix reason is required', false);
       return;
     }
   }
@@ -965,6 +1017,37 @@ async function cancelTrip(tripId) {
 function computeNetWeight(tare, gross) {
   if (!Number.isFinite(tare) || !Number.isFinite(gross)) return null;
   return Number((gross - tare).toFixed(2));
+}
+
+function parseGrossWeightAttempts(trip) {
+  if (!trip || trip.gross_weight_attempts == null) return [];
+  if (Array.isArray(trip.gross_weight_attempts)) return trip.gross_weight_attempts;
+  if (typeof trip.gross_weight_attempts === 'string') {
+    try {
+      const parsed = JSON.parse(trip.gross_weight_attempts);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_error) {
+      return [];
+    }
+  }
+  return [];
+}
+
+function buildGrossAttemptEntry(trip, { tare, gross, net, decision, reason, operatorName }) {
+  const attempts = parseGrossWeightAttempts(trip);
+  return [
+    ...attempts,
+    {
+      attempt_no: attempts.length + 1,
+      tare_weight: tare,
+      gross_weight: gross,
+      net_weight: net,
+      decision,
+      reason: reason || null,
+      operator_name: operatorName || null,
+      timestamp_ist: getCurrentISTTimestampISO()
+    }
+  ];
 }
 
 async function saveTareWeight(tripId) {
@@ -1096,14 +1179,79 @@ async function markGrossDone(tripId) {
   }
 
   const net = computeNetWeight(tare, gross);
+  const nextAttempts = buildGrossAttemptEntry(trip, {
+    tare,
+    gross,
+    net,
+    decision: 'ACCEPTED',
+    reason: null,
+    operatorName
+  });
   const extraFields = {
     tare_weight: tare,
     gross_weight: gross,
     net_weight: net,
     weight_operator_name: operatorName,
-    gross_done_by: operatorName
+    gross_done_by: operatorName,
+    gross_weight_attempts: nextAttempts,
+    load_fix_reason: null
   };
   await applyStatusChange(tripId, 'GROSS_WEIGHT_DONE', extraFields);
+}
+
+async function sendForLoadFix(tripId) {
+  if (!hasRoleAccess(['Weighbridge', 'Admin'])) {
+    showMessage('Only Weighbridge/Admin can send for load fix', false);
+    return;
+  }
+  const trip = getTripById(tripId);
+  if (!trip) return;
+
+  const gross = getWeightFromRow(tripId, 'gross_weight') ?? Number(trip.gross_weight);
+  const tare = getWeightFromRow(tripId, 'tare_weight') ?? Number(trip.tare_weight);
+  if (!Number.isFinite(gross) || gross <= 0) {
+    showMessage('Gross weight is required before sending for load fix', false);
+    return;
+  }
+  if (!Number.isFinite(tare) || tare <= 0) {
+    showMessage('Tare weight is required before sending for load fix', false);
+    return;
+  }
+  if (gross <= tare) {
+    showMessage('Gross weight must be greater than tare weight', false);
+    return;
+  }
+
+  const operatorName = getPersonValueFromRow(tripId, 'Weighbridge', trip.weight_operator_name || '');
+  if (!operatorName) {
+    showMessage('Select weighbridge operator name', false);
+    return;
+  }
+
+  const reason = window.prompt('Enter load fix reason:');
+  if (!reason || !reason.trim()) {
+    showMessage('Load fix reason is mandatory', false);
+    return;
+  }
+
+  const net = computeNetWeight(tare, gross);
+  const nextAttempts = buildGrossAttemptEntry(trip, {
+    tare,
+    gross,
+    net,
+    decision: 'RECHECK',
+    reason: reason.trim(),
+    operatorName
+  });
+
+  await applyStatusChange(tripId, 'LOAD_FIX_REQUIRED', {
+    tare_weight: tare,
+    gross_weight: gross,
+    net_weight: net,
+    weight_operator_name: operatorName,
+    gross_weight_attempts: nextAttempts,
+    load_fix_reason: reason.trim()
+  });
 }
 
 function getWeightsView(trip) {
@@ -1123,6 +1271,7 @@ function getDispatchDetailsView(trip) {
     'LOADING_IN_PROGRESS',
     'LOADING_COMPLETED',
     'GROSS_WEIGHT_PENDING',
+    'LOAD_FIX_REQUIRED',
     'GROSS_WEIGHT_DONE',
     'BILLING_PENDING',
     'BILLING_COMPLETED',
@@ -1146,6 +1295,13 @@ function getDispatchDetailsView(trip) {
   if (trip.loading_done_by) items.push(`Loading Done By: ${escapeHtml(trip.loading_done_by)}`);
   if (trip.billing_done_by) items.push(`Billing Done By: ${escapeHtml(trip.billing_done_by)}`);
   if (trip.eta) items.push(`ETA: ${formatDateTime(trip.eta)}`);
+  if (trip.load_fix_reason) items.push(`Load Fix Reason: ${escapeHtml(trip.load_fix_reason)}`);
+  const grossAttempts = parseGrossWeightAttempts(trip);
+  if (grossAttempts.length) {
+    const lastAttempt = grossAttempts[grossAttempts.length - 1];
+    const verdict = lastAttempt?.decision || '-';
+    items.push(`Gross Attempts: ${grossAttempts.length} (Last: ${escapeHtml(verdict)})`);
+  }
   if (!items.length) {
     if (!showLoadingDetailsHintStatuses.has(status)) return '';
     return '<div class="mini-muted">Loading details not added yet</div>';
@@ -1213,6 +1369,7 @@ const ADMIN_EDITABLE_FIELDS = [
   { key: 'packing', label: 'Packing', type: 'text' },
   { key: 'eta', label: 'ETA', type: 'datetime-local' },
   { key: 'waiting_reason', label: 'Waiting Reason', type: 'text' },
+  { key: 'load_fix_reason', label: 'Load Fix Reason', type: 'text' },
   { key: 'tare_weight', label: 'Tare', type: 'number' },
   { key: 'gross_weight', label: 'Gross', type: 'number' },
   { key: 'cancel_reason', label: 'Cancel Reason', type: 'text' }
@@ -1331,7 +1488,7 @@ function renderAdminManualEditor(trip) {
 }
 
 function getDispatchEditor(trip) {
-  if (!hasRoleAccess(['Loading', 'Admin'])) {
+  if (!hasRoleAccess(['Dispatch', 'Admin'])) {
     return getDispatchDetailsView(trip);
   }
   const draft = getLoadingDraft(trip.id);
@@ -1342,9 +1499,6 @@ function getDispatchEditor(trip) {
   const conditionValue = draft.condition ?? trip.condition ?? '';
   const packingValue = draft.packing ?? trip.packing ?? '';
   const loadingPointValue = draft.loading_point ?? trip.loading_point ?? '';
-  const loadingTeamValue = draft.labour_team ?? trip.labour_team ?? '';
-  const loadingPersonValue = draft.loading_person_name ?? trip.loading_person_name ?? '';
-
   return `
     <div class="dispatch-editor">
       <label>Material ${renderDispatchSelect('material_type', trip.id, materialValue)}</label>
@@ -1352,11 +1506,25 @@ function getDispatchEditor(trip) {
       <label>Condition ${renderDispatchSelect('condition', trip.id, conditionValue)}</label>
       <label>Packing ${renderDispatchSelect('packing', trip.id, packingValue)}</label>
       <label>Loading Point ${renderDispatchSelect('loading_point', trip.id, loadingPointValue)}</label>
-      <label>Loading Team ${renderDispatchSelect('labour_team', trip.id, loadingTeamValue)}</label>
-      <label>Loading Manager ${renderPersonSelect('Loading', trip.id, loadingPersonValue)}</label>
       <label>ETA
         <input type="datetime-local" data-trip-id="${trip.id}" data-dispatch-field="eta" class="dispatch-input" value="${etaValue}" />
       </label>
+    </div>
+  `;
+}
+
+function getLoadingStartEditor(trip) {
+  if (!hasRoleAccess(['Loading', 'Admin'])) {
+    return '';
+  }
+  const draft = getLoadingDraft(trip.id);
+  const loadingTeamValue = draft.labour_team ?? trip.labour_team ?? '';
+  const loadingPersonValue = draft.loading_person_name ?? trip.loading_person_name ?? '';
+
+  return `
+    <div class="dispatch-editor">
+      <label>Loading Team ${renderDispatchSelect('labour_team', trip.id, loadingTeamValue)}</label>
+      <label>Loading Manager ${renderPersonSelect('Loading', trip.id, loadingPersonValue)}</label>
     </div>
   `;
 }
@@ -1369,6 +1537,7 @@ function getAllowedManualTargets(trip) {
     // Weighbridge stages already render explicit "Save" + "Mark Done" controls.
     if (status === 'SENT_FOR_TARE_WEIGHT' && target === 'TARE_WEIGHT_DONE') return false;
     if (status === 'GROSS_WEIGHT_PENDING' && target === 'GROSS_WEIGHT_DONE') return false;
+    if (status === 'GROSS_WEIGHT_PENDING' && target === 'LOAD_FIX_REQUIRED') return false;
     if (target === 'EXITED') {
       return role === 'Gate';
     }
@@ -1426,14 +1595,19 @@ function getWorkflowActions(trip) {
         </label>
         <div class="workflow-row">
           <button class="workflow-btn" data-action="save-gross" data-trip-id="${trip.id}">Save Gross Weight</button>
+          <button class="workflow-btn danger" data-action="send-load-fix" data-trip-id="${trip.id}">Send For Load Fix</button>
           <button class="workflow-btn primary" data-action="mark-gross-done" data-trip-id="${trip.id}">Mark Gross Weight Done</button>
         </div>
       </div>
     `);
   }
 
-  if (status === 'READY_FOR_LOADING' && hasRoleAccess(['Loading', 'Admin'])) {
+  if (['AT_DISPATCH', 'WAITING'].includes(status)) {
     actionBlocks.push(getDispatchEditor(trip));
+  }
+
+  if (status === 'READY_FOR_LOADING' || status === 'LOAD_FIX_REQUIRED') {
+    actionBlocks.push(getLoadingStartEditor(trip));
   }
 
   if (hasRoleAccess(['Dispatch', 'Admin']) && ['AT_DISPATCH', 'WAITING', 'READY_FOR_LOADING'].includes(status)) {
@@ -1641,8 +1815,13 @@ async function handleStatusTargetClick(button) {
       return;
     }
     const dispatchDetails = getMergedDispatchDetails(tripId);
+    const loadingStartError = getLoadingStartValidationError(dispatchDetails);
+    if (loadingStartError) {
+      showMessage(loadingStartError, false);
+      return;
+    }
     await applyStatusChange(tripId, 'LOADING_IN_PROGRESS', {
-      ...dispatchDetails,
+      labour_team: dispatchDetails.labour_team,
       loading_person_name: loadingPersonName,
       loading_done_by: loadingPersonName,
       waiting_reason: trip.waiting_reason || null
@@ -1657,8 +1836,20 @@ async function handleStatusTargetClick(button) {
       showMessage('Select dispatch manager name', false);
       return;
     }
+    const dispatchDetails = getMergedDispatchDetails(tripId);
+    const readyError = getReadyForLoadingValidationError(dispatchDetails);
+    if (readyError) {
+      showMessage(readyError, false);
+      return;
+    }
     extraFields.dispatch_manager_name = dispatchName;
     extraFields.dispatch_done_by = dispatchName;
+    extraFields.material_type = dispatchDetails.material_type;
+    extraFields.grade = dispatchDetails.grade;
+    extraFields.condition = dispatchDetails.condition;
+    extraFields.packing = dispatchDetails.packing;
+    extraFields.loading_point = dispatchDetails.loading_point;
+    extraFields.eta = dispatchDetails.eta;
   }
 
   if (targetStatus === 'LOADING_COMPLETED') {
@@ -1743,9 +1934,10 @@ function updateLoadingButtonState(tripId) {
   const trip = getTripById(tripId);
   const draft = getLoadingDraft(tripId);
   const loadingPerson = getPersonValueFromRow(tripId, 'Loading', draft.loading_person_name || trip?.loading_person_name || '');
+  const loadingTeam = (details.labour_team || '').trim();
   const tare = Number(trip?.tare_weight);
   const hasTare = Number.isFinite(tare) && tare > 0;
-  button.disabled = !hasTare || !loadingPerson;
+  button.disabled = !hasTare || !loadingPerson || !loadingTeam;
 }
 
 function wireRowEvents() {
@@ -1771,6 +1963,10 @@ function wireRowEvents() {
 
   document.querySelectorAll('[data-action="save-gross"]').forEach((button) => {
     button.addEventListener('click', () => saveGrossWeight(button.dataset.tripId));
+  });
+
+  document.querySelectorAll('[data-action="send-load-fix"]').forEach((button) => {
+    button.addEventListener('click', () => sendForLoadFix(button.dataset.tripId));
   });
 
   document.querySelectorAll('[data-action="mark-gross-done"]').forEach((button) => {

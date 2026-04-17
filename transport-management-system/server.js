@@ -25,6 +25,7 @@ const STATUS_FLOW = [
   'LOADING_IN_PROGRESS',
   'LOADING_COMPLETED',
   'GROSS_WEIGHT_PENDING',
+  'LOAD_FIX_REQUIRED',
   'GROSS_WEIGHT_DONE',
   'BILLING_PENDING',
   'BILLING_COMPLETED',
@@ -42,7 +43,8 @@ const STATUS_TRANSITIONS = {
   READY_FOR_LOADING: ['LOADING_IN_PROGRESS'],
   LOADING_IN_PROGRESS: ['LOADING_COMPLETED'],
   LOADING_COMPLETED: ['GROSS_WEIGHT_PENDING'],
-  GROSS_WEIGHT_PENDING: ['GROSS_WEIGHT_DONE'],
+  GROSS_WEIGHT_PENDING: ['LOAD_FIX_REQUIRED', 'GROSS_WEIGHT_DONE'],
+  LOAD_FIX_REQUIRED: ['LOADING_IN_PROGRESS'],
   GROSS_WEIGHT_DONE: ['BILLING_PENDING'],
   BILLING_PENDING: ['BILLING_COMPLETED'],
   BILLING_COMPLETED: ['COMPLETED'],
@@ -62,7 +64,7 @@ const ROLE_ALLOWED_TARGETS = {
   Gate: ['EXITED'],
   Dispatch: ['AT_DISPATCH', 'WAITING', 'READY_FOR_LOADING', 'CANCELLED'],
   Loading: ['LOADING_IN_PROGRESS', 'LOADING_COMPLETED'],
-  Weighbridge: ['TARE_WEIGHT_DONE', 'GROSS_WEIGHT_DONE'],
+  Weighbridge: ['TARE_WEIGHT_DONE', 'LOAD_FIX_REQUIRED', 'GROSS_WEIGHT_DONE'],
   Accounts: ['BILLING_COMPLETED', 'COMPLETED'],
   Admin: STATUS_FLOW
 };
@@ -96,6 +98,7 @@ function hasValue(value) {
 
 const TRACKED_DETAIL_FIELDS = [
   'waiting_reason',
+  'load_fix_reason',
   'cancel_reason',
   'loading_point',
   'labour_team',
@@ -107,6 +110,7 @@ const TRACKED_DETAIL_FIELDS = [
   'tare_weight',
   'gross_weight',
   'net_weight',
+  'gross_weight_attempts',
   'dispatch_manager_name',
   'weight_operator_name',
   'loading_person_name',
@@ -249,6 +253,9 @@ function valuesEqual(field, a, b) {
   if (field === 'status_history') {
     return JSON.stringify(normalizeStatusHistory(a)) === JSON.stringify(normalizeStatusHistory(b));
   }
+  if (field === 'gross_weight_attempts') {
+    return JSON.stringify(normalizeGrossWeightAttempts(a)) === JSON.stringify(normalizeGrossWeightAttempts(b));
+  }
   if (field === 'in_time' || field === 'out_time' || field === 'last_status_update_time' || field === 'eta') {
     if (!a && !b) return true;
     if (!a || !b) return false;
@@ -264,6 +271,30 @@ function toFiniteNumberOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+function normalizeGrossWeightAttempts(value) {
+  if (value == null) return [];
+  const source = typeof value === 'string' ? (() => {
+    try {
+      return JSON.parse(value);
+    } catch (_err) {
+      return [];
+    }
+  })() : value;
+  if (!Array.isArray(source)) return [];
+  return source
+    .filter((entry) => entry && typeof entry === 'object')
+    .map((entry, index) => ({
+      attempt_no: Number(entry.attempt_no) || (index + 1),
+      tare_weight: toFiniteNumberOrNull(entry.tare_weight),
+      gross_weight: toFiniteNumberOrNull(entry.gross_weight),
+      net_weight: toFiniteNumberOrNull(entry.net_weight),
+      decision: String(entry.decision || '').toUpperCase() || 'RECHECK',
+      reason: normalizeEmpty(entry.reason),
+      operator_name: normalizeEmpty(entry.operator_name),
+      timestamp_ist: normalizeEmpty(entry.timestamp_ist) || getCurrentIstTimestamp()
+    }));
 }
 
 function isRoleAllowedForStatus(role, targetStatus) {
@@ -324,9 +355,11 @@ app.post('/trip', async (req, res) => {
     labour_team,
     eta,
     waiting_reason,
+    load_fix_reason,
     tare_weight,
     gross_weight,
     net_weight,
+    gross_weight_attempts,
     status,
     final_status,
     is_cancelled,
@@ -344,6 +377,7 @@ app.post('/trip', async (req, res) => {
   const safeLastStatusUpdateTime = safeInTime;
   const safeIsCancelled = is_cancelled ?? false;
   const safeStatusHistory = buildInitialStatusHistory(safeStatus);
+  const safeGrossWeightAttempts = normalizeGrossWeightAttempts(gross_weight_attempts);
 
   try {
     const result = await pool.query(
@@ -372,9 +406,11 @@ app.post('/trip', async (req, res) => {
         labour_team,
         eta,
         waiting_reason,
+        load_fix_reason,
         tare_weight,
         gross_weight,
         net_weight,
+        gross_weight_attempts,
         status,
         final_status,
         is_cancelled,
@@ -383,7 +419,7 @@ app.post('/trip', async (req, res) => {
         out_time,
         last_status_update_time,
         status_history
-      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35)
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37)
       RETURNING *`,
       [
         sequence_number,
@@ -410,9 +446,11 @@ app.post('/trip', async (req, res) => {
         labour_team,
         eta,
         waiting_reason,
+        load_fix_reason,
         tare_weight,
         gross_weight,
         net_weight,
+        JSON.stringify(safeGrossWeightAttempts),
         safeStatus,
         final_status || null,
         safeIsCancelled,
@@ -484,9 +522,11 @@ app.put('/trip/:id', async (req, res) => {
     'labour_team',
     'eta',
     'waiting_reason',
+    'load_fix_reason',
     'tare_weight',
     'gross_weight',
     'net_weight',
+    'gross_weight_attempts',
     'status',
     'final_status',
     'is_cancelled',
@@ -555,6 +595,13 @@ app.put('/trip/:id', async (req, res) => {
         }
         if (!hasValue(effective.eta)) {
           return res.status(400).json({ error: 'ETA is required before starting loading', received: summarize() });
+        }
+      }
+
+      if (requestedStatus === 'LOAD_FIX_REQUIRED') {
+        const effectiveReason = normalizeEmpty(req.body.load_fix_reason ?? existingTrip.load_fix_reason);
+        if (!hasValue(effectiveReason)) {
+          return res.status(400).json({ error: 'Load fix reason is required' });
         }
       }
     }
@@ -663,6 +710,10 @@ app.put('/trip/:id', async (req, res) => {
     }
   }
 
+  if (Object.prototype.hasOwnProperty.call(req.body, 'gross_weight_attempts')) {
+    req.body.gross_weight_attempts = normalizeGrossWeightAttempts(req.body.gross_weight_attempts);
+  }
+
   const providedFields = allowedFields.filter((field) =>
     Object.prototype.hasOwnProperty.call(req.body, field) && req.body[field] !== undefined
   );
@@ -704,7 +755,9 @@ app.put('/trip/:id', async (req, res) => {
     'updated_at = NOW()'
   ].join(', ');
   const values = providedFields.map((field) => (
-    field === 'status_history' ? JSON.stringify(req.body[field]) : req.body[field]
+    (field === 'status_history' || field === 'gross_weight_attempts')
+      ? JSON.stringify(req.body[field])
+      : req.body[field]
   ));
 
   try {
