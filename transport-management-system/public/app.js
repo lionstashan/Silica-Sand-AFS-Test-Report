@@ -231,6 +231,14 @@ function formatMinutes(totalMinutes) {
   return `${hours}h ${minutes}m`;
 }
 
+function formatWeightMT(value) {
+  if (value === null || value === undefined) return '-';
+  if (typeof value === 'string' && !value.trim()) return '-';
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '-';
+  return `${numeric.toFixed(3)} MT`;
+}
+
 function parseStatusHistory(trip) {
   if (!trip || trip.status_history == null) return [];
   if (Array.isArray(trip.status_history)) return trip.status_history;
@@ -243,6 +251,18 @@ function parseStatusHistory(trip) {
     }
   }
   return [];
+}
+
+function getLatestStatusDetailValue(trip, field) {
+  const history = parseStatusHistory(trip);
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const details = history[index]?.details;
+    if (!details || typeof details !== 'object') continue;
+    const value = details[field];
+    if (value === null || value === undefined || value === '') continue;
+    return value;
+  }
+  return null;
 }
 
 function statusToLabel(status) {
@@ -261,6 +281,7 @@ function statusDetailLabel(key) {
     condition: 'Condition',
     packing: 'Packing',
     eta: 'ETA',
+    expected_weight: 'Expected',
     tare_weight: 'Tare',
     gross_weight: 'Gross',
     net_weight: 'Net',
@@ -286,22 +307,90 @@ function formatStatusDetailValue(key, value) {
     const attempts = Array.isArray(value) ? value : [];
     return `${attempts.length} entries`;
   }
-  if (['tare_weight', 'gross_weight', 'net_weight'].includes(key)) return `${value} kg`;
+  if (['expected_weight', 'tare_weight', 'gross_weight', 'net_weight'].includes(key)) return formatWeightMT(value);
   return String(value);
+}
+
+function getGrossAttemptReasons(value) {
+  const attempts = Array.isArray(value) ? value : [];
+  return attempts
+    .map((attempt, index) => {
+      const decision = String(attempt?.decision || '').toUpperCase();
+      const reason = String(attempt?.reason || '').trim();
+      if (decision !== 'RECHECK' || !reason) return null;
+      const attemptNo = Number(attempt?.attempt_no);
+      const labelNo = Number.isFinite(attemptNo) && attemptNo > 0 ? attemptNo : (index + 1);
+      return `Load Fix #${labelNo}: ${reason}`;
+    })
+    .filter(Boolean);
 }
 
 function renderStatusDetails(entry) {
   const details = entry?.details && typeof entry.details === 'object' ? entry.details : null;
   if (!details) return '';
-  const detailEntries = Object.entries(details)
-    .map(([key, value]) => {
+  const detailEntries = Object.entries(details).flatMap(([key, value]) => {
+      if (key === 'gross_weight_attempts') {
+        const formattedAttempts = formatStatusDetailValue(key, value);
+        const reasonLines = getGrossAttemptReasons(value);
+        const attemptChip = formattedAttempts
+          ? `<span class="timeline-detail-chip"><strong>${escapeHtml(statusDetailLabel(key))}:</strong> ${escapeHtml(formattedAttempts)}</span>`
+          : '';
+        const reasonChips = reasonLines.map((line) => (
+          `<span class="timeline-detail-chip"><strong>Load Fix Reason:</strong> ${escapeHtml(line)}</span>`
+        ));
+        return [attemptChip, ...reasonChips].filter(Boolean);
+      }
       const formatted = formatStatusDetailValue(key, value);
       if (!formatted) return '';
-      return `<span class="timeline-detail-chip"><strong>${escapeHtml(statusDetailLabel(key))}:</strong> ${escapeHtml(formatted)}</span>`;
+      return [`<span class="timeline-detail-chip"><strong>${escapeHtml(statusDetailLabel(key))}:</strong> ${escapeHtml(formatted)}</span>`];
     })
     .filter(Boolean);
   if (!detailEntries.length) return '';
   return `<div class="timeline-item-details">${detailEntries.join('')}</div>`;
+}
+
+function getLatestDetailValueFromHistory(history, endIndex, field) {
+  for (let index = endIndex; index >= 0; index -= 1) {
+    const details = history[index]?.details;
+    if (!details || typeof details !== 'object') continue;
+    const value = details[field];
+    if (value === null || value === undefined || value === '') continue;
+    return value;
+  }
+  return null;
+}
+
+function enrichTimelineEntryDetailsForDisplay(trip, history, entry, index) {
+  const status = normalizeStatus(entry?.status);
+  if (status !== 'READY_FOR_LOADING') return entry;
+
+  const details = entry?.details && typeof entry.details === 'object' ? { ...entry.details } : {};
+  const readyFields = [
+    'material_type',
+    'grade',
+    'condition',
+    'packing',
+    'loading_point',
+    'eta',
+    'expected_weight',
+    'dispatch_done_by',
+    'dispatch_manager_name'
+  ];
+
+  readyFields.forEach((field) => {
+    if (details[field] !== null && details[field] !== undefined && details[field] !== '') return;
+    const fromHistory = getLatestDetailValueFromHistory(history, index, field);
+    if (fromHistory !== null && fromHistory !== undefined && fromHistory !== '') {
+      details[field] = fromHistory;
+      return;
+    }
+    const fromTrip = trip?.[field];
+    if (fromTrip !== null && fromTrip !== undefined && fromTrip !== '') {
+      details[field] = fromTrip;
+    }
+  });
+
+  return { ...entry, details };
 }
 
 function getStatusDurationMinutes(entry) {
@@ -351,16 +440,17 @@ function renderStatusTimeline(trip) {
     return '<div class="mini-muted">No status history available</div>';
   }
 
-  return history.map((entry) => {
+  return history.map((entry, index) => {
+    const displayEntry = enrichTimelineEntryDetailsForDisplay(trip, history, entry, index);
     const current = !entry.exit_time;
     return `
       <article class="timeline-item ${current ? 'timeline-item-current' : ''}">
-        <div class="timeline-item-status">${escapeHtml(statusToLabel(entry.status))}</div>
+        <div class="timeline-item-status">${escapeHtml(statusToLabel(displayEntry.status))}</div>
         <div class="timeline-item-times">
-          <span>${formatTimeOnly(entry.entry_time)} → ${entry.exit_time ? formatTimeOnly(entry.exit_time) : 'Now'}</span>
-          <span>${formatMinutes(getStatusDurationMinutes(entry))}</span>
+          <span>${formatTimeOnly(displayEntry.entry_time)} → ${displayEntry.exit_time ? formatTimeOnly(displayEntry.exit_time) : 'Now'}</span>
+          <span>${formatMinutes(getStatusDurationMinutes(displayEntry))}</span>
         </div>
-        ${renderStatusDetails(entry)}
+        ${renderStatusDetails(displayEntry)}
       </article>
     `;
   }).join('');
@@ -369,6 +459,10 @@ function renderStatusTimeline(trip) {
 function openTimelineModal(tripId) {
   const trip = getTripById(tripId);
   if (!trip || !timelineModal || !timelineModalBody || !timelineModalTitle) return;
+  const expected = Number(trip.expected_weight);
+  const net = Number(trip.net_weight);
+  const variance = Number.isFinite(expected) && Number.isFinite(net) ? (net - expected) : null;
+  const lastLoadFixReason = getLastLoadFixReason(trip);
   timelineModalTitle.textContent = `Status Timeline - ${trip.truck_number || 'Truck'}`;
   timelineModalBody.innerHTML = `
     <div class="timeline-meta">
@@ -387,7 +481,10 @@ function openTimelineModal(tripId) {
       <div><strong>Gross Done By:</strong> ${escapeHtml(trip.gross_done_by || '-')}</div>
       <div><strong>Loading Done By:</strong> ${escapeHtml(trip.loading_done_by || '-')}</div>
       <div><strong>Billing Done By:</strong> ${escapeHtml(trip.billing_done_by || '-')}</div>
-      <div><strong>Load Fix Reason:</strong> ${escapeHtml(trip.load_fix_reason || '-')}</div>
+      <div><strong>Expected Weight:</strong> ${formatWeightMT(trip.expected_weight)}</div>
+      <div><strong>Final Net Weight:</strong> ${formatWeightMT(trip.net_weight)}</div>
+      <div><strong>Variance:</strong> ${variance === null ? '-' : formatWeightMT(variance)}</div>
+      <div><strong>Last Load Fix Reason:</strong> ${escapeHtml(lastLoadFixReason || '-')}</div>
       <div><strong>Gross Attempts:</strong> ${parseGrossWeightAttempts(trip).length}</div>
     </div>
     ${renderStageSummary(trip)}
@@ -655,6 +752,7 @@ function getBaseTripPayload(trip) {
     loading_point: trip.loading_point,
     labour_team: trip.labour_team,
     eta: trip.eta,
+    expected_weight: trip.expected_weight,
     waiting_reason: trip.waiting_reason,
     load_fix_reason: trip.load_fix_reason,
     tare_weight: trip.tare_weight,
@@ -716,7 +814,8 @@ function getDispatchDetailsFromRow(tripId) {
     packing: resolveDropdown('packing'),
     loading_point: resolveDropdown('loading_point'),
     labour_team: resolveDropdown('labour_team'),
-    eta: localInputToIstIso(readValue('eta'))
+    eta: localInputToIstIso(readValue('eta')),
+    expected_weight: readValue('expected_weight')
   };
 }
 
@@ -724,6 +823,7 @@ function getMergedDispatchDetails(tripId) {
   const trip = getTripById(tripId);
   const rowDetails = getDispatchDetailsFromRow(tripId);
   const draft = getLoadingDraft(tripId);
+  const historyExpectedWeight = getLatestStatusDetailValue(trip, 'expected_weight');
   return {
     material_type: rowDetails.material_type || draft.material_type || trip?.material_type || '',
     grade: rowDetails.grade || draft.grade || trip?.grade || '',
@@ -731,7 +831,8 @@ function getMergedDispatchDetails(tripId) {
     packing: rowDetails.packing || draft.packing || trip?.packing || '',
     loading_point: rowDetails.loading_point || draft.loading_point || trip?.loading_point || '',
     labour_team: rowDetails.labour_team || draft.labour_team || trip?.labour_team || '',
-    eta: rowDetails.eta || draft.eta || trip?.eta || null
+    eta: rowDetails.eta || draft.eta || trip?.eta || null,
+    expected_weight: rowDetails.expected_weight || draft.expected_weight || trip?.expected_weight || historyExpectedWeight || ''
   };
 }
 
@@ -742,6 +843,8 @@ function getReadyForLoadingValidationError(details) {
   if (!details.packing) return 'Packing is required before moving to ready for loading';
   if (!details.loading_point) return 'Loading point is required before moving to ready for loading';
   if (!details.eta) return 'ETA is required before moving to ready for loading';
+  const expected = Number(details.expected_weight);
+  if (!Number.isFinite(expected) || expected <= 0) return 'Expected weight (MT) is required before moving to ready for loading';
   return null;
 }
 
@@ -851,7 +954,8 @@ async function applyStatusChange(tripId, requestedStatus, extraFields = {}) {
       condition: extraFields.condition || draft.condition || existingTrip.condition,
       packing: extraFields.packing || draft.packing || existingTrip.packing,
       loading_point: extraFields.loading_point || draft.loading_point || existingTrip.loading_point,
-      eta: extraFields.eta || draft.eta || existingTrip.eta
+      eta: extraFields.eta || draft.eta || existingTrip.eta,
+      expected_weight: extraFields.expected_weight || draft.expected_weight || existingTrip.expected_weight
     };
     const readyError = getReadyForLoadingValidationError(pendingDetails);
     if (readyError) {
@@ -1020,6 +1124,37 @@ function computeNetWeight(tare, gross) {
   return Number((gross - tare).toFixed(2));
 }
 
+function getCurrentExpectedWeightValue(trip) {
+  if (!trip) return null;
+  if (trip.expected_weight !== null && trip.expected_weight !== undefined && trip.expected_weight !== '') {
+    return trip.expected_weight;
+  }
+  return getLatestStatusDetailValue(trip, 'expected_weight');
+}
+
+function getCurrentWeightValue(trip, fieldName) {
+  if (!trip) return null;
+  const currentValue = trip[fieldName];
+  if (currentValue !== null && currentValue !== undefined && currentValue !== '') {
+    return currentValue;
+  }
+  return getLatestStatusDetailValue(trip, fieldName);
+}
+
+function updateGrossNetPreview(tripId) {
+  const previewInput = document.querySelector(`[data-trip-id="${tripId}"][data-weight-field="net_weight_preview"]`);
+  if (!previewInput) return;
+  const trip = getTripById(tripId);
+  if (!trip) {
+    previewInput.value = '-';
+    return;
+  }
+  const tare = getWeightFromRow(tripId, 'tare_weight') ?? Number(trip.tare_weight);
+  const gross = getWeightFromRow(tripId, 'gross_weight') ?? Number(trip.gross_weight);
+  const net = computeNetWeight(tare, gross);
+  previewInput.value = net === null ? '-' : formatWeightMT(net);
+}
+
 function parseGrossWeightAttempts(trip) {
   if (!trip || trip.gross_weight_attempts == null) return [];
   if (Array.isArray(trip.gross_weight_attempts)) return trip.gross_weight_attempts;
@@ -1032,6 +1167,19 @@ function parseGrossWeightAttempts(trip) {
     }
   }
   return [];
+}
+
+function getLastLoadFixReason(trip) {
+  const directReason = String(trip?.load_fix_reason || '').trim();
+  if (directReason) return directReason;
+  const attempts = parseGrossWeightAttempts(trip);
+  for (let index = attempts.length - 1; index >= 0; index -= 1) {
+    const attempt = attempts[index] || {};
+    const decision = String(attempt.decision || '').toUpperCase();
+    const reason = String(attempt.reason || '').trim();
+    if (decision === 'RECHECK' && reason) return reason;
+  }
+  return null;
 }
 
 function buildGrossAttemptEntry(trip, { tare, gross, net, decision, reason, operatorName }) {
@@ -1258,15 +1406,16 @@ async function sendForLoadFix(tripId) {
 function getWeightsView(trip) {
   return `
     <div class="weight-readonly">
-      <span>Tare: ${trip.tare_weight ?? '-'}</span>
-      <span>Gross: ${trip.gross_weight ?? '-'}</span>
-      <span>Net: ${trip.net_weight ?? '-'}</span>
+      <span>Tare: ${formatWeightMT(trip.tare_weight)}</span>
+      <span>Gross: ${formatWeightMT(trip.gross_weight)}</span>
+      <span>Net: ${formatWeightMT(trip.net_weight)}</span>
     </div>
   `;
 }
 
 function getDispatchDetailsView(trip) {
   const status = normalizeStatus(trip.status);
+  const draft = getLoadingDraft(trip.id);
   const showLoadingDetailsHintStatuses = new Set([
     'READY_FOR_LOADING',
     'LOADING_IN_PROGRESS',
@@ -1279,12 +1428,21 @@ function getDispatchDetailsView(trip) {
     'COMPLETED',
     'EXITED'
   ]);
+  const historyExpectedWeight = getLatestStatusDetailValue(trip, 'expected_weight');
   const items = [];
+  const expectedWeightValue = (
+    trip.expected_weight !== null && trip.expected_weight !== undefined && trip.expected_weight !== ''
+      ? trip.expected_weight
+      : (draft.expected_weight ?? historyExpectedWeight ?? '')
+  );
   if (trip.material_type) items.push(`Material: ${escapeHtml(trip.material_type)}`);
   if (trip.grade) items.push(`Grade: ${escapeHtml(trip.grade)}`);
   if (trip.condition) items.push(`Condition: ${escapeHtml(trip.condition)}`);
   if (trip.packing) items.push(`Packing: ${escapeHtml(trip.packing)}`);
   if (trip.loading_point) items.push(`Loading: ${escapeHtml(trip.loading_point)}`);
+  if (expectedWeightValue !== null && expectedWeightValue !== undefined && expectedWeightValue !== '') {
+    items.push(`Expected: ${escapeHtml(formatWeightMT(expectedWeightValue))}`);
+  }
   if (trip.labour_team) items.push(`Team: ${escapeHtml(trip.labour_team)}`);
   if (trip.dispatch_manager_name) items.push(`Dispatch Manager: ${escapeHtml(trip.dispatch_manager_name)}`);
   if (trip.loading_person_name) items.push(`Loading Manager: ${escapeHtml(trip.loading_person_name)}`);
@@ -1371,8 +1529,9 @@ const ADMIN_EDITABLE_FIELDS = [
   { key: 'eta', label: 'ETA', type: 'datetime-local' },
   { key: 'waiting_reason', label: 'Waiting Reason', type: 'text' },
   { key: 'load_fix_reason', label: 'Load Fix Reason', type: 'text' },
-  { key: 'tare_weight', label: 'Tare', type: 'number' },
-  { key: 'gross_weight', label: 'Gross', type: 'number' },
+  { key: 'expected_weight', label: 'Expected Weight (MT)', type: 'number' },
+  { key: 'tare_weight', label: 'Tare Weight (MT)', type: 'number' },
+  { key: 'gross_weight', label: 'Gross Weight (MT)', type: 'number' },
   { key: 'cancel_reason', label: 'Cancel Reason', type: 'text' }
 ];
 
@@ -1475,7 +1634,7 @@ function renderAdminManualEditor(trip) {
   return `
     <div class="workflow-group admin-editor">
       <div class="mini-muted"><strong>Admin Manual Data Editor</strong></div>
-      <div class="mini-muted"><strong>Net Weight:</strong> ${trip.net_weight ? `${escapeHtml(String(trip.net_weight))} kg` : '-'}</div>
+      <div class="mini-muted"><strong>Net Weight:</strong> ${formatWeightMT(trip.net_weight)}</div>
       <div class="admin-editor-grid">
         ${fieldsHtml}
       </div>
@@ -1500,6 +1659,7 @@ function getDispatchEditor(trip) {
   const conditionValue = draft.condition ?? trip.condition ?? '';
   const packingValue = draft.packing ?? trip.packing ?? '';
   const loadingPointValue = draft.loading_point ?? trip.loading_point ?? '';
+  const expectedWeightValue = draft.expected_weight ?? trip.expected_weight ?? '';
   return `
     <div class="dispatch-editor">
       <label>Material ${renderDispatchSelect('material_type', trip.id, materialValue)}</label>
@@ -1507,6 +1667,9 @@ function getDispatchEditor(trip) {
       <label>Condition ${renderDispatchSelect('condition', trip.id, conditionValue)}</label>
       <label>Packing ${renderDispatchSelect('packing', trip.id, packingValue)}</label>
       <label>Loading Point ${renderDispatchSelect('loading_point', trip.id, loadingPointValue)}</label>
+      <label>Expected Weight (MT)
+        <input type="number" step="0.001" min="0" data-trip-id="${trip.id}" data-dispatch-field="expected_weight" class="dispatch-input" value="${escapeHtml(String(expectedWeightValue))}" />
+      </label>
       <label>ETA
         <input type="datetime-local" data-trip-id="${trip.id}" data-dispatch-field="eta" class="dispatch-input" value="${etaValue}" />
       </label>
@@ -1521,9 +1684,19 @@ function getLoadingStartEditor(trip) {
   const draft = getLoadingDraft(trip.id);
   const loadingTeamValue = draft.labour_team ?? trip.labour_team ?? '';
   const loadingPersonValue = draft.loading_person_name ?? trip.loading_person_name ?? '';
+  const expectedWeightValue = draft.expected_weight ?? getCurrentExpectedWeightValue(trip) ?? '';
+  const isLoadFixStage = normalizeStatus(trip.status) === 'LOAD_FIX_REQUIRED';
 
   return `
     <div class="dispatch-editor">
+      <label>Expected Weight (MT)
+        <input type="text" class="dispatch-input" value="${escapeHtml(formatWeightMT(expectedWeightValue))}" disabled />
+      </label>
+      ${isLoadFixStage ? `
+      <label>Current Net Weight (MT)
+        <input type="text" class="dispatch-input" value="${escapeHtml(formatWeightMT(trip.net_weight))}" disabled />
+      </label>
+      ` : ''}
       <label>Loading Team ${renderDispatchSelect('labour_team', trip.id, loadingTeamValue)}</label>
       <label>Loading Manager ${renderPersonSelect('Loading', trip.id, loadingPersonValue)}</label>
     </div>
@@ -1571,8 +1744,8 @@ function getWorkflowActions(trip) {
         <label>Weighbridge Operator
           ${renderPersonSelect('Weighbridge', trip.id, trip.weight_operator_name || '')}
         </label>
-        <label>Tare Weight
-          <input type="number" step="0.01" data-trip-id="${trip.id}" data-weight-field="tare_weight" value="${trip.tare_weight ?? ''}" class="weight-input" />
+        <label>Tare Weight (MT)
+          <input type="number" step="0.001" data-trip-id="${trip.id}" data-weight-field="tare_weight" value="${trip.tare_weight ?? ''}" class="weight-input" />
         </label>
         <div class="workflow-row">
           <button class="workflow-btn" data-action="save-tare" data-trip-id="${trip.id}">Save Tare Weight</button>
@@ -1583,16 +1756,24 @@ function getWorkflowActions(trip) {
   }
 
   if ((role === 'Weighbridge' || role === 'Admin') && status === 'GROSS_WEIGHT_PENDING') {
+    const expectedWeightValue = getCurrentExpectedWeightValue(trip);
+    const previewNet = computeNetWeight(Number(trip.tare_weight), Number(trip.gross_weight));
     actionBlocks.push(`
       <div class="workflow-group">
         <label>Weighbridge Operator
           ${renderPersonSelect('Weighbridge', trip.id, trip.weight_operator_name || '')}
         </label>
-        <label>Tare Weight
-          <input type="number" step="0.01" data-trip-id="${trip.id}" data-weight-field="tare_weight" value="${trip.tare_weight ?? ''}" class="weight-input" />
+        <label>Expected Weight (MT)
+          <input type="text" class="weight-input" value="${escapeHtml(formatWeightMT(expectedWeightValue))}" disabled />
         </label>
-        <label>Gross Weight
-          <input type="number" step="0.01" data-trip-id="${trip.id}" data-weight-field="gross_weight" value="${trip.gross_weight ?? ''}" class="weight-input" />
+        <label>Tare Weight (MT)
+          <input type="number" step="0.001" data-trip-id="${trip.id}" data-weight-field="tare_weight" value="${trip.tare_weight ?? ''}" class="weight-input" />
+        </label>
+        <label>Gross Weight (MT)
+          <input type="number" step="0.001" data-trip-id="${trip.id}" data-weight-field="gross_weight" value="${trip.gross_weight ?? ''}" class="weight-input" />
+        </label>
+        <label>Net Weight (MT)
+          <input type="text" data-trip-id="${trip.id}" data-weight-field="net_weight_preview" value="${escapeHtml(previewNet === null ? '-' : formatWeightMT(previewNet))}" class="weight-input" disabled />
         </label>
         <div class="workflow-row">
           <button class="workflow-btn" data-action="save-gross" data-trip-id="${trip.id}">Save Gross Weight</button>
@@ -1622,11 +1803,23 @@ function getWorkflowActions(trip) {
   }
 
   if (hasRoleAccess(['Accounts', 'Admin']) && ['BILLING_PENDING', 'BILLING_COMPLETED'].includes(status)) {
+    const tareValue = getCurrentWeightValue(trip, 'tare_weight');
+    const grossValue = getCurrentWeightValue(trip, 'gross_weight');
+    const netValue = getCurrentWeightValue(trip, 'net_weight');
+    const expectedValue = getCurrentWeightValue(trip, 'expected_weight');
+    const expected = Number(expectedValue);
+    const net = Number(netValue);
+    const variance = Number.isFinite(expected) && Number.isFinite(net) ? (net - expected) : null;
     actionBlocks.push(`
       <div class="workflow-group">
         <label>Accounts Manager
           ${renderPersonSelect('Accounts', trip.id, trip.accounts_person_name || '')}
         </label>
+        <div class="mini-muted"><strong>Tare:</strong> ${formatWeightMT(tareValue)}</div>
+        <div class="mini-muted"><strong>Gross:</strong> ${formatWeightMT(grossValue)}</div>
+        <div class="mini-muted"><strong>Net:</strong> ${formatWeightMT(netValue)}</div>
+        <div class="mini-muted"><strong>Expected:</strong> ${formatWeightMT(expectedValue)}</div>
+        <div class="mini-muted"><strong>Variance:</strong> ${variance === null ? '-' : formatWeightMT(variance)}</div>
       </div>
     `);
   }
@@ -1687,6 +1880,8 @@ function renderTripsTable(trips) {
   wireRowEvents();
   document.querySelectorAll('[data-action="status-change"][data-target-status="LOADING_IN_PROGRESS"]')
     .forEach((button) => updateLoadingButtonState(button.dataset.tripId));
+  document.querySelectorAll('[data-weight-field="net_weight_preview"]')
+    .forEach((input) => updateGrossNetPreview(input.dataset.tripId));
 }
 
 function renderTripsMobileList(trips) {
@@ -1821,12 +2016,17 @@ async function handleStatusTargetClick(button) {
       showMessage(loadingStartError, false);
       return;
     }
-    await applyStatusChange(tripId, 'LOADING_IN_PROGRESS', {
+    const loadingPayload = {
       labour_team: dispatchDetails.labour_team,
       loading_person_name: loadingPersonName,
       loading_done_by: loadingPersonName,
       waiting_reason: trip.waiting_reason || null
-    });
+    };
+    const parsedExpectedWeight = Number.parseFloat(dispatchDetails.expected_weight);
+    if (Number.isFinite(parsedExpectedWeight) && parsedExpectedWeight > 0) {
+      loadingPayload.expected_weight = parsedExpectedWeight;
+    }
+    await applyStatusChange(tripId, 'LOADING_IN_PROGRESS', loadingPayload);
     clearLoadingDraft(tripId);
     return;
   }
@@ -1850,6 +2050,12 @@ async function handleStatusTargetClick(button) {
     extraFields.condition = dispatchDetails.condition;
     extraFields.packing = dispatchDetails.packing;
     extraFields.loading_point = dispatchDetails.loading_point;
+    const parsedExpectedWeight = Number.parseFloat(dispatchDetails.expected_weight);
+    if (!Number.isFinite(parsedExpectedWeight) || parsedExpectedWeight <= 0) {
+      showMessage('Expected weight (MT) is required before moving to ready for loading', false);
+      return;
+    }
+    extraFields.expected_weight = parsedExpectedWeight;
     extraFields.eta = dispatchDetails.eta;
   }
 
@@ -1990,6 +2196,14 @@ function wireRowEvents() {
     });
   });
 
+  document.querySelectorAll('.weight-input[data-weight-field="tare_weight"], .weight-input[data-weight-field="gross_weight"]').forEach((input) => {
+    const tripId = input.dataset.tripId;
+    if (!tripId) return;
+    const syncPreview = () => updateGrossNetPreview(tripId);
+    input.addEventListener('input', syncPreview);
+    input.addEventListener('change', syncPreview);
+  });
+
   document.querySelectorAll('.person-input[data-person-role]').forEach((selectEl) => {
     selectEl.addEventListener('change', () => {
       const tripId = selectEl.dataset.tripId;
@@ -2045,7 +2259,7 @@ function valuesEquivalentForAdmin(field, newValue, oldValue) {
     const b = oldValue ? new Date(oldValue).getTime() : null;
     return a === b;
   }
-  if (['tare_weight', 'gross_weight', 'net_weight'].includes(field)) {
+  if (['expected_weight', 'tare_weight', 'gross_weight', 'net_weight'].includes(field)) {
     const a = newValue === null ? null : Number(newValue);
     const b = oldValue === null || oldValue === undefined || oldValue === '' ? null : Number(oldValue);
     return (a === null && b === null) || (Number.isFinite(a) && Number.isFinite(b) && a === b);
@@ -2062,7 +2276,7 @@ function readAdminFieldValue(fieldKey, inputValue) {
   if (fieldKey === 'eta') {
     return inputValue ? localInputToIstIso(inputValue) : null;
   }
-  if (['tare_weight', 'gross_weight'].includes(fieldKey)) {
+  if (['expected_weight', 'tare_weight', 'gross_weight'].includes(fieldKey)) {
     if (inputValue === '') return null;
     const parsed = Number.parseFloat(inputValue);
     return Number.isFinite(parsed) ? parsed : null;

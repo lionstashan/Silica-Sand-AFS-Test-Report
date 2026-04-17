@@ -1,10 +1,5 @@
 require('dotenv').config();
-const { Pool } = require('pg');
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
+const { pool, initDb } = require('./db');
 
 function addHours(date, hours) {
   return new Date(date.getTime() + hours * 60 * 60 * 1000);
@@ -19,222 +14,407 @@ function subDays(date, days) {
 }
 
 function toIso(date) {
-  return date.toISOString();
+  return date ? date.toISOString() : null;
 }
 
-function getIstParts(date) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).formatToParts(date);
-  const mapped = {};
-  parts.forEach((part) => {
-    if (part.type !== 'literal') mapped[part.type] = part.value;
-  });
-  return mapped;
+function withDefaults(trip) {
+  return {
+    customer_name: 'Bhagwat Minerals',
+    transporter: 'Shree Balaji Logistics',
+    driver_name: 'Ramesh Kumar',
+    driver_phone: '9876543210',
+    gate_person_name: 'X',
+    dispatch_manager_name: null,
+    weight_operator_name: null,
+    loading_person_name: null,
+    accounts_person_name: null,
+    dispatch_done_by: null,
+    tare_done_by: null,
+    gross_done_by: null,
+    loading_done_by: null,
+    billing_done_by: null,
+    material_type: null,
+    grade: null,
+    condition: null,
+    packing: null,
+    loading_point: null,
+    labour_team: null,
+    eta: null,
+    expected_weight: null,
+    waiting_reason: null,
+    load_fix_reason: null,
+    tare_weight: null,
+    gross_weight: null,
+    net_weight: null,
+    gross_weight_attempts: [],
+    final_status: null,
+    is_cancelled: false,
+    cancel_reason: null,
+    ...trip
+  };
 }
 
 async function run() {
+  await initDb();
   const now = new Date();
-  const nowIst = getIstParts(now);
-
-  const inCurrentMonthA = subDays(now, 4);
-  const inCurrentMonthB = subDays(now, 2);
-  const inCancelledExited = subDays(now, 1);
-  const inPrevMonth = new Date(Date.UTC(
-    Number(nowIst.year),
-    Math.max(0, Number(nowIst.month) - 2),
-    20,
-    8,
-    30,
-    0
-  ));
-  const inPrevYear = new Date(Date.UTC(
-    Number(nowIst.year) - 1,
-    11,
-    15,
-    9,
-    0,
-    0
-  ));
-
   const trips = [
-    {
-      truck: 'RJ14GH9821',
+    withDefaults({
+      truck_number: 'RJ14GA1021',
       status: 'EXITED',
-      finalStatus: 'COMPLETED',
-      inTime: inCurrentMonthA,
-      outTime: addHours(inCurrentMonthA, 10),
-      tareWeight: 14500,
-      grossWeight: 40000,
-      netWeight: 25500,
-      materialType: 'Silica A',
-      grade: 'Grade 1',
-      loadingPoint: 'L1',
-      labourTeam: 'T1',
-      eta: addHours(inCurrentMonthA, 2)
-    },
-    {
-      truck: 'GJ05TX7743',
+      final_status: 'COMPLETED',
+      customer_name: 'Jaipur Silica Sand Pvt Ltd',
+      transporter: 'Agarwal Roadlines',
+      driver_name: 'Suresh Meena',
+      driver_phone: '9829123456',
+      gate_person_name: 'X',
+      dispatch_manager_name: 'Jitendra Yadav',
+      weight_operator_name: 'Anil Sharma',
+      loading_person_name: 'Rajesh Kumar',
+      accounts_person_name: 'Anil Sharma',
+      dispatch_done_by: 'Jitendra Yadav',
+      tare_done_by: 'Anil Sharma',
+      gross_done_by: 'Ajay',
+      loading_done_by: 'Rajesh Kumar',
+      billing_done_by: 'Anil Sharma',
+      material_type: 'Silica Sand',
+      grade: 'Glass Grade',
+      condition: 'Dry',
+      packing: 'Loose',
+      loading_point: 'Office Front',
+      labour_team: 'Dinesh',
+      eta: addHours(subDays(now, 1), 2),
+      expected_weight: 25.0,
+      tare_weight: 14.6,
+      gross_weight: 39.8,
+      net_weight: 25.2,
+      in_time: subDays(now, 1),
+      out_time: subHours(now, 8),
+      last_status_update_time: subHours(now, 8)
+    }),
+    withDefaults({
+      truck_number: 'RJ14GA1022',
       status: 'EXITED',
-      finalStatus: 'COMPLETED',
-      inTime: inCurrentMonthB,
-      outTime: addHours(inCurrentMonthB, 12),
-      tareWeight: 14200,
-      grossWeight: 32600,
-      netWeight: 18400,
-      materialType: 'Silica B',
-      grade: 'Grade 2',
-      loadingPoint: 'L2',
-      labourTeam: 'T2',
-      eta: addHours(inCurrentMonthB, 1.5)
-    },
-    {
-      truck: 'MH04KU1188',
+      final_status: 'COMPLETED',
+      customer_name: 'Silica Sand India Pvt Ltd',
+      transporter: 'Shri Ram Transport',
+      driver_name: 'Pawan Yadav',
+      driver_phone: '9829011223',
+      gate_person_name: 'Y',
+      dispatch_manager_name: 'Jitendra Yadav',
+      weight_operator_name: 'Ajay',
+      loading_person_name: 'Jai Bhagwan',
+      accounts_person_name: 'Ajay',
+      dispatch_done_by: 'Jitendra Yadav',
+      tare_done_by: 'Ajay',
+      gross_done_by: 'Anil Sharma',
+      loading_done_by: 'Jai Bhagwan',
+      billing_done_by: 'Ajay',
+      material_type: 'Ball Clay',
+      grade: 'Ball Clay',
+      condition: 'Wet',
+      packing: '4G',
+      loading_point: 'Warehouse',
+      labour_team: 'Loader',
+      eta: addHours(subDays(now, 2), 3),
+      expected_weight: 24.0,
+      tare_weight: 13.9,
+      gross_weight: 37.7,
+      net_weight: 23.8,
+      in_time: subDays(now, 2),
+      out_time: subDays(now, 1.5),
+      last_status_update_time: subDays(now, 1.5)
+    }),
+    withDefaults({
+      truck_number: 'RJ14GA1023',
       status: 'EXITED',
-      finalStatus: 'CANCELLED',
-      inTime: inCancelledExited,
-      outTime: addHours(inCancelledExited, 6),
-      cancelReason: 'E-way bill mismatch at dispatch',
-      isCancelled: true
-    },
-    {
-      truck: 'RJ19QA6620',
-      status: 'EXITED',
-      finalStatus: 'COMPLETED',
-      inTime: inPrevMonth,
-      outTime: addHours(inPrevMonth, 9),
-      tareWeight: 14600,
-      grossWeight: 36900,
-      netWeight: 22300,
-      materialType: 'Silica A',
-      grade: 'Grade 1',
-      loadingPoint: 'L3',
-      labourTeam: 'T3',
-      eta: addHours(inPrevMonth, 1)
-    },
-    {
-      truck: 'HR38AF4402',
-      status: 'EXITED',
-      finalStatus: 'COMPLETED',
-      inTime: inPrevYear,
-      outTime: addHours(inPrevYear, 8),
-      tareWeight: 15000,
-      grossWeight: 45200,
-      netWeight: 30200,
-      materialType: 'Silica B',
-      grade: 'Grade 2',
-      loadingPoint: 'L1',
-      labourTeam: 'T2',
-      eta: addHours(inPrevYear, 1.25)
-    },
-    { truck: 'RJ14GL4100', status: 'SENT_FOR_TARE_WEIGHT', inTime: subHours(now, 2), statusAgeHours: 0.5 },
-    { truck: 'GJ01HV9034', status: 'TARE_WEIGHT_DONE', inTime: subHours(now, 3), tareWeight: 14100, statusAgeHours: 0.75 },
-    { truck: 'RJ27TB2401', status: 'AT_DISPATCH', inTime: subHours(now, 5), tareWeight: 14450, statusAgeHours: 1.5 },
-    { truck: 'UP78CM5531', status: 'WAITING', inTime: subHours(now, 13), tareWeight: 14300, waitingReason: 'Loading bay occupied', statusAgeHours: 2 },
-    {
-      truck: 'RJ09PC7722',
-      status: 'READY_FOR_LOADING',
-      inTime: subHours(now, 26),
-      loadingPoint: 'L1',
-      labourTeam: 'T1',
-      materialType: 'Silica A',
-      grade: 'Grade 1',
-      eta: addHours(now, 2),
-      tareWeight: 14000,
-      statusAgeHours: 3
-    },
-    {
-      truck: 'RJ14NS1289',
-      status: 'LOADING_IN_PROGRESS',
-      inTime: subHours(now, 8),
-      loadingPoint: 'L2',
-      labourTeam: 'T2',
-      materialType: 'Silica B',
-      grade: 'Grade 2',
-      eta: addHours(now, 1),
-      tareWeight: 13900,
-      statusAgeHours: 1
-    },
-    {
-      truck: 'DL1LU8765',
-      status: 'LOADING_COMPLETED',
-      inTime: subHours(now, 30),
-      loadingPoint: 'L3',
-      labourTeam: 'T3',
-      materialType: 'Silica A',
-      grade: 'Grade 1',
-      eta: addHours(now, 0.5),
-      tareWeight: 14700,
-      statusAgeHours: 0.8
-    },
-    {
-      truck: 'CG04LP5510',
-      status: 'GROSS_WEIGHT_PENDING',
-      inTime: subHours(now, 25),
-      tareWeight: 14650,
-      statusAgeHours: 1.75
-    },
-    {
-      truck: 'PB10DM2190',
-      status: 'GROSS_WEIGHT_DONE',
-      inTime: subHours(now, 1),
-      tareWeight: 14200,
-      grossWeight: 36500,
-      netWeight: 22300,
-      statusAgeHours: 0.4
-    },
-    { truck: 'RJ45TA9923', status: 'BILLING_PENDING', inTime: subHours(now, 3), tareWeight: 14100, grossWeight: 35900, netWeight: 21800, statusAgeHours: 1.25 },
-    { truck: 'MH12RW6007', status: 'BILLING_COMPLETED', inTime: subHours(now, 15), tareWeight: 14400, grossWeight: 37200, netWeight: 22800, statusAgeHours: 2.5 },
-    {
-      truck: 'RJ04NA3312',
-      status: 'COMPLETED',
-      finalStatus: 'COMPLETED',
-      inTime: subHours(now, 6),
-      outTime: subHours(now, 1),
-      tareWeight: 14000,
-      grossWeight: 35200,
-      netWeight: 21200
-    },
-    {
-      truck: 'GJ18PR4471',
-      status: 'CANCELLED',
-      finalStatus: 'CANCELLED',
-      inTime: subHours(now, 7),
-      outTime: subHours(now, 1),
-      cancelReason: 'Customer hold at dispatch',
-      isCancelled: true
-    },
-    {
-      truck: 'RJ14MK2234',
+      final_status: 'CANCELLED',
+      is_cancelled: true,
+      cancel_reason: 'Customer hold after dispatch',
+      customer_name: 'Kamdhenu Minerals',
+      transporter: 'Ganpati Carriers',
+      driver_name: 'Rakesh Gurjar',
+      driver_phone: '9870012345',
+      gate_person_name: 'Z',
+      dispatch_manager_name: 'Jitendra Yadav',
+      dispatch_done_by: 'Jitendra Yadav',
+      tare_done_by: 'Ajay',
+      tare_weight: 14.2,
+      waiting_reason: 'Document clarification',
+      in_time: subHours(now, 36),
+      out_time: subHours(now, 24),
+      last_status_update_time: subHours(now, 24)
+    }),
+    withDefaults({
+      truck_number: 'RJ14GA1024',
+      status: 'SENT_FOR_TARE_WEIGHT',
+      customer_name: 'Meenakshi Minerals',
+      gate_person_name: 'X',
+      in_time: subHours(now, 1),
+      last_status_update_time: subHours(now, 0.4)
+    }),
+    withDefaults({
+      truck_number: 'RJ14GA1025',
+      status: 'TARE_WEIGHT_DONE',
+      customer_name: 'Vishwakarma Minerals',
+      gate_person_name: 'Y',
+      tare_weight: 14.4,
+      weight_operator_name: 'Anil Sharma',
+      tare_done_by: 'Anil Sharma',
+      in_time: subHours(now, 2),
+      last_status_update_time: subHours(now, 1.2)
+    }),
+    withDefaults({
+      truck_number: 'RJ14GA1026',
       status: 'AT_DISPATCH',
-      inTime: subHours(now, 49),
-      tareWeight: 14500,
-      statusAgeHours: 10
-    },
-    {
-      truck: 'UP32HZ1176',
+      customer_name: 'Ganesh Minerals',
+      gate_person_name: 'Z',
+      tare_weight: 14.1,
+      weight_operator_name: 'Ajay',
+      tare_done_by: 'Ajay',
+      dispatch_manager_name: 'Jitendra Yadav',
+      in_time: subHours(now, 4),
+      last_status_update_time: subHours(now, 1.5)
+    }),
+    withDefaults({
+      truck_number: 'RJ14GA1027',
       status: 'WAITING',
-      inTime: subHours(now, 22),
-      tareWeight: 13800,
-      waitingReason: 'Loading team shift change',
-      statusAgeHours: 5
-    },
-    {
-      truck: 'KA03MN7742',
+      customer_name: 'JMD',
+      gate_person_name: 'X',
+      tare_weight: 14.3,
+      waiting_reason: 'Loading bay occupied',
+      dispatch_manager_name: 'Jitendra Yadav',
+      dispatch_done_by: 'Jitendra Yadav',
+      in_time: subHours(now, 13),
+      last_status_update_time: subHours(now, 2.3)
+    }),
+    withDefaults({
+      truck_number: 'RJ14GA1028',
       status: 'READY_FOR_LOADING',
-      inTime: subHours(now, 11),
-      loadingPoint: 'L2',
-      labourTeam: 'T1',
-      materialType: 'Silica B',
-      grade: 'Grade 2',
+      customer_name: 'Dashmesh Minerals Pvt Ltd',
+      gate_person_name: 'Y',
+      dispatch_manager_name: 'Jitendra Yadav',
+      dispatch_done_by: 'Jitendra Yadav',
+      weight_operator_name: 'Anil Sharma',
+      tare_done_by: 'Anil Sharma',
+      material_type: 'Silica Sand',
+      grade: 'Foundry Grade',
+      condition: 'Dry',
+      packing: 'Old',
+      loading_point: 'Old Dry Plant',
       eta: addHours(now, 1),
-      tareWeight: 13950,
-      statusAgeHours: 2
-    }
+      expected_weight: 26.0,
+      tare_weight: 14.8,
+      in_time: subHours(now, 7),
+      last_status_update_time: subHours(now, 1)
+    }),
+    withDefaults({
+      truck_number: 'RJ14GA1029',
+      status: 'LOADING_IN_PROGRESS',
+      customer_name: 'R.R. Minerals',
+      gate_person_name: 'Z',
+      dispatch_manager_name: 'Jitendra Yadav',
+      dispatch_done_by: 'Jitendra Yadav',
+      loading_person_name: 'Rajesh Kumar',
+      loading_done_by: 'Rajesh Kumar',
+      material_type: 'Silica Sand',
+      grade: '30-80',
+      condition: 'Dry',
+      packing: '3G',
+      loading_point: 'Near Crusher Plant',
+      labour_team: 'Shambhu',
+      eta: addHours(now, 0.8),
+      expected_weight: 24.5,
+      tare_weight: 14.0,
+      in_time: subHours(now, 9),
+      last_status_update_time: subHours(now, 1.1)
+    }),
+    withDefaults({
+      truck_number: 'RJ14GA1030',
+      status: 'LOADING_COMPLETED',
+      customer_name: 'Ojaswi Mines and Minerals',
+      gate_person_name: 'X',
+      dispatch_manager_name: 'Jitendra Yadav',
+      dispatch_done_by: 'Jitendra Yadav',
+      loading_person_name: 'Jai Bhagwan',
+      loading_done_by: 'Jai Bhagwan',
+      material_type: 'Ball Clay',
+      grade: 'Raw',
+      condition: 'Wet',
+      packing: 'Loose',
+      loading_point: 'Glass Plant',
+      labour_team: 'Chandan',
+      eta: addHours(now, 0.5),
+      expected_weight: 23.0,
+      tare_weight: 13.7,
+      in_time: subHours(now, 12),
+      last_status_update_time: subHours(now, 0.8)
+    }),
+    withDefaults({
+      truck_number: 'RJ14GA1031',
+      status: 'GROSS_WEIGHT_PENDING',
+      customer_name: 'SKM',
+      gate_person_name: 'Y',
+      dispatch_manager_name: 'Jitendra Yadav',
+      dispatch_done_by: 'Jitendra Yadav',
+      loading_person_name: 'Rajesh Kumar',
+      loading_done_by: 'Rajesh Kumar',
+      material_type: 'Silica Sand',
+      grade: '30-150',
+      condition: 'Dry',
+      packing: '4G',
+      loading_point: 'Office Front',
+      labour_team: 'JCB',
+      eta: addHours(now, 0.2),
+      expected_weight: 25.5,
+      tare_weight: 14.5,
+      in_time: subHours(now, 16),
+      last_status_update_time: subHours(now, 2)
+    }),
+    withDefaults({
+      truck_number: 'RJ14GA1032',
+      status: 'LOAD_FIX_REQUIRED',
+      customer_name: 'RP Mines',
+      gate_person_name: 'Z',
+      dispatch_manager_name: 'Jitendra Yadav',
+      dispatch_done_by: 'Jitendra Yadav',
+      loading_person_name: 'Jai Bhagwan',
+      loading_done_by: 'Jai Bhagwan',
+      weight_operator_name: 'Ajay',
+      gross_done_by: 'Ajay',
+      material_type: 'Silica Sand',
+      grade: '18-30',
+      condition: 'Dry',
+      packing: 'Loose',
+      loading_point: 'Warehouse',
+      labour_team: 'Loader',
+      eta: addHours(now, 1.2),
+      expected_weight: 24.0,
+      tare_weight: 14.2,
+      gross_weight: 37.5,
+      net_weight: 23.3,
+      load_fix_reason: 'Net weight under expected, send back for correction',
+      gross_weight_attempts: [
+        {
+          tare_weight: 14.2,
+          gross_weight: 37.5,
+          net_weight: 23.3,
+          decision: 'RECHECK',
+          reason: 'Net weight under expected, send back for correction',
+          operator_name: 'Ajay',
+          at: toIso(subHours(now, 0.6))
+        }
+      ],
+      in_time: subHours(now, 20),
+      last_status_update_time: subHours(now, 0.6)
+    }),
+    withDefaults({
+      truck_number: 'RJ14GA1033',
+      status: 'GROSS_WEIGHT_DONE',
+      customer_name: 'Tejaswi Minerals',
+      gate_person_name: 'X',
+      dispatch_manager_name: 'Jitendra Yadav',
+      dispatch_done_by: 'Jitendra Yadav',
+      weight_operator_name: 'Anil Sharma',
+      tare_done_by: 'Anil Sharma',
+      gross_done_by: 'Anil Sharma',
+      material_type: 'Silica Sand',
+      grade: 'Foundry Grade',
+      condition: 'Dry',
+      packing: 'Old',
+      loading_point: 'Old Dry Plant',
+      labour_team: 'Tractor',
+      eta: addHours(now, 0.1),
+      expected_weight: 24.0,
+      tare_weight: 14.3,
+      gross_weight: 38.4,
+      net_weight: 24.1,
+      in_time: subHours(now, 6),
+      last_status_update_time: subHours(now, 0.7)
+    }),
+    withDefaults({
+      truck_number: 'RJ14GA1034',
+      status: 'BILLING_PENDING',
+      customer_name: 'Harsidhi Harbel',
+      gate_person_name: 'Y',
+      dispatch_manager_name: 'Jitendra Yadav',
+      dispatch_done_by: 'Jitendra Yadav',
+      accounts_person_name: 'Ajay',
+      billing_done_by: null,
+      material_type: 'Ball Clay',
+      grade: 'Ball Clay',
+      condition: 'Wet',
+      packing: '3G',
+      loading_point: 'Warehouse',
+      labour_team: 'Dinesh',
+      eta: addHours(now, 0.1),
+      expected_weight: 22.5,
+      tare_weight: 13.6,
+      gross_weight: 36.0,
+      net_weight: 22.4,
+      in_time: subHours(now, 11),
+      last_status_update_time: subHours(now, 0.3)
+    }),
+    withDefaults({
+      truck_number: 'RJ14GA1035',
+      status: 'COMPLETED',
+      final_status: 'COMPLETED',
+      customer_name: 'Bhagwat Minerals',
+      gate_person_name: 'Z',
+      dispatch_manager_name: 'Jitendra Yadav',
+      dispatch_done_by: 'Jitendra Yadav',
+      accounts_person_name: 'Anil Sharma',
+      billing_done_by: 'Anil Sharma',
+      material_type: 'Silica Sand',
+      grade: '16-30',
+      condition: 'Dry',
+      packing: 'Loose',
+      loading_point: 'Glass Plant',
+      labour_team: 'JCB',
+      eta: addHours(subHours(now, 8), 1),
+      expected_weight: 23.5,
+      tare_weight: 14.0,
+      gross_weight: 37.8,
+      net_weight: 23.8,
+      in_time: subHours(now, 8),
+      out_time: subHours(now, 1.5),
+      last_status_update_time: subHours(now, 1.5)
+    }),
+    withDefaults({
+      truck_number: 'RJ14GA1036',
+      status: 'CANCELLED',
+      final_status: 'CANCELLED',
+      is_cancelled: true,
+      cancel_reason: 'Driver unavailable for dispatch',
+      customer_name: 'Kamdhenu Minerals',
+      gate_person_name: 'X',
+      dispatch_manager_name: 'Jitendra Yadav',
+      dispatch_done_by: 'Jitendra Yadav',
+      tare_weight: 14.4,
+      waiting_reason: 'Driver lunch break exceeded',
+      in_time: subHours(now, 10),
+      out_time: subHours(now, 4),
+      last_status_update_time: subHours(now, 4)
+    })
   ];
+
+  const insertSql = `
+    INSERT INTO trips (
+      truck_number, customer_name, transporter, driver_name, driver_phone, gate_person_name,
+      dispatch_manager_name, weight_operator_name, loading_person_name, accounts_person_name,
+      dispatch_done_by, tare_done_by, gross_done_by, loading_done_by, billing_done_by,
+      material_type, grade, condition, packing, loading_point, labour_team, eta, expected_weight,
+      waiting_reason, load_fix_reason, tare_weight, gross_weight, net_weight, gross_weight_attempts,
+      status, final_status, is_cancelled, cancel_reason, in_time, out_time, last_status_update_time
+    )
+    VALUES (
+      $1,$2,$3,$4,$5,$6,
+      $7,$8,$9,$10,
+      $11,$12,$13,$14,$15,
+      $16,$17,$18,$19,$20,$21,$22,$23,
+      $24,$25,$26,$27,$28,$29,
+      $30,$31,$32,$33,$34,$35,$36
+    )
+  `;
 
   const client = await pool.connect();
   try {
@@ -242,52 +422,48 @@ async function run() {
     await client.query('TRUNCATE TABLE trips RESTART IDENTITY');
 
     for (const trip of trips) {
-      const inTime = trip.inTime || now;
-      const outTime = trip.outTime || null;
-      const isCancelled = Boolean(trip.isCancelled);
-      const finalStatus = trip.finalStatus || null;
-      const lastStatusUpdate = trip.statusAgeHours ? subHours(now, trip.statusAgeHours) : (outTime || inTime);
-      await client.query(
-        `INSERT INTO trips (
-          truck_number, customer_name, transporter, driver_name, driver_phone, gate_person_name,
-          dispatch_manager_name, weight_operator_name, material_type, grade, loading_point, labour_team,
-          eta, waiting_reason, tare_weight, gross_weight, net_weight, status, final_status, is_cancelled,
-          cancel_reason, in_time, out_time, last_status_update_time
-        )
-        VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
-          $13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24
-        )`,
-        [
-          trip.truck,
-          trip.customerName || (trip.materialType === 'Silica B' ? 'Shree Cement' : 'UltraTech Cement'),
-          trip.transporter || 'Shree Ram Logistics',
-          trip.driverName || 'Ramesh Kumar',
-          trip.driverPhone || '9876543210',
-          trip.gatePersonName || 'Sohan',
-          trip.dispatchManagerName || 'Amit Sharma',
-          trip.weightOperatorName || 'Vikas Yadav',
-          trip.materialType || null,
-          trip.grade || null,
-          trip.loadingPoint || null,
-          trip.labourTeam || null,
-          trip.eta ? toIso(trip.eta) : null,
-          trip.waitingReason || null,
-          trip.tareWeight || null,
-          trip.grossWeight || null,
-          trip.netWeight || null,
-          trip.status,
-          finalStatus,
-          isCancelled,
-          trip.cancelReason || null,
-          toIso(inTime),
-          outTime ? toIso(outTime) : null,
-          toIso(lastStatusUpdate)
-        ]
-      );
+      await client.query(insertSql, [
+        trip.truck_number,
+        trip.customer_name,
+        trip.transporter,
+        trip.driver_name,
+        trip.driver_phone,
+        trip.gate_person_name,
+        trip.dispatch_manager_name,
+        trip.weight_operator_name,
+        trip.loading_person_name,
+        trip.accounts_person_name,
+        trip.dispatch_done_by,
+        trip.tare_done_by,
+        trip.gross_done_by,
+        trip.loading_done_by,
+        trip.billing_done_by,
+        trip.material_type,
+        trip.grade,
+        trip.condition,
+        trip.packing,
+        trip.loading_point,
+        trip.labour_team,
+        toIso(trip.eta),
+        trip.expected_weight,
+        trip.waiting_reason,
+        trip.load_fix_reason,
+        trip.tare_weight,
+        trip.gross_weight,
+        trip.net_weight,
+        JSON.stringify(trip.gross_weight_attempts || []),
+        trip.status,
+        trip.final_status,
+        trip.is_cancelled,
+        trip.cancel_reason,
+        toIso(trip.in_time),
+        toIso(trip.out_time),
+        toIso(trip.last_status_update_time)
+      ]);
     }
 
     await client.query('COMMIT');
+    console.log(`Seed complete. Inserted trips: ${trips.length}`);
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -295,16 +471,6 @@ async function run() {
     client.release();
     await pool.end();
   }
-
-  console.log('Seed complete. Inserted trips:', trips.length);
-  console.log('Expected key demo metrics:');
-  console.log('- Completed (Month): 2');
-  console.log('- Completed (Year): 3');
-  console.log('- Quantity (Month): 43.90 tons');
-  console.log('- Quantity (Year): 66.20 tons');
-  console.log('- Cancelled (Exited): 1');
-  console.log('- Loading zone should have READY_FOR_LOADING / LOADING_IN_PROGRESS / LOADING_COMPLETED entries');
-  console.log('- Accounts zone should have BILLING_PENDING / BILLING_COMPLETED entries');
 }
 
 run().catch((error) => {

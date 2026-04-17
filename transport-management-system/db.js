@@ -40,6 +40,7 @@ async function initDb() {
       loading_point TEXT,
       labour_team TEXT,
       eta TIMESTAMPTZ,
+      expected_weight NUMERIC,
       waiting_reason TEXT,
       load_fix_reason TEXT,
       tare_weight NUMERIC,
@@ -64,6 +65,7 @@ async function initDb() {
     ALTER TABLE trips
     ADD COLUMN IF NOT EXISTS labour_team TEXT,
     ADD COLUMN IF NOT EXISTS eta TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS expected_weight NUMERIC,
     ADD COLUMN IF NOT EXISTS waiting_reason TEXT,
     ADD COLUMN IF NOT EXISTS load_fix_reason TEXT,
     ADD COLUMN IF NOT EXISTS last_status_update_time TIMESTAMPTZ,
@@ -81,6 +83,13 @@ async function initDb() {
     ADD COLUMN IF NOT EXISTS billing_done_by TEXT,
     ADD COLUMN IF NOT EXISTS condition TEXT,
     ADD COLUMN IF NOT EXISTS packing TEXT
+  `);
+  await pool.query(`
+    ALTER TABLE trips
+    ALTER COLUMN expected_weight TYPE NUMERIC USING expected_weight::numeric,
+    ALTER COLUMN tare_weight TYPE NUMERIC USING tare_weight::numeric,
+    ALTER COLUMN gross_weight TYPE NUMERIC USING gross_weight::numeric,
+    ALTER COLUMN net_weight TYPE NUMERIC USING net_weight::numeric
   `);
   await pool.query(`
     UPDATE trips

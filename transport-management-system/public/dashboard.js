@@ -269,8 +269,12 @@ function parseWeight(value) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function formatTons(weightInKg) {
-  return `${(weightInKg / 1000).toFixed(2)} tons`;
+function formatWeightMT(value) {
+  if (value === null || value === undefined) return '-';
+  if (typeof value === 'string' && !value.trim()) return '-';
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '-';
+  return `${numeric.toFixed(3)} MT`;
 }
 
 function getTruckNumbers(trips) {
@@ -302,7 +306,7 @@ function updateSummaryCards(trips) {
     const tripIst = getIstDateParts(tripDate);
     return tripIst.year === nowIst.year && tripIst.month === nowIst.month;
   }).length;
-  const quantityTodayKg = visibleTrips.reduce((total, trip) => {
+  const quantityTodayMt = visibleTrips.reduce((total, trip) => {
     if (!(trip.status === 'EXITED' && getExitedOutcome(trip) === 'COMPLETED')) return total;
     const completedDate = parseTripDate(trip.out_time || trip.in_time);
     if (!completedDate) return total;
@@ -317,7 +321,7 @@ function updateSummaryCards(trips) {
     const tripIst = getIstDateParts(tripDate);
     return tripIst.year === nowIst.year;
   }).length;
-  const quantityMonthKg = visibleTrips.reduce((total, trip) => {
+  const quantityMonthMt = visibleTrips.reduce((total, trip) => {
     if (!(trip.status === 'EXITED' && getExitedOutcome(trip) === 'COMPLETED')) return total;
     const tripDate = parseTripDate(trip.in_time);
     if (!tripDate) return total;
@@ -325,7 +329,7 @@ function updateSummaryCards(trips) {
     if (tripIst.year !== nowIst.year || tripIst.month !== nowIst.month) return total;
     return total + parseWeight(trip.net_weight);
   }, 0);
-  const quantityYearKg = visibleTrips.reduce((total, trip) => {
+  const quantityYearMt = visibleTrips.reduce((total, trip) => {
     if (!(trip.status === 'EXITED' && getExitedOutcome(trip) === 'COMPLETED')) return total;
     const tripDate = parseTripDate(trip.in_time);
     if (!tripDate) return total;
@@ -370,9 +374,9 @@ function updateSummaryCards(trips) {
     ${createSummaryCard('Completed (Today)', completedToday, 'card-green')}
     ${createSummaryCard('Completed (Month)', completedMonth, 'card-green', [], false)}
     ${createSummaryCard('Completed (Year)', completedYear, 'card-green', [], false)}
-    ${createSummaryCard('Quantity (Today)', formatTons(quantityTodayKg), 'card-light-blue')}
-    ${createSummaryCard('Quantity (Month)', formatTons(quantityMonthKg), 'card-light-blue', [], false)}
-    ${createSummaryCard('Quantity (Year)', formatTons(quantityYearKg), 'card-purple', [], false)}
+    ${createSummaryCard('Quantity (Today)', formatWeightMT(quantityTodayMt), 'card-light-blue')}
+    ${createSummaryCard('Quantity (Month)', formatWeightMT(quantityMonthMt), 'card-light-blue', [], false)}
+    ${createSummaryCard('Quantity (Year)', formatWeightMT(quantityYearMt), 'card-purple', [], false)}
     ${createSummaryCard('Cancelled (Exited)', cancelledExited, 'card-red', [], false)}
     ${createSummaryCard('In Plant', inPlantTrips.length, 'card-blue', [], false)}
     ${createSummaryCard('Dispatch', dispatchCount, 'card-light-blue', dispatchTruckNumbers)}
@@ -553,6 +557,7 @@ function statusDetailLabel(key) {
     condition: 'Condition',
     packing: 'Packing',
     eta: 'ETA',
+    expected_weight: 'Expected',
     tare_weight: 'Tare',
     gross_weight: 'Gross',
     net_weight: 'Net',
@@ -578,7 +583,7 @@ function formatStatusDetailValue(key, value) {
     const attempts = Array.isArray(value) ? value : [];
     return `${attempts.length} entries`;
   }
-  if (['tare_weight', 'gross_weight', 'net_weight'].includes(key)) return `${value} kg`;
+  if (['expected_weight', 'tare_weight', 'gross_weight', 'net_weight'].includes(key)) return formatWeightMT(value);
   return String(value);
 }
 
@@ -619,6 +624,9 @@ function renderStatusTimeline(trip) {
 function openTimelineModal(tripId) {
   const trip = allTrips.find((item) => String(item.id) === String(tripId));
   if (!trip || !timelineModal || !timelineModalTitle || !timelineModalBody) return;
+  const expected = Number(trip.expected_weight);
+  const net = Number(trip.net_weight);
+  const variance = Number.isFinite(expected) && Number.isFinite(net) ? (net - expected) : null;
   timelineModalTitle.textContent = `Status Timeline - ${trip.truck_number || 'Truck'}`;
   timelineModalBody.innerHTML = `
     <div class="timeline-meta">
@@ -637,6 +645,9 @@ function openTimelineModal(tripId) {
       <div><strong>Gross Done By:</strong> ${escapeHtml(trip.gross_done_by || '-')}</div>
       <div><strong>Loading Done By:</strong> ${escapeHtml(trip.loading_done_by || '-')}</div>
       <div><strong>Billing Done By:</strong> ${escapeHtml(trip.billing_done_by || '-')}</div>
+      <div><strong>Expected Weight:</strong> ${formatWeightMT(trip.expected_weight)}</div>
+      <div><strong>Final Net Weight:</strong> ${formatWeightMT(trip.net_weight)}</div>
+      <div><strong>Variance:</strong> ${variance === null ? '-' : formatWeightMT(variance)}</div>
       <div><strong>Load Fix Reason:</strong> ${escapeHtml(trip.load_fix_reason || '-')}</div>
       <div><strong>Gross Attempts:</strong> ${parseGrossWeightAttempts(trip).length}</div>
     </div>
@@ -696,7 +707,8 @@ function updateActiveTripsTable(trips) {
         <td>${getStatusWithCancelReason(trip)}</td>
         <td>${trip.customer_name || ''}</td>
         <td>${escapeHtml(trip.transporter || '')}</td>
-        <td>${trip.net_weight ? trip.net_weight + ' kg' : ''}</td>
+        <td>${formatWeightMT(trip.expected_weight)}</td>
+        <td>${formatWeightMT(trip.net_weight)}</td>
         <td>${formatDateTime(trip.in_time)}</td>
         <td><span data-time-scope="active" data-time-kind="total" data-trip-id="${trip.id}">${formatMinutes(totalTime)}</span></td>
       </tr>
@@ -719,7 +731,8 @@ function updateActiveTripsTable(trips) {
           <div class="mobile-trip-grid">
             <div><strong>Customer:</strong> ${escapeHtml(trip.customer_name || '-')}</div>
             ${renderMobileRoleNames(trip)}
-            <div><strong>Net:</strong> ${trip.net_weight ? `${trip.net_weight} kg` : '-'}</div>
+            <div><strong>Expected:</strong> ${formatWeightMT(trip.expected_weight)}</div>
+            <div><strong>Net:</strong> ${formatWeightMT(trip.net_weight)}</div>
             <div><strong>Time In:</strong> ${formatDateTime(trip.in_time)}</div>
             <div><strong>Total:</strong> <span data-time-scope="active" data-time-kind="total" data-trip-id="${trip.id}">${formatMinutes(totalTime)}</span></div>
             <div><strong>Stage:</strong> <span data-time-scope="active" data-time-kind="stage" data-trip-id="${trip.id}">${formatMinutes(stageTime)}</span></div>
@@ -757,6 +770,9 @@ function renderReportTable(trips) {
     const totalMinutes = getFinalizedTotalMinutes(trip);
     const cancelReason = isCancelledTrip(trip) ? (trip.cancel_reason || '-') : '-';
     const exitedOutcome = getExitedOutcome(trip);
+    const expected = Number(trip.expected_weight);
+    const net = Number(trip.net_weight);
+    const variance = Number.isFinite(expected) && Number.isFinite(net) ? (net - expected) : null;
     const statusLabel = trip.status === 'EXITED'
       ? (exitedOutcome === 'CANCELLED' ? 'CANCELLED / EXITED' : 'COMPLETED / EXITED')
       : (isCancelledTrip(trip) ? 'CANCELLED' : 'COMPLETED');
@@ -765,7 +781,9 @@ function renderReportTable(trips) {
         <td>${getTruckDetailLink(trip)}</td>
         <td>${trip.customer_name || ''}</td>
         <td>${statusLabel}</td>
-        <td>${trip.net_weight ? `${trip.net_weight} kg` : ''}</td>
+        <td>${formatWeightMT(trip.expected_weight)}</td>
+        <td>${formatWeightMT(trip.net_weight)}</td>
+        <td>${variance === null ? '-' : formatWeightMT(variance)}</td>
         <td>${formatDateTime(trip.in_time)}</td>
         <td>${formatDateTime(trip.out_time)}</td>
         <td>${formatMinutes(totalMinutes)}</td>
@@ -779,6 +797,9 @@ function renderReportTable(trips) {
       const totalMinutes = getFinalizedTotalMinutes(trip);
       const cancelReason = isCancelledTrip(trip) ? (trip.cancel_reason || '-') : '-';
       const exitedOutcome = getExitedOutcome(trip);
+      const expected = Number(trip.expected_weight);
+      const net = Number(trip.net_weight);
+      const variance = Number.isFinite(expected) && Number.isFinite(net) ? (net - expected) : null;
       const statusLabel = trip.status === 'EXITED'
         ? (exitedOutcome === 'CANCELLED' ? 'CANCELLED / EXITED' : 'COMPLETED / EXITED')
         : (isCancelledTrip(trip) ? 'CANCELLED' : 'COMPLETED');
@@ -790,7 +811,9 @@ function renderReportTable(trips) {
           </div>
           <div class="mobile-trip-grid">
             <div><strong>Customer:</strong> ${escapeHtml(trip.customer_name || '-')}</div>
-            <div><strong>Net:</strong> ${trip.net_weight ? `${trip.net_weight} kg` : '-'}</div>
+            <div><strong>Expected:</strong> ${formatWeightMT(trip.expected_weight)}</div>
+            <div><strong>Net:</strong> ${formatWeightMT(trip.net_weight)}</div>
+            <div><strong>Variance:</strong> ${variance === null ? '-' : formatWeightMT(variance)}</div>
             <div><strong>In:</strong> ${formatDateTime(trip.in_time)}</div>
             <div><strong>Out:</strong> ${formatDateTime(trip.out_time)}</div>
             <div><strong>Total:</strong> ${formatMinutes(totalMinutes)}</div>
@@ -873,11 +896,13 @@ function exportReportCsv() {
     'Loading Point',
     'Labour Team',
     'ETA',
+    'Expected Weight (MT)',
     'Waiting Reason',
     'Load Fix Reason',
-    'Tare Weight',
-    'Gross Weight',
-    'Net Weight',
+    'Tare Weight (MT)',
+    'Gross Weight (MT)',
+    'Net Weight (MT)',
+    'Variance (MT)',
     'Gross Attempts Count',
     'In Time',
     'Out Time',
@@ -891,6 +916,9 @@ function exportReportCsv() {
     const status = trip.status === 'EXITED'
       ? (exitedOutcome === 'CANCELLED' ? 'CANCELLED / EXITED' : 'COMPLETED / EXITED')
       : (isCancelledTrip(trip) ? 'CANCELLED' : 'COMPLETED');
+    const expected = Number(trip.expected_weight);
+    const net = Number(trip.net_weight);
+    const variance = Number.isFinite(expected) && Number.isFinite(net) ? (net - expected) : null;
     const totalTime = formatMinutes(getFinalizedTotalMinutes(trip));
     const row = [
       trip.id || '',
@@ -921,11 +949,13 @@ function exportReportCsv() {
       trip.loading_point || '',
       trip.labour_team || '',
       formatDateTime(trip.eta),
+      trip.expected_weight || '',
       trip.waiting_reason || '',
       trip.load_fix_reason || '',
       trip.tare_weight || '',
       trip.gross_weight || '',
       trip.net_weight || '',
+      variance === null ? '' : variance.toFixed(3),
       Array.isArray(trip.gross_weight_attempts)
         ? trip.gross_weight_attempts.length
         : ((typeof trip.gross_weight_attempts === 'string' && trip.gross_weight_attempts)

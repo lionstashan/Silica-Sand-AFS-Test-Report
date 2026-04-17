@@ -108,6 +108,7 @@ const TRACKED_DETAIL_FIELDS = [
   'condition',
   'packing',
   'eta',
+  'expected_weight',
   'tare_weight',
   'gross_weight',
   'net_weight',
@@ -144,6 +145,27 @@ function getDetailChanges(beforeTripData, afterTripData) {
     changes[field] = afterValue;
   });
   return changes;
+}
+
+function getReadyForLoadingSnapshot(existingTrip, requestBody) {
+  const resolved = {
+    material_type: normalizeEmpty(requestBody.material_type ?? existingTrip.material_type),
+    grade: normalizeEmpty(requestBody.grade ?? existingTrip.grade),
+    condition: normalizeEmpty(requestBody.condition ?? existingTrip.condition),
+    packing: normalizeEmpty(requestBody.packing ?? existingTrip.packing),
+    loading_point: normalizeEmpty(requestBody.loading_point ?? existingTrip.loading_point),
+    eta: normalizeEmpty(requestBody.eta ?? existingTrip.eta),
+    expected_weight: toFiniteNumberOrNull(requestBody.expected_weight ?? existingTrip.expected_weight),
+    dispatch_manager_name: normalizeEmpty(requestBody.dispatch_manager_name ?? existingTrip.dispatch_manager_name),
+    dispatch_done_by: normalizeEmpty(requestBody.dispatch_done_by ?? existingTrip.dispatch_done_by)
+  };
+
+  const snapshot = {};
+  Object.entries(resolved).forEach(([field, value]) => {
+    if (value === null || value === undefined || value === '') return;
+    snapshot[field] = value;
+  });
+  return snapshot;
 }
 
 function getCurrentIstTimestamp() {
@@ -355,6 +377,7 @@ app.post('/trip', async (req, res) => {
     loading_point,
     labour_team,
     eta,
+    expected_weight,
     waiting_reason,
     load_fix_reason,
     tare_weight,
@@ -406,6 +429,7 @@ app.post('/trip', async (req, res) => {
         loading_point,
         labour_team,
         eta,
+        expected_weight,
         waiting_reason,
         load_fix_reason,
         tare_weight,
@@ -420,7 +444,7 @@ app.post('/trip', async (req, res) => {
         out_time,
         last_status_update_time,
         status_history
-      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37)
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38)
       RETURNING *`,
       [
         sequence_number,
@@ -446,6 +470,7 @@ app.post('/trip', async (req, res) => {
         loading_point,
         labour_team,
         eta,
+        expected_weight,
         waiting_reason,
         load_fix_reason,
         tare_weight,
@@ -522,6 +547,7 @@ app.put('/trip/:id', async (req, res) => {
     'loading_point',
     'labour_team',
     'eta',
+    'expected_weight',
     'waiting_reason',
     'load_fix_reason',
     'tare_weight',
@@ -556,6 +582,13 @@ app.put('/trip/:id', async (req, res) => {
         return res.status(400).json({ error: `Invalid transition: ${currentStatus} -> ${requestedStatus}` });
       }
 
+      if (requestedStatus === 'READY_FOR_LOADING') {
+        const expectedWeight = toFiniteNumberOrNull(req.body.expected_weight ?? existingTrip.expected_weight);
+        if (expectedWeight === null || expectedWeight <= 0) {
+          return res.status(400).json({ error: 'Expected weight (MT) is required before ready for loading' });
+        }
+      }
+
       if (requestedStatus === 'LOADING_IN_PROGRESS') {
         const effective = {
           material_type: normalizeEmpty(req.body.material_type ?? existingTrip.material_type),
@@ -564,7 +597,8 @@ app.put('/trip/:id', async (req, res) => {
           packing: normalizeEmpty(req.body.packing ?? existingTrip.packing),
           loading_point: normalizeEmpty(req.body.loading_point ?? existingTrip.loading_point),
           labour_team: normalizeEmpty(req.body.labour_team ?? existingTrip.labour_team),
-          eta: normalizeEmpty(req.body.eta ?? existingTrip.eta)
+          eta: normalizeEmpty(req.body.eta ?? existingTrip.eta),
+          expected_weight: toFiniteNumberOrNull(req.body.expected_weight ?? existingTrip.expected_weight)
         };
         const summarize = () => ({
           material_type: effective.material_type || null,
@@ -573,7 +607,8 @@ app.put('/trip/:id', async (req, res) => {
           packing: effective.packing || null,
           loading_point: effective.loading_point || null,
           labour_team: effective.labour_team || null,
-          eta: effective.eta || null
+          eta: effective.eta || null,
+          expected_weight: effective.expected_weight
         });
 
         if (!hasValue(effective.material_type)) {
@@ -597,6 +632,9 @@ app.put('/trip/:id', async (req, res) => {
         if (!hasValue(effective.eta)) {
           return res.status(400).json({ error: 'ETA is required before starting loading', received: summarize() });
         }
+        if (effective.expected_weight === null || effective.expected_weight <= 0) {
+          return res.status(400).json({ error: 'Expected weight (MT) is required before starting loading', received: summarize() });
+        }
       }
 
       if (requestedStatus === 'LOAD_FIX_REQUIRED') {
@@ -614,7 +652,13 @@ app.put('/trip/:id', async (req, res) => {
   }
 
   if (isStatusChange) {
-    const requestedDetailChanges = getDetailChanges(existingTrip, { ...mergedTripData, status: requestedStatus });
+    let requestedDetailChanges = getDetailChanges(existingTrip, { ...mergedTripData, status: requestedStatus });
+    if (requestedStatus === 'READY_FOR_LOADING') {
+      requestedDetailChanges = {
+        ...getReadyForLoadingSnapshot(existingTrip, req.body),
+        ...requestedDetailChanges
+      };
+    }
     const requestedAtIst = getCurrentIstTimestamp();
     let nextHistory = applyStatusHistoryTransition(
       existingTrip.status_history,
