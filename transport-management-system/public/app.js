@@ -216,6 +216,14 @@ function parseTripDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function isInputEditingActive() {
+  const activeEl = document.activeElement;
+  if (!activeEl) return false;
+  if (activeEl.isContentEditable) return true;
+  const tag = (activeEl.tagName || '').toUpperCase();
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+}
+
 function calculateElapsedMinutes(startTime) {
   if (!startTime) return null;
   const diffMs = Date.now() - startTime.getTime();
@@ -1944,6 +1952,7 @@ async function loadTrips() {
 }
 
 function updateTimeMetrics() {
+  if (isInputEditingActive()) return;
   const totalTimeElements = document.querySelectorAll('[data-time-scope="main"][data-time-kind="total"]');
   totalTimeElements.forEach((element) => {
     const tripId = element.dataset.tripId;
@@ -2388,7 +2397,10 @@ document.addEventListener('DOMContentLoaded', () => {
   loadTrips();
 
   setInterval(updateTimeMetrics, 5000);
-  window.addEventListener('resize', applyFilters);
+  window.addEventListener('resize', () => {
+    if (isInputEditingActive()) return;
+    applyFilters();
+  });
 
   document.getElementById('truck-search').addEventListener('input', applyFilters);
   document.getElementById('status-filter').addEventListener('change', applyFilters);

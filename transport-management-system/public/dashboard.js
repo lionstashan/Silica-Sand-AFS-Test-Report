@@ -1036,7 +1036,10 @@ async function loadDashboardData() {
 
 function startAutoRefresh() {
   loadDashboardData(); // Initial load
-  refreshInterval = setInterval(loadDashboardData, 5000); // Refresh every 5 seconds
+  refreshInterval = setInterval(() => {
+    if (isInputEditingActive()) return;
+    loadDashboardData();
+  }, 5000); // Refresh every 5 seconds unless user is typing
   setInterval(updateTimeMetrics, 5000); // Update time metrics every 5 seconds
 }
 
@@ -1044,6 +1047,14 @@ function stopAutoRefresh() {
   if (refreshInterval) {
     clearInterval(refreshInterval);
   }
+}
+
+function isInputEditingActive() {
+  const activeEl = document.activeElement;
+  if (!activeEl) return false;
+  if (activeEl.isContentEditable) return true;
+  const tag = (activeEl.tagName || '').toUpperCase();
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 }
 
 // Start the dashboard when page loads
