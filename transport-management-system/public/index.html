@@ -13,9 +13,9 @@
       <h2>Select Your Role</h2>
       <div class="role-buttons">
         <button class="role-btn" data-role="Gate">Gate</button>
+        <button class="role-btn" data-role="Weighbridge">Weighbridge</button>
         <button class="role-btn" data-role="Dispatch">Dispatch</button>
         <button class="role-btn" data-role="Loading">Loading</button>
-        <button class="role-btn" data-role="Weighbridge">Weighbridge</button>
         <button class="role-btn" data-role="Accounts">Accounts</button>
         <button class="role-btn" data-role="Admin">Admin</button>
       </div>
@@ -76,13 +76,10 @@
         </label>
 
         <label>Transporter
-          <select name="transporter_select" id="transporter-select">
-            <option value="">Select Transporter</option>
-            <option value="XYZ Transport">XYZ Transport</option>
-            <option value="LMN Logistics">LMN Logistics</option>
-            <option value="other">Other</option>
-          </select>
-          <input type="text" name="transporter" id="transporter-other" placeholder="Enter transporter name" style="display: none;" />
+          <div class="typeahead-wrap">
+            <input type="text" name="transporter" id="transporter-input" placeholder="Type or select transporter" autocomplete="off" />
+            <div id="transporter-suggestions" class="typeahead-list" role="listbox" aria-label="Transporter suggestions"></div>
+          </div>
         </label>
 
         <label>Driver Name
@@ -154,6 +151,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260417-14"></script>
+  <script src="app.js?v=20260417-19"></script>
 </body>
 </html>

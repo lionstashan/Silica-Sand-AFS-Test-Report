@@ -4,6 +4,18 @@ const loadingDetailsDrafts = new Map();
 
 const IST_TIMEZONE = 'Asia/Kolkata';
 const IST_OFFSET = '+05:30';
+const TRANSPORTER_STORAGE_KEY = 'transporterOptions';
+const TRANSPORTER_STORAGE_VERSION_KEY = 'transporterOptionsVersion';
+const TRANSPORTER_STORAGE_VERSION = '2026-04-17-list-1';
+const BASE_TRANSPORTER_OPTIONS = [
+  'Shree Ram Roadlines',
+  'Kuber Roadlines',
+  'Ganesh Road Lines',
+  'Amardeep Transport',
+  'Shree Syam Transport',
+  'Jambeshwar Road Lines',
+  'Ravi Road Lines'
+];
 const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Admin'];
 const BILLING_VISIBLE_STATUSES = ['BILLING_PENDING', 'BILLING_COMPLETED', 'COMPLETED', 'EXITED'];
 
@@ -54,10 +66,10 @@ const AUTO_STATUS_TRANSITIONS = {
 
 const ROLE_PINS = {
   Gate: '1111',
-  Dispatch: '2222',
-  Loading: '5555',
-  Weighbridge: '3333',
-  Accounts: '4444',
+  Weighbridge: '2222',
+  Dispatch: '3333',
+  Loading: '4444',
+  Accounts: '5555',
   Admin: '9999'
 };
 
@@ -83,7 +95,7 @@ const PERSON_DROPDOWNS = {
   Dispatch: ['Jitendra Yadav', 'Other'],
   Loading: ['Rajesh Kumar', 'Jai Bhagwan', 'Other'],
   Weighbridge: ['Anil Sharma', 'Ajay', 'Other'],
-  Accounts: ['Pooja', 'Neha', 'Kiran', 'Other']
+  Accounts: ['Ashutosh', 'Other']
 };
 const PERSON_FIELD_BY_ROLE = {
   Dispatch: 'dispatch_manager_name',
@@ -112,10 +124,11 @@ const timelineModalBody = document.getElementById('timeline-modal-body');
 
 const customerSelect = document.getElementById('customer-select');
 const customerOther = document.getElementById('customer-other');
-const transporterSelect = document.getElementById('transporter-select');
-const transporterOther = document.getElementById('transporter-other');
+const transporterInput = document.getElementById('transporter-input');
+const transporterSuggestions = document.getElementById('transporter-suggestions');
 const gatePersonSelect = document.getElementById('gate-person-select');
 const gatePersonOther = document.getElementById('gate-person-other');
+let transporterOptions = [];
 
 const MAIN_TABLE_COLUMNS = [
   'Truck Number',
@@ -674,6 +687,69 @@ function toggleOtherInput(selectElement, inputElement) {
   inputElement.value = '';
 }
 
+function normalizeTransporterName(value) {
+  return String(value || '').trim();
+}
+
+function getStoredTransporterOptions() {
+  try {
+    const raw = localStorage.getItem(TRANSPORTER_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeTransporterName).filter(Boolean);
+  } catch (_error) {
+    return [];
+  }
+}
+
+function setStoredTransporterOptions(options) {
+  const unique = Array.from(new Set(
+    options
+      .map(normalizeTransporterName)
+      .filter((value) => value && value.toLowerCase() !== 'test')
+  ));
+  localStorage.setItem(TRANSPORTER_STORAGE_KEY, JSON.stringify(unique));
+}
+
+function ensureTransporterOptionsSeeded() {
+  const version = localStorage.getItem(TRANSPORTER_STORAGE_VERSION_KEY);
+  if (version === TRANSPORTER_STORAGE_VERSION) return;
+  setStoredTransporterOptions(BASE_TRANSPORTER_OPTIONS);
+  localStorage.setItem(TRANSPORTER_STORAGE_VERSION_KEY, TRANSPORTER_STORAGE_VERSION);
+}
+
+function refreshTransporterOptions() {
+  if (!transporterInput) return;
+  ensureTransporterOptionsSeeded();
+  const storedOptions = getStoredTransporterOptions();
+  const merged = Array.from(new Set([...BASE_TRANSPORTER_OPTIONS, ...storedOptions])).sort((a, b) => a.localeCompare(b));
+  setStoredTransporterOptions(merged);
+  transporterOptions = merged;
+}
+
+function hideTransporterSuggestions() {
+  if (!transporterSuggestions) return;
+  transporterSuggestions.style.display = 'none';
+  transporterSuggestions.innerHTML = '';
+}
+
+function renderTransporterSuggestions(query) {
+  if (!transporterSuggestions) return;
+  const normalizedQuery = String(query || '').trim().toLowerCase();
+  const filtered = transporterOptions
+    .filter((name) => name.toLowerCase().includes(normalizedQuery))
+    .slice(0, 8);
+  if (!filtered.length) {
+    hideTransporterSuggestions();
+    return;
+  }
+  transporterSuggestions.innerHTML = filtered
+    .map((name) => `<button type="button" class="typeahead-option" data-transporter-option="${escapeHtml(name)}">${escapeHtml(name)}</button>`)
+    .join('');
+  transporterSuggestions.style.display = 'block';
+}
+
 function getFormData() {
   const formData = new FormData(form);
 
@@ -682,10 +758,7 @@ function getFormData() {
     customerName = formData.get('customer_name') || '';
   }
 
-  let transporter = formData.get('transporter_select') || '';
-  if (transporter === 'other') {
-    transporter = formData.get('transporter') || '';
-  }
+  const transporter = formData.get('transporter') || '';
 
   let gatePerson = formData.get('gate_person_select') || '';
   if (gatePerson === 'other') {
@@ -708,8 +781,9 @@ function getFormData() {
 function resetForm() {
   form.reset();
   toggleOtherInput(customerSelect, customerOther);
-  toggleOtherInput(transporterSelect, transporterOther);
   toggleOtherInput(gatePersonSelect, gatePersonOther);
+  if (transporterInput) transporterInput.value = '';
+  hideTransporterSuggestions();
 }
 
 function normalizeStatus(status) {
@@ -1944,6 +2018,7 @@ async function loadTrips() {
   try {
     const response = await fetch('/trips');
     allTrips = await response.json();
+    refreshTransporterOptions();
     applyFilters();
   } catch (error) {
     console.error('Failed to load trips:', error);
@@ -2394,6 +2469,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initializeRole();
   syncTripsTableHeader();
   refreshStatusFilterOptions();
+  refreshTransporterOptions();
   loadTrips();
 
   setInterval(updateTimeMetrics, 5000);
@@ -2408,11 +2484,32 @@ document.addEventListener('DOMContentLoaded', () => {
   customerSelect.addEventListener('change', () => {
     toggleOtherInput(customerSelect, customerOther);
   });
-  transporterSelect.addEventListener('change', () => {
-    toggleOtherInput(transporterSelect, transporterOther);
+  transporterInput?.addEventListener('input', () => {
+    renderTransporterSuggestions(transporterInput.value);
+  });
+  transporterInput?.addEventListener('focus', () => {
+    renderTransporterSuggestions(transporterInput.value);
+  });
+  transporterInput?.addEventListener('blur', () => {
+    window.setTimeout(() => hideTransporterSuggestions(), 120);
   });
   gatePersonSelect.addEventListener('change', () => {
     toggleOtherInput(gatePersonSelect, gatePersonOther);
+  });
+  transporterSuggestions?.addEventListener('click', (event) => {
+    const target = event.target.closest('[data-transporter-option]');
+    if (!target || !transporterInput) return;
+    transporterInput.value = target.getAttribute('data-transporter-option') || '';
+    hideTransporterSuggestions();
+    transporterInput.focus();
+  });
+  document.addEventListener('click', (event) => {
+    if (!transporterInput || !transporterSuggestions) return;
+    const clickedInsideInput = transporterInput.contains(event.target);
+    const clickedInsideList = transporterSuggestions.contains(event.target);
+    if (!clickedInsideInput && !clickedInsideList) {
+      hideTransporterSuggestions();
+    }
   });
 
   form.addEventListener('submit', async (event) => {
@@ -2439,6 +2536,15 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       await response.json();
+      const transporterName = normalizeTransporterName(payload.transporter);
+      if (transporterName) {
+        const merged = Array.from(new Set([
+          ...getStoredTransporterOptions(),
+          transporterName
+        ]));
+        setStoredTransporterOptions(merged);
+        refreshTransporterOptions();
+      }
       showMessage('Gate entry recorded and moved to SENT_FOR_TARE_WEIGHT');
       resetForm();
       await loadTrips();

@@ -359,6 +359,7 @@ label {
 
 input,
 select {
+  width: 100%;
   margin-top: 6px;
   padding: 12px;
   border: 1px solid #cbd5e1;
@@ -371,6 +372,45 @@ input:focus,
 select:focus {
   outline: none;
   border-color: #0f4c81;
+}
+
+.typeahead-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.typeahead-list {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 1200;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+  max-height: 220px;
+  overflow-y: auto;
+  display: none;
+}
+
+.typeahead-option {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: #fff;
+  padding: 10px 12px;
+  font-size: 0.95rem;
+  border-radius: 0;
+}
+
+.typeahead-option + .typeahead-option {
+  border-top: 1px solid #e2e8f0;
+}
+
+.typeahead-option:hover,
+.typeahead-option:focus {
+  background: #eff6ff;
 }
 
 .actions {

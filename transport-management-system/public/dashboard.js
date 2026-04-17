@@ -41,10 +41,10 @@ const istDatePartsFormatter = new Intl.DateTimeFormat('en-CA', {
 // Hardcoded PINs for each role
 const rolePINs = {
   'Gate': '1111',
-  'Dispatch': '2222',
-  'Loading': '5555',
-  'Weighbridge': '3333',
-  'Accounts': '4444',
+  'Weighbridge': '2222',
+  'Dispatch': '3333',
+  'Loading': '4444',
+  'Accounts': '5555',
   'Admin': '9999'
 };
 
