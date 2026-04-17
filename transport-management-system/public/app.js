@@ -72,7 +72,7 @@ const ROLE_ALLOWED_TARGETS = {
 
 const DISPATCH_DROPDOWNS = {
   loading_point: ['Office Front', 'Warehouse', 'Old Dry Plant', 'Near Crusher Plant', 'Glass Plant', 'Other'],
-  labour_team: ['Dinesh', 'Shambhu', 'Chandan', 'JCB', 'Loader', 'Tractor', 'Other'],
+  labour_team: ['Dinesh', 'Shambhu', 'Chandan', 'JCB Loader', 'Tractor', 'Other'],
   material_type: ['Silica Sand', 'Ball Clay', 'Other'],
   grade: ['Glass Grade', 'Foundry Grade', '30-150', '30-80', '18-30', '16-30', '14-16', '12-16', '14-12', 'Ball Clay', 'Raw', 'Other'],
   condition: ['Dry', 'Wet', 'Other'],
