@@ -206,6 +206,19 @@ function getAssignedPersonCell(trip) {
   return `<div class="mini-muted">${escapeHtml(assigned.roleLabel)}: ${escapeHtml(assigned.name)}</div>`;
 }
 
+function renderMobileRoleNames(trip) {
+  const roleRows = [
+    ['Gate Operator', trip.gate_person_name],
+    ['Dispatch Manager', trip.dispatch_manager_name],
+    ['Loading Manager', trip.loading_person_name],
+    ['Weighbridge Operator', trip.weight_operator_name],
+    ['Accounts Manager', trip.accounts_person_name]
+  ];
+  return roleRows
+    .map(([label, value]) => `<div><strong>${label}:</strong> ${escapeHtml(value || '-')}</div>`)
+    .join('');
+}
+
 function getStatusWithCancelReason(trip) {
   const exitedOutcome = getExitedOutcome(trip);
   const displayStatus = trip.status === 'EXITED'
@@ -648,21 +661,18 @@ function updateActiveTripsTable(trips) {
   const activeMobileList = document.getElementById('active-mobile-list');
   tripsTable.innerHTML = activeTrips.slice(0, 20).map(trip => { // Show last 20 active trips
     const inTime = parseTripDate(trip.in_time);
-    const statusTime = parseTripDate(trip.last_status_update_time || trip.in_time);
     const totalTime = calculateElapsedMinutes(inTime);
-    const stageTime = calculateElapsedMinutes(statusTime);
     const delayClass = getDelayClass(totalTime);
 
     return `
       <tr class="${delayClass}" data-active-trip-row="${trip.id}">
         <td>${getTruckDetailLink(trip)}</td>
         <td>${getStatusWithCancelReason(trip)}</td>
-        <td>${getAssignedPersonCell(trip)}</td>
         <td>${trip.customer_name || ''}</td>
+        <td>${escapeHtml(trip.transporter || '')}</td>
         <td>${trip.net_weight ? trip.net_weight + ' kg' : ''}</td>
         <td>${formatDateTime(trip.in_time)}</td>
         <td><span data-time-scope="active" data-time-kind="total" data-trip-id="${trip.id}">${formatMinutes(totalTime)}</span></td>
-        <td><span data-time-scope="active" data-time-kind="stage" data-trip-id="${trip.id}">${formatMinutes(stageTime)}</span></td>
       </tr>
     `;
   }).join('');
@@ -682,7 +692,7 @@ function updateActiveTripsTable(trips) {
           </div>
           <div class="mobile-trip-grid">
             <div><strong>Customer:</strong> ${escapeHtml(trip.customer_name || '-')}</div>
-            <div><strong>Assigned Manager/Operator:</strong> ${escapeHtml(getAssignedPersonByStatus(trip).name || '-')}</div>
+            ${renderMobileRoleNames(trip)}
             <div><strong>Net:</strong> ${trip.net_weight ? `${trip.net_weight} kg` : '-'}</div>
             <div><strong>Time In:</strong> ${formatDateTime(trip.in_time)}</div>
             <div><strong>Total:</strong> <span data-time-scope="active" data-time-kind="total" data-trip-id="${trip.id}">${formatMinutes(totalTime)}</span></div>
@@ -924,14 +934,8 @@ function updateTimeMetrics() {
     const trip = allTrips.find(t => t.id == tripId);
     if (trip) {
       const inTime = parseTripDate(trip.in_time);
-      const statusTime = parseTripDate(trip.last_status_update_time || trip.in_time);
       const totalTime = calculateElapsedMinutes(inTime);
-      const stageTime = calculateElapsedMinutes(statusTime);
       element.textContent = formatMinutes(totalTime);
-      document.querySelectorAll(`[data-time-scope="active"][data-time-kind="stage"][data-trip-id="${trip.id}"]`)
-        .forEach((stageElement) => {
-          stageElement.textContent = formatMinutes(stageTime);
-        });
 
       // Update row highlighting
       const delayClass = getDelayClass(totalTime);

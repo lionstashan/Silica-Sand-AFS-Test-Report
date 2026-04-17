@@ -528,16 +528,6 @@ td {
   text-align: left;
 }
 
-.trip-table-main th:nth-child(3),
-.trip-table-main td:nth-child(3),
-.trip-table-dashboard-active th:nth-child(3),
-.trip-table-dashboard-active td:nth-child(3) {
-  width: 150px;
-  max-width: 150px;
-  white-space: normal;
-  word-break: break-word;
-}
-
 th {
   font-weight: 600;
 }

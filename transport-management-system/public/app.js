@@ -117,7 +117,6 @@ const gatePersonOther = document.getElementById('gate-person-other');
 const MAIN_TABLE_COLUMNS = [
   'Truck Number',
   'Status',
-  'Assigned Manager/Operator',
   'Customer',
   'In Time',
   'Workflow / Actions'
@@ -499,6 +498,19 @@ function getAssignedPersonCell(trip) {
     return `<div class="mini-muted">${escapeHtml(assigned.roleLabel)}: -</div>`;
   }
   return `<div class="mini-muted">${escapeHtml(assigned.roleLabel)}: ${escapeHtml(assigned.name)}</div>`;
+}
+
+function renderMobileRoleNames(trip) {
+  const roleRows = [
+    ['Gate Operator', trip.gate_person_name],
+    ['Dispatch Manager', trip.dispatch_manager_name],
+    ['Loading Manager', trip.loading_person_name],
+    ['Weighbridge Operator', trip.weight_operator_name],
+    ['Accounts Manager', trip.accounts_person_name]
+  ];
+  return roleRows
+    .map(([label, value]) => `<div><strong>${label}:</strong> ${escapeHtml(value || '-')}</div>`)
+    .join('');
 }
 
 function getStatusWithReasonDetails(trip) {
@@ -1020,7 +1032,7 @@ async function saveGrossWeight(tripId) {
   const trip = getTripById(tripId);
   if (!trip) return;
   const gross = getWeightFromRow(tripId, 'gross_weight');
-  const tare = Number(trip.tare_weight);
+  const tare = getWeightFromRow(tripId, 'tare_weight') ?? Number(trip.tare_weight);
 
   if (!Number.isFinite(gross) || gross <= 0) {
     showMessage('Enter a valid gross weight', false);
@@ -1043,6 +1055,7 @@ async function saveGrossWeight(tripId) {
   const net = computeNetWeight(tare, gross);
   const payload = {
     ...getBaseTripPayload(trip),
+    tare_weight: tare,
     gross_weight: gross,
     net_weight: net,
     weight_operator_name: operatorName
@@ -1062,7 +1075,7 @@ async function markGrossDone(tripId) {
   const trip = getTripById(tripId);
   if (!trip) return;
   const gross = getWeightFromRow(tripId, 'gross_weight') || Number(trip.gross_weight);
-  const tare = Number(trip.tare_weight);
+  const tare = getWeightFromRow(tripId, 'tare_weight') ?? Number(trip.tare_weight);
 
   if (!Number.isFinite(gross) || gross <= 0) {
     showMessage('Gross weight is required before marking gross done', false);
@@ -1084,6 +1097,7 @@ async function markGrossDone(tripId) {
 
   const net = computeNetWeight(tare, gross);
   const extraFields = {
+    tare_weight: tare,
     gross_weight: gross,
     net_weight: net,
     weight_operator_name: operatorName,
@@ -1404,6 +1418,9 @@ function getWorkflowActions(trip) {
         <label>Weighbridge Operator
           ${renderPersonSelect('Weighbridge', trip.id, trip.weight_operator_name || '')}
         </label>
+        <label>Tare Weight
+          <input type="number" step="0.01" data-trip-id="${trip.id}" data-weight-field="tare_weight" value="${trip.tare_weight ?? ''}" class="weight-input" />
+        </label>
         <label>Gross Weight
           <input type="number" step="0.01" data-trip-id="${trip.id}" data-weight-field="gross_weight" value="${trip.gross_weight ?? ''}" class="weight-input" />
         </label>
@@ -1480,7 +1497,6 @@ function renderTripsTable(trips) {
         <tr class="${delayClass}" data-trip-row="${trip.id}">
           <td>${getTruckTimelineButton(trip)}</td>
           <td>${getStatusWithReasonDetails(trip)}</td>
-          <td>${getAssignedPersonCell(trip)}</td>
           <td>${escapeHtml(trip.customer_name || '')}</td>
           <td>${formatDateTime(trip.in_time)}</td>
           <td>${getWorkflowActions(trip)}</td>
@@ -1516,7 +1532,7 @@ function renderTripsMobileList(trips) {
         </div>
         <div class="mobile-trip-grid">
           <div><strong>Customer:</strong> ${escapeHtml(trip.customer_name || '-')}</div>
-          <div><strong>Assigned Manager/Operator:</strong> ${escapeHtml(getAssignedPersonByStatus(trip).name || '-')}</div>
+          ${renderMobileRoleNames(trip)}
           <div><strong>In Time:</strong> ${formatDateTime(trip.in_time)}</div>
         </div>
         <div class="mobile-trip-actions">
