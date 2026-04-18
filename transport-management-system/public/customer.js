@@ -42,6 +42,7 @@ const expectedTable = document.getElementById('expected-table');
 const expectedMobileList = document.getElementById('expected-mobile-list');
 const summaryCards = document.getElementById('summary-cards');
 const messageEl = document.getElementById('message');
+const loginMessageEl = document.getElementById('login-message');
 const customerNameInput = document.querySelector('#expected-form input[name="customer_name"]');
 const transporterInput = document.getElementById('customer-transporter-input');
 const transporterList = document.getElementById('customer-transporter-list');
@@ -73,6 +74,12 @@ function formatWeight(value) {
 function showMessage(text, success = true) {
   messageEl.textContent = text;
   messageEl.style.color = success ? '#047857' : '#b91c1c';
+}
+
+function showLoginMessage(text, success = false) {
+  if (!loginMessageEl) return;
+  loginMessageEl.textContent = text;
+  loginMessageEl.style.color = success ? '#047857' : '#b91c1c';
 }
 
 function normalizeListValue(value) {
@@ -290,6 +297,7 @@ function applyAuthedUI() {
     customerNameInput.value = defaultCustomerName;
     customerNameInput.readOnly = true;
   }
+  showLoginMessage('', true);
 }
 
 function applyLoggedOutUI() {
@@ -499,10 +507,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const password = String(formData.get('password') || '').trim();
     try {
       await login(username, password);
+      showLoginMessage('', true);
       showMessage('Login successful');
       await bootstrapAuthenticated();
     } catch (error) {
-      showMessage(error.message, false);
+      showLoginMessage(error.message, false);
     }
   });
 
