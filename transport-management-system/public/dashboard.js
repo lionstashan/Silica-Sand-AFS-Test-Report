@@ -40,11 +40,11 @@ const istDatePartsFormatter = new Intl.DateTimeFormat('en-CA', {
 
 // Hardcoded PINs for each role
 const rolePINs = {
-  'Gate': '1111',
-  'Weighbridge': '2222',
-  'Dispatch': '3333',
-  'Loading': '4444',
-  'Accounts': '5555',
+  'Gate': 'G8P2',
+  'Weighbridge': 'W3K7',
+  'Dispatch': 'D9M4',
+  'Loading': 'L5Q8',
+  'Accounts': 'A6R1',
   'Admin': '2802'
 };
 
@@ -139,7 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const selectedRole = window.currentSelectedRole;
 
     if (!pin || pin.length !== 4) {
-      document.getElementById('pin-error-message').textContent = 'PIN must be 4 digits';
+      document.getElementById('pin-error-message').textContent = 'PIN must be 4 characters';
       document.getElementById('pin-error-message').style.display = 'block';
       return;
     }

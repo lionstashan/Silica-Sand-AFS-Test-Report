@@ -68,11 +68,11 @@ const AUTO_STATUS_TRANSITIONS = {
 };
 
 const ROLE_PINS = {
-  Gate: '1111',
-  Weighbridge: '2222',
-  Dispatch: '3333',
-  Loading: '4444',
-  Accounts: '5555',
+  Gate: 'G8P2',
+  Weighbridge: 'W3K7',
+  Dispatch: 'D9M4',
+  Loading: 'L5Q8',
+  Accounts: 'A6R1',
   Admin: '2802'
 };
 
@@ -93,7 +93,7 @@ const DISPATCH_DROPDOWNS = {
   material_type: ['Silica Sand', 'Ball Clay', 'Other'],
   grade: ['Glass Grade', 'Foundry Grade', '30-150', '30-80', '18-30', '16-30', '14-16', '12-16', '14-12', 'Ball Clay', 'Raw', 'Other'],
   condition: ['Dry', 'Wet', 'Other'],
-  packing: ['Loose', 'Old', '3G', '4G', 'Other']
+  packing: ['Loose', 'Old Bag', '3G Bag', '4G Bag', 'Other']
 };
 const PERSON_DROPDOWNS = {
   Gate: ['X', 'Y', 'Z', 'Other'],
@@ -2749,7 +2749,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const selectedRole = window.currentSelectedRole;
 
     if (!pin || pin.length !== 4) {
-      document.getElementById('pin-error-message').textContent = 'PIN must be 4 digits';
+      document.getElementById('pin-error-message').textContent = 'PIN must be 4 characters';
       document.getElementById('pin-error-message').style.display = 'block';
       return;
     }

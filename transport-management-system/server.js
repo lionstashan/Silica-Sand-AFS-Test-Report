@@ -9,11 +9,11 @@ const PORT = process.env.PORT || 3000;
 
 const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Admin'];
 const ROLE_PINS = {
-  Gate: '1111',
-  Weighbridge: '2222',
-  Dispatch: '3333',
-  Loading: '4444',
-  Accounts: '5555',
+  Gate: 'G8P2',
+  Weighbridge: 'W3K7',
+  Dispatch: 'D9M4',
+  Loading: 'L5Q8',
+  Accounts: 'A6R1',
   Admin: '2802'
 };
 
@@ -372,7 +372,7 @@ async function canCustomerAccessTripDocuments(customerUserId, tripId) {
   const result = await pool.query(
     `SELECT 1
      FROM trips t
-     JOIN expected_trucks et ON et.id = t.expected_truck_id
+     JOIN expected_trucks et ON (et.id = t.expected_truck_id OR et.linked_trip_id = t.id)
      WHERE t.id = $1 AND et.submitted_by_user_id = $2
      LIMIT 1`,
     [tripId, customerUserId]
@@ -540,8 +540,11 @@ app.post('/trip', async (req, res) => {
   const safeStatusHistory = buildInitialStatusHistory(safeStatus);
   const safeGrossWeightAttempts = normalizeGrossWeightAttempts(gross_weight_attempts);
 
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query('BEGIN');
+
+    const tripInsertResult = await client.query(
       `INSERT INTO trips(
         sequence_number,
         truck_number,
@@ -628,10 +631,117 @@ app.post('/trip', async (req, res) => {
         JSON.stringify(safeStatusHistory)
       ]
     );
-    res.status(201).json(result.rows[0]);
+    const createdTrip = tripInsertResult.rows[0];
+    const normalizedCustomerName = normalizeEmpty(customer_name);
+    const normalizedTruckNumber = normalizeEmpty(truck_number);
+    let syncedExpectedTruckId = null;
+
+    // Auto-sync gate entries into customer expected-truck list when profile exists.
+    if (normalizedCustomerName && normalizedTruckNumber) {
+      const todayIst = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).format(new Date());
+      const dedupeKey = `expected-sync:${normalizedCustomerName.trim().toLowerCase()}:${normalizedTruckNumber.trim().toLowerCase()}:${todayIst}`;
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [dedupeKey]);
+
+      const customerUserRes = await client.query(
+        `SELECT id, customer_name
+         FROM customer_users
+         WHERE is_active = true
+           AND lower(trim(customer_name)) = lower(trim($1))
+         ORDER BY id ASC
+         LIMIT 1`,
+        [normalizedCustomerName]
+      );
+
+      if (customerUserRes.rows.length) {
+        const customerUser = customerUserRes.rows[0];
+        const existingExpectedRes = await client.query(
+          `SELECT id, linked_trip_id
+           FROM expected_trucks
+           WHERE submitted_by_user_id = $1
+             AND lower(trim(customer_name)) = lower(trim($2))
+             AND lower(trim(truck_number)) = lower(trim($3))
+             AND (created_at AT TIME ZONE 'Asia/Kolkata')::date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+           ORDER BY id DESC
+           LIMIT 1
+           FOR UPDATE`,
+          [customerUser.id, normalizedCustomerName, normalizedTruckNumber]
+        );
+
+        if (existingExpectedRes.rows.length) {
+          const existingExpected = existingExpectedRes.rows[0];
+          syncedExpectedTruckId = existingExpected.id;
+          if (!existingExpected.linked_trip_id) {
+            await client.query(
+              `UPDATE expected_trucks
+               SET linked_trip_id = $1,
+                   status = 'GATE_IN_DONE',
+                   status_updated_at = NOW(),
+                   status_updated_by = 'SYSTEM_GATE_SYNC',
+                   updated_at = NOW()
+               WHERE id = $2`,
+              [createdTrip.id, existingExpected.id]
+            );
+          }
+        } else {
+          const insertedExpectedRes = await client.query(
+            `INSERT INTO expected_trucks (
+              submitted_by_user_id, customer_name, truck_number, driver_name, driver_phone, transporter,
+              expected_quantity_mt, material_type, grade, condition, packing, location, eta, notes,
+              status, linked_trip_id, submitted_at, status_updated_at, status_updated_by
+            ) VALUES (
+              $1,$2,$3,$4,$5,$6,
+              $7,$8,$9,$10,$11,$12,$13,$14,
+              'GATE_IN_DONE',$15,NOW(),NOW(),'SYSTEM_GATE_SYNC'
+            )
+            RETURNING id`,
+            [
+              customerUser.id,
+              normalizedCustomerName,
+              normalizedTruckNumber,
+              normalizeEmpty(driver_name),
+              normalizeEmpty(driver_phone),
+              normalizeEmpty(transporter),
+              toFiniteNumberOrNull(expected_weight) ?? 0,
+              normalizeEmpty(material_type),
+              normalizeEmpty(grade),
+              normalizeEmpty(condition),
+              normalizeEmpty(packing),
+              normalizeEmpty(location),
+              normalizeEmpty(eta),
+              normalizeEmpty(customer_notes),
+              createdTrip.id
+            ]
+          );
+          syncedExpectedTruckId = insertedExpectedRes.rows[0].id;
+        }
+
+        if (syncedExpectedTruckId) {
+          await client.query(
+            `UPDATE trips
+             SET expected_truck_id = COALESCE(expected_truck_id, $1),
+                 updated_at = NOW()
+             WHERE id = $2`,
+            [syncedExpectedTruckId, createdTrip.id]
+          );
+        }
+      }
+    }
+
+    await client.query('COMMIT');
+
+    const finalTripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [createdTrip.id]);
+    return res.status(201).json(finalTripRes.rows[0] || createdTrip);
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Error creating trip', error);
-    res.status(500).json({ error: 'Failed to create trip' });
+    return res.status(500).json({ error: 'Failed to create trip' });
+  } finally {
+    client.release();
   }
 });
 
@@ -1232,6 +1342,50 @@ app.get('/customer/trip-documents', async (req, res) => {
   }
 });
 
+app.get('/customer/trips/:id/timeline', async (req, res) => {
+  const auth = await readCustomerFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+
+  const tripId = Number(req.params.id);
+  if (!Number.isInteger(tripId) || tripId <= 0) {
+    return res.status(400).json({ error: 'Invalid trip id' });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT
+        t.id,
+        t.truck_number,
+        t.status,
+        t.final_status,
+        t.is_cancelled,
+        t.in_time,
+        t.out_time,
+        t.expected_weight,
+        t.net_weight,
+        t.material_type,
+        t.grade,
+        t.condition,
+        t.packing,
+        t.location,
+        COALESCE(t.status_history, '[]'::jsonb) AS status_history
+       FROM trips t
+       JOIN expected_trucks et ON (et.id = t.expected_truck_id OR et.linked_trip_id = t.id)
+       WHERE t.id = $1 AND et.submitted_by_user_id = $2
+       LIMIT 1`,
+      [tripId, auth.user.id]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: 'Trip not found' });
+    }
+    return res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Failed to load customer trip timeline', error);
+    return res.status(500).json({ error: 'Failed to load trip timeline' });
+  }
+});
+
 app.get('/customer/documents/:id/download', async (req, res) => {
   const auth = await readCustomerFromRequest(req);
   if (auth.error) return res.status(auth.status).json({ error: auth.error });
@@ -1409,7 +1563,8 @@ app.get('/customer/expected-trucks', async (req, res) => {
         t.final_status AS trip_final_status,
         t.in_time AS trip_in_time,
         t.out_time AS trip_out_time,
-        t.net_weight AS trip_net_weight
+        t.net_weight AS trip_net_weight,
+        COALESCE(t.status_history, '[]'::jsonb) AS trip_status_history
        FROM expected_trucks et
        LEFT JOIN trips t ON t.id = et.linked_trip_id
        WHERE et.submitted_by_user_id = $1

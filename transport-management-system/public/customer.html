@@ -77,6 +77,12 @@
           </select>
           <input type="text" id="customer-condition-other" placeholder="Enter condition" style="display:none;" />
         </label>
+        <label>Packing
+          <select name="packing" id="customer-packing">
+            <option value="">Select</option>
+          </select>
+          <input type="text" id="customer-packing-other" placeholder="Enter packing" style="display:none;" />
+        </label>
         <label>Location
           <input type="text" id="customer-location-input" name="location" list="customer-location-options" />
         </label>
@@ -117,6 +123,7 @@
             <th>Current Status</th>
             <th>Customer</th>
             <th>Expected (MT)</th>
+            <th>Net Weight (MT)</th>
             <th>Material</th>
             <th>Documents</th>
             <th>Submitted At</th>
@@ -129,7 +136,17 @@
     <div id="expected-mobile-list" class="mobile-trip-list mobile-only"></div>
   </section>
 
+  <div id="timeline-modal" class="timeline-modal" style="display: none;">
+    <div class="timeline-modal-content">
+      <div class="timeline-modal-header">
+        <h3 id="timeline-modal-title">Status Timeline</h3>
+        <button type="button" class="timeline-close-btn" data-action="close-timeline">Close</button>
+      </div>
+      <div id="timeline-modal-body"></div>
+    </div>
+  </div>
+
   <datalist id="customer-location-options"></datalist>
-  <script src="customer.js?v=20260418-7"></script>
+  <script src="customer.js?v=20260418-11"></script>
 </body>
 </html>

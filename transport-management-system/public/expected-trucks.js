@@ -1,9 +1,9 @@
 const ROLE_PINS = {
-  Gate: '1111',
-  Weighbridge: '2222',
-  Dispatch: '3333',
-  Loading: '4444',
-  Accounts: '5555',
+  Gate: 'G8P2',
+  Weighbridge: 'W3K7',
+  Dispatch: 'D9M4',
+  Loading: 'L5Q8',
+  Accounts: 'A6R1',
   Admin: '2802'
 };
 const ALLOWED_ROLES = ['Gate', 'Dispatch', 'Admin'];

@@ -20,19 +20,21 @@ const DISPATCH_DROPDOWNS = {
   material_type: ['Silica Sand', 'Ball Clay', 'Other'],
   grade: ['Glass Grade', 'Foundry Grade', '30-150', '30-80', '18-30', '16-30', '14-16', '12-16', '14-12', 'Ball Clay', 'Raw', 'Other'],
   condition: ['Dry', 'Wet', 'Other'],
-  packing: ['Loose', 'Old', '3G', '4G', 'Other']
+  packing: ['Loose', 'Old Bag', '3G Bag', '4G Bag', 'Other']
 };
 
 const CUSTOMER_DROPDOWN_CONFIG = [
   { field: 'material_type', selectId: 'customer-material-type', otherId: 'customer-material-type-other' },
   { field: 'grade', selectId: 'customer-grade', otherId: 'customer-grade-other' },
-  { field: 'condition', selectId: 'customer-condition', otherId: 'customer-condition-other' }
+  { field: 'condition', selectId: 'customer-condition', otherId: 'customer-condition-other' },
+  { field: 'packing', selectId: 'customer-packing', otherId: 'customer-packing-other' }
 ];
 
 let customerUser = null;
 let expectedRows = [];
 let transporterOptions = [];
 let tripDocumentsByTripId = new Map();
+let tripTimelineByTripId = new Map();
 
 const loginPanel = document.getElementById('login-panel');
 const appPanel = document.getElementById('app-panel');
@@ -48,6 +50,9 @@ const transporterInput = document.getElementById('customer-transporter-input');
 const transporterList = document.getElementById('customer-transporter-list');
 const locationInput = document.getElementById('customer-location-input');
 const locationOptionsDatalist = document.getElementById('customer-location-options');
+const timelineModal = document.getElementById('timeline-modal');
+const timelineModalTitle = document.getElementById('timeline-modal-title');
+const timelineModalBody = document.getElementById('timeline-modal-body');
 
 function escapeHtml(value) {
   return String(value || '')
@@ -69,6 +74,239 @@ function formatWeight(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return '-';
   return `${n.toFixed(3)} MT`;
+}
+
+function parseTripDate(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function formatTimeOnly(value) {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toLocaleTimeString('en-IN', {
+    timeZone: IST_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  });
+}
+
+function formatMinutes(totalMinutes) {
+  if (totalMinutes === null || Number.isNaN(totalMinutes)) return '-';
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours <= 0) return `${minutes}m`;
+  return `${hours}h ${minutes}m`;
+}
+
+function parseStatusHistory(row) {
+  const raw = row?.status_history ?? row?.trip_status_history;
+  if (Array.isArray(raw) && raw.length) return raw;
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) return parsed;
+    } catch (_error) {
+      // Fall through to synthesized fallback.
+    }
+  }
+  const fallbackStatus = row?.trip_status || row?.current_status || row?.status;
+  const fallbackEntryTime = row?.trip_in_time || row?.submitted_at;
+  if (!fallbackStatus || !fallbackEntryTime) return [];
+  return [{
+    status: fallbackStatus,
+    entry_time: fallbackEntryTime,
+    exit_time: row?.trip_out_time || null,
+    details: {}
+  }];
+}
+
+function statusToLabel(status) {
+  return String(status || '').replaceAll('_', ' ');
+}
+
+function getStatusDurationMinutes(entry) {
+  const start = parseTripDate(entry?.entry_time);
+  if (!start) return null;
+  const end = parseTripDate(entry?.exit_time) || new Date();
+  const diffMs = end.getTime() - start.getTime();
+  if (diffMs <= 0) return 0;
+  return Math.floor(diffMs / (1000 * 60));
+}
+
+function getStageDurationSummary(row) {
+  const history = parseStatusHistory(row);
+  const totals = new Map();
+  history.forEach((entry) => {
+    const status = statusToLabel(entry?.status || '');
+    const minutes = getStatusDurationMinutes(entry);
+    if (!status || minutes === null || Number.isNaN(minutes)) return;
+    totals.set(status, (totals.get(status) || 0) + minutes);
+  });
+  return Array.from(totals.entries()).map(([status, minutes]) => ({ status, minutes }));
+}
+
+function renderStageSummary(row) {
+  const summary = getStageDurationSummary(row);
+  if (!summary.length) return '<div class="mini-muted">No stage timing available</div>';
+  const chips = summary
+    .map((item) => `<span class="timeline-summary-chip"><strong>${escapeHtml(item.status)}:</strong> ${formatMinutes(item.minutes)}</span>`)
+    .join('');
+  return `
+    <div class="timeline-stage-summary">
+      <h4>Stage Time Summary</h4>
+      <div class="timeline-summary-grid">${chips}</div>
+    </div>
+  `;
+}
+
+function statusDetailLabel(key) {
+  const labels = {
+    waiting_reason: 'Waiting',
+    load_fix_reason: 'Load Fix',
+    cancel_reason: 'Cancel',
+    material_type: 'Material',
+    grade: 'Grade',
+    condition: 'Condition',
+    packing: 'Packing',
+    location: 'Location',
+    eta: 'ETA',
+    expected_weight: 'Expected',
+    tare_weight: 'Tare',
+    gross_weight: 'Gross',
+    net_weight: 'Net'
+  };
+  return labels[key] || key.replaceAll('_', ' ');
+}
+
+function formatStatusDetailValue(key, value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (key === 'eta') return formatDateTime(value);
+  if (['expected_weight', 'tare_weight', 'gross_weight', 'net_weight'].includes(key)) return formatWeight(value);
+  return String(value);
+}
+
+function renderStatusDetails(entry) {
+  const details = entry?.details && typeof entry.details === 'object' ? entry.details : null;
+  if (!details) return '';
+  const detailEntries = Object.entries(details)
+    .map(([key, value]) => {
+      const formatted = formatStatusDetailValue(key, value);
+      if (!formatted) return '';
+      return `<span class="timeline-detail-chip"><strong>${escapeHtml(statusDetailLabel(key))}:</strong> ${escapeHtml(formatted)}</span>`;
+    })
+    .filter(Boolean);
+  if (!detailEntries.length) return '';
+  return `<div class="timeline-item-details">${detailEntries.join('')}</div>`;
+}
+
+function renderStatusTimeline(row) {
+  const history = parseStatusHistory(row);
+  if (!history.length) return '<div class="mini-muted">No status history available</div>';
+  return history.map((entry) => {
+    const isCurrent = !entry.exit_time;
+    return `
+      <article class="timeline-item ${isCurrent ? 'timeline-item-current' : ''}">
+        <div class="timeline-item-status">${escapeHtml(statusToLabel(entry.status))}</div>
+        <div class="timeline-item-times">
+          <span>${formatTimeOnly(entry.entry_time)} → ${entry.exit_time ? formatTimeOnly(entry.exit_time) : 'Now'}</span>
+          <span>${formatMinutes(getStatusDurationMinutes(entry))}</span>
+        </div>
+        ${renderStatusDetails(entry)}
+      </article>
+    `;
+  }).join('');
+}
+
+function getTruckTimelineLink(row) {
+  const label = escapeHtml(row?.truck_number || '-');
+  if (!row?.linked_trip_id) return label;
+  return `
+    <button type="button" class="truck-link-btn" data-action="view-timeline" data-trip-id="${row.linked_trip_id}">
+      ${label}
+    </button>
+  `;
+}
+
+async function fetchCustomerTripTimeline(tripId) {
+  const cacheKey = String(tripId);
+  if (tripTimelineByTripId.has(cacheKey)) {
+    return tripTimelineByTripId.get(cacheKey);
+  }
+  const response = await fetch(`/customer/trips/${encodeURIComponent(tripId)}/timeline`, {
+    headers: getCustomerAuthHeaders()
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to load trip timeline');
+  }
+  const data = await response.json();
+  tripTimelineByTripId.set(cacheKey, data);
+  return data;
+}
+
+async function openTimelineModal(tripId) {
+  if (!timelineModal || !timelineModalBody || !timelineModalTitle) return;
+  const row = expectedRows.find((item) => String(item.linked_trip_id) === String(tripId));
+  if (!row) return;
+  timelineModalTitle.textContent = `Status Timeline - ${row.truck_number || 'Truck'} (#${tripId})`;
+  timelineModalBody.innerHTML = '<div class="mini-muted">Loading timeline...</div>';
+  timelineModal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+
+  let timelineRow = null;
+  try {
+    timelineRow = await fetchCustomerTripTimeline(tripId);
+  } catch (error) {
+    timelineModalBody.innerHTML = `<div class="mini-muted">${escapeHtml(error.message || 'Failed to load timeline')}</div>`;
+    return;
+  }
+
+  const effective = {
+    ...row,
+    ...timelineRow,
+    trip_status: timelineRow?.status ?? row?.trip_status,
+    trip_in_time: timelineRow?.in_time ?? row?.trip_in_time,
+    trip_out_time: timelineRow?.out_time ?? row?.trip_out_time,
+    trip_net_weight: timelineRow?.net_weight ?? row?.trip_net_weight
+  };
+
+  timelineModalBody.innerHTML = `
+    <div class="timeline-meta">
+      <div><strong>Current:</strong> ${escapeHtml(statusToLabel(effective.current_status || effective.trip_status || effective.status || '-'))}</div>
+      <div><strong>Customer:</strong> ${escapeHtml(effective.customer_name || '-')}</div>
+      <div><strong>In Time:</strong> ${formatDateTime(effective.trip_in_time)}</div>
+      <div><strong>Out Time:</strong> ${formatDateTime(effective.trip_out_time)}</div>
+      <div><strong>Expected Weight:</strong> ${formatWeight(effective.expected_weight ?? effective.expected_quantity_mt)}</div>
+      <div><strong>Net Weight:</strong> ${formatWeight(effective.trip_net_weight)}</div>
+      <div><strong>Material:</strong> ${escapeHtml(effective.material_type || '-')}</div>
+      <div><strong>Grade:</strong> ${escapeHtml(effective.grade || '-')}</div>
+      <div><strong>Condition:</strong> ${escapeHtml(effective.condition || '-')}</div>
+      <div><strong>Packing:</strong> ${escapeHtml(effective.packing || '-')}</div>
+      <div><strong>Location:</strong> ${escapeHtml(effective.location || '-')}</div>
+    </div>
+    ${renderStageSummary(effective)}
+    <div class="timeline-list">
+      ${renderStatusTimeline(effective)}
+    </div>
+  `;
+}
+
+function closeTimelineModal() {
+  if (!timelineModal) return;
+  timelineModal.style.display = 'none';
+  document.body.style.overflow = 'auto';
+}
+
+function wireTruckTimelineEvents() {
+  document.querySelectorAll('[data-action="view-timeline"]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      await openTimelineModal(button.dataset.tripId);
+    });
+  });
 }
 
 function showMessage(text, success = true) {
@@ -380,11 +618,12 @@ function renderExpectedRows(data) {
   if (!isMobile) {
     expectedTable.innerHTML = data.map((row) => `
       <tr>
-        <td>${escapeHtml(row.truck_number)}</td>
+        <td>${getTruckTimelineLink(row)}</td>
         <td>${escapeHtml(row.current_status || row.status)}</td>
         <td>${escapeHtml(row.customer_name || '-')}</td>
         <td>${formatWeight(row.expected_quantity_mt)}</td>
-        <td>${escapeHtml([row.material_type, row.grade, row.condition, row.location].filter(Boolean).join(' / ') || '-')}</td>
+        <td>${formatWeight(row.trip_net_weight)}</td>
+        <td>${escapeHtml([row.material_type, row.grade, row.condition, row.packing, row.location].filter(Boolean).join(' / ') || '-')}</td>
         <td>${getDocLinks(row)}</td>
         <td>${formatDateTime(row.submitted_at)}</td>
         <td>${row.linked_trip_id ? `#${row.linked_trip_id}` : '-'}</td>
@@ -396,14 +635,17 @@ function renderExpectedRows(data) {
     expectedMobileList.innerHTML = data.map((row) => `
       <article class="mobile-trip-card">
         <div class="mobile-trip-head">
-          <div class="mobile-trip-truck">${escapeHtml(row.truck_number)}</div>
+          <div class="mobile-trip-truck">${getTruckTimelineLink(row)}</div>
           <div>${escapeHtml(row.current_status || row.status)}</div>
         </div>
         <div class="mobile-trip-grid">
           <div><strong>Customer:</strong> ${escapeHtml(row.customer_name || '-')}</div>
           <div><strong>Expected:</strong> ${formatWeight(row.expected_quantity_mt)}</div>
+          <div><strong>Net Weight:</strong> ${formatWeight(row.trip_net_weight)}</div>
           <div><strong>Material:</strong> ${escapeHtml(row.material_type || '-')}</div>
           <div><strong>Grade:</strong> ${escapeHtml(row.grade || '-')}</div>
+          <div><strong>Condition:</strong> ${escapeHtml(row.condition || '-')}</div>
+          <div><strong>Packing:</strong> ${escapeHtml(row.packing || '-')}</div>
           <div><strong>Location:</strong> ${escapeHtml(row.location || '-')}</div>
           <div><strong>Docs:</strong> ${getDocLinks(row)}</div>
           <div><strong>Submitted:</strong> ${formatDateTime(row.submitted_at)}</div>
@@ -413,6 +655,7 @@ function renderExpectedRows(data) {
     `).join('');
   }
   wireCustomerDocumentEvents();
+  wireTruckTimelineEvents();
 }
 
 function wireCustomerDocumentEvents() {
@@ -484,6 +727,7 @@ async function loadExpectedTrucks() {
     throw new Error(err.error || 'Failed to load expected trucks');
   }
   expectedRows = await response.json();
+  tripTimelineByTripId = new Map();
   await refreshTripDocumentsForRows(expectedRows);
   refreshLocationOptions(expectedRows);
   renderExpectedRows(expectedRows);
@@ -496,6 +740,14 @@ async function bootstrapAuthenticated() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  document.querySelector('[data-action="close-timeline"]')?.addEventListener('click', closeTimelineModal);
+  timelineModal?.addEventListener('click', (event) => {
+    if (event.target === timelineModal) closeTimelineModal();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeTimelineModal();
+  });
+
   initTransporterTypeahead();
   initCustomerDropdowns();
   refreshLocationOptions();
@@ -529,7 +781,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       grade: getDropdownValue('grade'),
       condition: getDropdownValue('condition'),
       location: String(formData.get('location') || '').trim(),
-      packing: '',
+      packing: getDropdownValue('packing'),
       eta: String(formData.get('eta') || '').trim() ? `${String(formData.get('eta')).trim()}:00+05:30` : null,
       notes: String(formData.get('notes') || '').trim()
     };
