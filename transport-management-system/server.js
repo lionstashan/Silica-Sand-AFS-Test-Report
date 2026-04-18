@@ -85,7 +85,7 @@ const DOC_ALLOWED_MIME_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 ]);
 const DOC_MAX_SIZE_BYTES = 10 * 1024 * 1024;
-const DOC_UPLOAD_DIR = path.join(__dirname, 'uploads', 'docs');
+const DOC_UPLOAD_DIR = path.resolve(process.env.DOC_UPLOAD_DIR || path.join(__dirname, 'uploads', 'docs'));
 fs.mkdirSync(DOC_UPLOAD_DIR, { recursive: true });
 
 const documentStorage = multer.diskStorage({
