@@ -111,9 +111,27 @@ async function initDb() {
     WHERE updated_at IS NULL
   `);
   await pool.query(`
-    ALTER TABLE trips
-    ALTER COLUMN in_time TYPE TIMESTAMPTZ USING in_time AT TIME ZONE 'Asia/Kolkata',
-    ALTER COLUMN out_time TYPE TIMESTAMPTZ USING out_time AT TIME ZONE 'Asia/Kolkata'
+    DO $$
+    DECLARE
+      in_time_type TEXT;
+      out_time_type TEXT;
+    BEGIN
+      SELECT data_type INTO in_time_type
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'trips' AND column_name = 'in_time';
+
+      SELECT data_type INTO out_time_type
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'trips' AND column_name = 'out_time';
+
+      IF in_time_type = 'timestamp without time zone' THEN
+        EXECUTE 'ALTER TABLE trips ALTER COLUMN in_time TYPE TIMESTAMPTZ USING in_time AT TIME ZONE ''Asia/Kolkata''';
+      END IF;
+
+      IF out_time_type = 'timestamp without time zone' THEN
+        EXECUTE 'ALTER TABLE trips ALTER COLUMN out_time TYPE TIMESTAMPTZ USING out_time AT TIME ZONE ''Asia/Kolkata''';
+      END IF;
+    END $$;
   `);
   await pool.query(`
     ALTER TABLE trips
