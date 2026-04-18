@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Customer Portal</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>Customer Portal</h1>
+    <p>Submit expected trucks and track current status.</p>
+    <nav>
+      <span id="customer-indicator" class="role-indicator" style="display:none;"></span>
+      <a href="#" id="logout-link" class="nav-link" style="display:none;">Logout</a>
+    </nav>
+  </header>
+
+  <section class="panel" id="login-panel">
+    <h2>Customer Login</h2>
+    <form id="customer-login-form">
+      <div class="form-grid">
+        <label>Username
+          <input type="text" name="username" required />
+        </label>
+        <label>Password
+          <input type="password" name="password" required />
+        </label>
+      </div>
+      <div class="actions">
+        <button type="submit">Login</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel" id="app-panel" style="display:none;">
+    <h2>Submit Expected Truck</h2>
+    <form id="expected-form">
+      <div class="form-grid">
+        <label>Customer Name
+          <input type="text" name="customer_name" />
+        </label>
+        <label>Truck Number
+          <input type="text" name="truck_number" required />
+        </label>
+        <label>Driver Name
+          <input type="text" name="driver_name" required />
+        </label>
+        <label>Driver Phone
+          <input type="text" name="driver_phone" required />
+        </label>
+        <label>Transporter
+          <div class="typeahead-wrap">
+            <input type="text" id="customer-transporter-input" name="transporter" autocomplete="off" />
+            <div id="customer-transporter-list" class="typeahead-list"></div>
+          </div>
+        </label>
+        <label>Expected Quantity (MT)
+          <input type="number" step="0.001" min="0" name="expected_quantity_mt" required />
+        </label>
+        <label>Material Type
+          <select name="material_type" id="customer-material-type">
+            <option value="">Select</option>
+          </select>
+          <input type="text" id="customer-material-type-other" placeholder="Enter material type" style="display:none;" />
+        </label>
+        <label>Grade
+          <select name="grade" id="customer-grade">
+            <option value="">Select</option>
+          </select>
+          <input type="text" id="customer-grade-other" placeholder="Enter grade" style="display:none;" />
+        </label>
+        <label>Condition
+          <select name="condition" id="customer-condition">
+            <option value="">Select</option>
+          </select>
+          <input type="text" id="customer-condition-other" placeholder="Enter condition" style="display:none;" />
+        </label>
+        <label>Location
+          <input type="text" id="customer-location-input" name="location" list="customer-location-options" />
+        </label>
+        <label>ETA
+          <input type="datetime-local" name="eta" />
+        </label>
+        <label>Notes
+          <input type="text" name="notes" />
+        </label>
+      </div>
+      <div class="actions">
+        <button type="submit">Submit Expected Truck</button>
+      </div>
+    </form>
+    <div id="message"></div>
+  </section>
+
+  <section class="panel" id="summary-panel" style="display:none;">
+    <h2>Dispatch Summary</h2>
+    <div class="summary-cards" id="summary-cards"></div>
+    <div class="filters">
+      <div class="filter-group">
+        <label>Customer Name Filter
+          <input type="text" id="customer-filter" placeholder="Filter by customer name" />
+        </label>
+        <button type="button" id="summary-refresh-btn">Refresh Summary</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" id="list-panel" style="display:none;">
+    <h2>My Expected Trucks</h2>
+    <div class="table-container desktop-only">
+      <table class="trip-table-dashboard-active">
+        <thead>
+          <tr>
+            <th>Truck</th>
+            <th>Current Status</th>
+            <th>Customer</th>
+            <th>Expected (MT)</th>
+            <th>Material</th>
+            <th>Documents</th>
+            <th>Submitted At</th>
+            <th>Linked Trip</th>
+          </tr>
+        </thead>
+        <tbody id="expected-table"></tbody>
+      </table>
+    </div>
+    <div id="expected-mobile-list" class="mobile-trip-list mobile-only"></div>
+  </section>
+
+  <datalist id="customer-location-options"></datalist>
+  <script src="customer.js?v=20260418-6"></script>
+</body>
+</html>

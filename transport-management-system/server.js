@@ -1,6 +1,8 @@
 require('dotenv').config();
 const path = require('path');
+const fs = require('fs');
 const express = require('express');
+const multer = require('multer');
 const { initDb, pool } = require('./db');
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -8,11 +10,11 @@ const PORT = process.env.PORT || 3000;
 const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Admin'];
 const ROLE_PINS = {
   Gate: '1111',
-  Dispatch: '2222',
-  Loading: '5555',
-  Weighbridge: '3333',
-  Accounts: '4444',
-  Admin: '9999'
+  Weighbridge: '2222',
+  Dispatch: '3333',
+  Loading: '4444',
+  Accounts: '5555',
+  Admin: '2802'
 };
 
 const STATUS_FLOW = [
@@ -71,6 +73,47 @@ const ROLE_ALLOWED_TARGETS = {
 };
 
 const FINAL_STATUSES = new Set(['COMPLETED', 'CANCELLED', 'EXITED']);
+const EXPECTED_TRUCK_STATUSES = ['SUBMITTED', 'REVIEW_PENDING', 'APPROVED', 'CANCELLED', 'EXPIRED', 'GATE_IN_DONE'];
+const DOC_UPLOAD_ROLES = new Set(['Dispatch', 'Weighbridge', 'Accounts', 'Admin']);
+const DOC_VIEW_ROLES = new Set(['Dispatch', 'Weighbridge', 'Accounts', 'Admin']);
+const DOC_ALLOWED_EXTENSIONS = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.xlsx', '.xls']);
+const DOC_ALLOWED_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+]);
+const DOC_MAX_SIZE_BYTES = 10 * 1024 * 1024;
+const DOC_UPLOAD_DIR = path.join(__dirname, 'uploads', 'docs');
+fs.mkdirSync(DOC_UPLOAD_DIR, { recursive: true });
+
+const documentStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, DOC_UPLOAD_DIR),
+  filename: (_req, file, cb) => {
+    const safeBase = path.basename(file.originalname || 'document')
+      .replace(/[^\w.\- ]+/g, '_')
+      .replace(/\s+/g, '_')
+      .slice(0, 120);
+    const ext = path.extname(safeBase) || '';
+    const base = safeBase.replace(ext, '');
+    cb(null, `${Date.now()}_${Math.random().toString(36).slice(2, 10)}_${base}${ext}`);
+  }
+});
+
+const uploadDocument = multer({
+  storage: documentStorage,
+  limits: { fileSize: DOC_MAX_SIZE_BYTES },
+  fileFilter: (_req, file, cb) => {
+    const ext = String(path.extname(file.originalname || '')).toLowerCase();
+    const mime = String(file.mimetype || '').toLowerCase();
+    if (!DOC_ALLOWED_EXTENSIONS.has(ext) || !DOC_ALLOWED_MIME_TYPES.has(mime)) {
+      cb(new Error('Unsupported file type'));
+      return;
+    }
+    cb(null, true);
+  }
+});
 
 app.use(express.json());
 app.use((req, res, next) => {
@@ -98,6 +141,7 @@ function hasValue(value) {
 }
 
 const TRACKED_DETAIL_FIELDS = [
+  'customer_notes',
   'waiting_reason',
   'load_fix_reason',
   'cancel_reason',
@@ -107,6 +151,7 @@ const TRACKED_DETAIL_FIELDS = [
   'grade',
   'condition',
   'packing',
+  'location',
   'eta',
   'expected_weight',
   'tare_weight',
@@ -153,6 +198,7 @@ function getReadyForLoadingSnapshot(existingTrip, requestBody) {
     grade: normalizeEmpty(requestBody.grade ?? existingTrip.grade),
     condition: normalizeEmpty(requestBody.condition ?? existingTrip.condition),
     packing: normalizeEmpty(requestBody.packing ?? existingTrip.packing),
+    location: normalizeEmpty(requestBody.location ?? existingTrip.location),
     loading_point: normalizeEmpty(requestBody.loading_point ?? existingTrip.loading_point),
     eta: normalizeEmpty(requestBody.eta ?? existingTrip.eta),
     expected_weight: toFiniteNumberOrNull(requestBody.expected_weight ?? existingTrip.expected_weight),
@@ -166,6 +212,19 @@ function getReadyForLoadingSnapshot(existingTrip, requestBody) {
     snapshot[field] = value;
   });
   return snapshot;
+}
+
+function getStatusHistoryWithInitialDetails(initialStatus, details = {}) {
+  const history = buildInitialStatusHistory(initialStatus);
+  const filteredDetails = Object.fromEntries(
+    Object.entries(details || {}).filter(([, value]) => value !== null && value !== undefined && value !== '')
+  );
+  if (!history.length || !Object.keys(filteredDetails).length) return history;
+  const last = history[history.length - 1];
+  return [
+    ...history.slice(0, -1),
+    { ...last, details: { ...(last.details || {}), ...filteredDetails } }
+  ];
 }
 
 function getCurrentIstTimestamp() {
@@ -272,6 +331,74 @@ function readRoleFromRequest(req) {
   return { role };
 }
 
+function getUploaderDisplayNameForRole(role, trip) {
+  if (!trip) return null;
+  if (role === 'Dispatch') return normalizeEmpty(trip.dispatch_manager_name || trip.dispatch_done_by);
+  if (role === 'Weighbridge') return normalizeEmpty(trip.weight_operator_name || trip.tare_done_by || trip.gross_done_by);
+  if (role === 'Accounts') return normalizeEmpty(trip.accounts_person_name || trip.billing_done_by);
+  if (role === 'Admin') return 'Admin';
+  return null;
+}
+
+async function readCustomerFromRequest(req) {
+  const username = String(req.header('x-customer-username') || '').trim();
+  const password = String(req.header('x-customer-password') || '').trim();
+  if (!username || !password) {
+    return { error: 'Missing customer credentials', status: 401 };
+  }
+  try {
+    const result = await pool.query(
+      `SELECT id, customer_name, username, display_name, is_active
+       FROM customer_users
+       WHERE username = $1 AND password = $2
+       LIMIT 1`,
+      [username, password]
+    );
+    if (!result.rows.length) {
+      return { error: 'Invalid customer credentials', status: 403 };
+    }
+    const user = result.rows[0];
+    if (!user.is_active) {
+      return { error: 'Customer user is inactive', status: 403 };
+    }
+    return { user };
+  } catch (error) {
+    console.error('Customer auth failed', error);
+    return { error: 'Failed to validate customer credentials', status: 500 };
+  }
+}
+
+async function canCustomerAccessTripDocuments(customerUserId, tripId) {
+  const result = await pool.query(
+    `SELECT 1
+     FROM trips t
+     JOIN expected_trucks et ON et.id = t.expected_truck_id
+     WHERE t.id = $1 AND et.submitted_by_user_id = $2
+     LIMIT 1`,
+    [tripId, customerUserId]
+  );
+  return result.rows.length > 0;
+}
+
+function normalizeExpectedTruckStatus(status) {
+  const normalized = String(status || '').toUpperCase();
+  return EXPECTED_TRUCK_STATUSES.includes(normalized) ? normalized : 'SUBMITTED';
+}
+
+function getExpectedTruckCurrentStatus(row) {
+  if (row.trip_status) return row.trip_status;
+  return row.status;
+}
+
+function isTripCompletedForCustomer(trip) {
+  if (!trip) return false;
+  if (trip.status === 'EXITED') {
+    const outcome = trip.final_status || (trip.is_cancelled ? 'CANCELLED' : 'COMPLETED');
+    return outcome === 'COMPLETED';
+  }
+  return trip.status === 'COMPLETED';
+}
+
 function valuesEqual(field, a, b) {
   if (field === 'status_history') {
     return JSON.stringify(normalizeStatusHistory(a)) === JSON.stringify(normalizeStatusHistory(b));
@@ -344,6 +471,14 @@ app.get('/dashboard', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
 });
 
+app.get('/expected-trucks-page', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'expected-trucks.html'));
+});
+
+app.get('/customer', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'customer.html'));
+});
+
 app.post('/trip', async (req, res) => {
   const auth = readRoleFromRequest(req);
   if (auth.error) {
@@ -374,10 +509,12 @@ app.post('/trip', async (req, res) => {
     grade,
     condition,
     packing,
+    location,
     loading_point,
     labour_team,
     eta,
     expected_weight,
+    customer_notes,
     waiting_reason,
     load_fix_reason,
     tare_weight,
@@ -426,10 +563,12 @@ app.post('/trip', async (req, res) => {
         grade,
         condition,
         packing,
+        location,
         loading_point,
         labour_team,
         eta,
         expected_weight,
+        customer_notes,
         waiting_reason,
         load_fix_reason,
         tare_weight,
@@ -444,7 +583,7 @@ app.post('/trip', async (req, res) => {
         out_time,
         last_status_update_time,
         status_history
-      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38)
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40)
       RETURNING *`,
       [
         sequence_number,
@@ -467,10 +606,12 @@ app.post('/trip', async (req, res) => {
         grade,
         condition,
         packing,
+        location,
         loading_point,
         labour_team,
         eta,
         expected_weight,
+        customer_notes,
         waiting_reason,
         load_fix_reason,
         tare_weight,
@@ -544,10 +685,12 @@ app.put('/trip/:id', async (req, res) => {
     'grade',
     'condition',
     'packing',
+    'location',
     'loading_point',
     'labour_team',
     'eta',
     'expected_weight',
+    'customer_notes',
     'waiting_reason',
     'load_fix_reason',
     'tare_weight',
@@ -822,12 +965,759 @@ app.put('/trip/:id', async (req, res) => {
   }
 });
 
+app.delete('/trip/:id', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') {
+    return res.status(403).json({ error: 'Only Admin can delete trips' });
+  }
+
+  const tripId = Number(req.params.id);
+  if (!Number.isInteger(tripId) || tripId <= 0) {
+    return res.status(400).json({ error: 'Invalid trip id' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const existing = await client.query(
+      `SELECT id FROM trips WHERE id = $1 LIMIT 1 FOR UPDATE`,
+      [tripId]
+    );
+    if (!existing.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Trip not found' });
+    }
+
+    const docRows = await client.query(
+      `SELECT storage_path FROM trip_documents WHERE trip_id = $1`,
+      [tripId]
+    );
+
+    await client.query(`DELETE FROM trips WHERE id = $1`, [tripId]);
+    await client.query('COMMIT');
+
+    docRows.rows.forEach((row) => {
+      try {
+        const absolutePath = path.resolve(__dirname, row.storage_path || '');
+        if (absolutePath.startsWith(path.resolve(DOC_UPLOAD_DIR)) && fs.existsSync(absolutePath)) {
+          fs.unlinkSync(absolutePath);
+        }
+      } catch (_err) {
+        // no-op; db deletion is already committed
+      }
+    });
+
+    return res.json({ ok: true, deleted_trip_id: tripId });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Failed to delete trip', error);
+    return res.status(500).json({ error: 'Failed to delete trip' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/trip/:id/documents', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!DOC_VIEW_ROLES.has(auth.role)) {
+    return res.status(403).json({ error: 'Role cannot view trip documents' });
+  }
+
+  const tripId = Number(req.params.id);
+  if (!Number.isInteger(tripId) || tripId <= 0) {
+    return res.status(400).json({ error: 'Invalid trip id' });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT id, trip_id, expected_truck_id, doc_type, file_name, mime_type, file_size, uploaded_by_role, uploaded_by_name, created_at
+       FROM trip_documents
+       WHERE trip_id = $1
+       ORDER BY created_at DESC, id DESC`,
+      [tripId]
+    );
+    return res.json(result.rows);
+  } catch (error) {
+    console.error('Failed to load trip documents', error);
+    return res.status(500).json({ error: 'Failed to load trip documents' });
+  }
+});
+
+app.post('/trip/:id/documents', (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!DOC_UPLOAD_ROLES.has(auth.role)) {
+    return res.status(403).json({ error: 'Role cannot upload trip documents' });
+  }
+
+  const tripId = Number(req.params.id);
+  if (!Number.isInteger(tripId) || tripId <= 0) {
+    return res.status(400).json({ error: 'Invalid trip id' });
+  }
+
+  uploadDocument.single('file')(req, res, async (uploadError) => {
+    if (uploadError) {
+      const message = uploadError.message || 'Failed to upload file';
+      return res.status(400).json({ error: message });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: 'File is required' });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const tripRes = await client.query('SELECT id, expected_truck_id, dispatch_manager_name, dispatch_done_by, weight_operator_name, tare_done_by, gross_done_by, accounts_person_name, billing_done_by FROM trips WHERE id = $1 FOR UPDATE', [tripId]);
+      if (!tripRes.rows.length) {
+        await client.query('ROLLBACK');
+        try { fs.unlinkSync(req.file.path); } catch (_err) {}
+        return res.status(404).json({ error: 'Trip not found' });
+      }
+
+      const trip = tripRes.rows[0];
+      const docType = normalizeEmpty(req.body.doc_type);
+      const uploadedByName = getUploaderDisplayNameForRole(auth.role, trip);
+      const storagePath = path.relative(__dirname, req.file.path);
+      const insert = await client.query(
+        `INSERT INTO trip_documents (
+          trip_id, expected_truck_id, doc_type, file_name, mime_type, file_size, storage_path, uploaded_by_role, uploaded_by_name
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        RETURNING id, trip_id, expected_truck_id, doc_type, file_name, mime_type, file_size, uploaded_by_role, uploaded_by_name, created_at`,
+        [
+          trip.id,
+          trip.expected_truck_id || null,
+          docType,
+          req.file.originalname,
+          req.file.mimetype,
+          req.file.size,
+          storagePath,
+          auth.role,
+          uploadedByName
+        ]
+      );
+      await client.query('COMMIT');
+      return res.status(201).json(insert.rows[0]);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      try { fs.unlinkSync(req.file.path); } catch (_err) {}
+      console.error('Failed to upload trip document', error);
+      return res.status(500).json({ error: 'Failed to upload trip document' });
+    } finally {
+      client.release();
+    }
+  });
+});
+
+app.get('/documents/:id/download', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!DOC_VIEW_ROLES.has(auth.role)) {
+    return res.status(403).json({ error: 'Role cannot download trip documents' });
+  }
+
+  const documentId = Number(req.params.id);
+  if (!Number.isInteger(documentId) || documentId <= 0) {
+    return res.status(400).json({ error: 'Invalid document id' });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT id, file_name, mime_type, storage_path
+       FROM trip_documents
+       WHERE id = $1
+       LIMIT 1`,
+      [documentId]
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    const doc = result.rows[0];
+    const absolutePath = path.resolve(__dirname, doc.storage_path);
+    if (!absolutePath.startsWith(path.resolve(DOC_UPLOAD_DIR))) {
+      return res.status(403).json({ error: 'Invalid document path' });
+    }
+    if (!fs.existsSync(absolutePath)) {
+      return res.status(404).json({ error: 'Document file missing' });
+    }
+
+    return res.download(absolutePath, doc.file_name);
+  } catch (error) {
+    console.error('Failed to download trip document', error);
+    return res.status(500).json({ error: 'Failed to download trip document' });
+  }
+});
+
+app.delete('/trip/:tripId/documents/:docId', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!DOC_UPLOAD_ROLES.has(auth.role) && auth.role !== 'Admin') {
+    return res.status(403).json({ error: 'Role cannot delete trip documents' });
+  }
+
+  const tripId = Number(req.params.tripId);
+  const documentId = Number(req.params.docId);
+  if (!Number.isInteger(tripId) || tripId <= 0 || !Number.isInteger(documentId) || documentId <= 0) {
+    return res.status(400).json({ error: 'Invalid identifiers' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const existing = await client.query(
+      `SELECT id, trip_id, storage_path, uploaded_by_role
+       FROM trip_documents
+       WHERE id = $1 AND trip_id = $2
+       LIMIT 1
+       FOR UPDATE`,
+      [documentId, tripId]
+    );
+    if (!existing.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    const doc = existing.rows[0];
+    if (auth.role !== 'Admin' && doc.uploaded_by_role !== auth.role) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'You can only delete documents uploaded by your role' });
+    }
+
+    await client.query('DELETE FROM trip_documents WHERE id = $1', [doc.id]);
+    await client.query('COMMIT');
+    try {
+      const absolutePath = path.resolve(__dirname, doc.storage_path);
+      if (absolutePath.startsWith(path.resolve(DOC_UPLOAD_DIR)) && fs.existsSync(absolutePath)) {
+        fs.unlinkSync(absolutePath);
+      }
+    } catch (_err) {}
+    return res.json({ ok: true });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Failed to delete trip document', error);
+    return res.status(500).json({ error: 'Failed to delete trip document' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/customer/trip-documents', async (req, res) => {
+  const auth = await readCustomerFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+
+  const tripId = Number(req.query.trip_id || 0);
+  if (!Number.isInteger(tripId) || tripId <= 0) {
+    return res.status(400).json({ error: 'trip_id is required' });
+  }
+
+  try {
+    const allowed = await canCustomerAccessTripDocuments(auth.user.id, tripId);
+    if (!allowed) {
+      return res.status(403).json({ error: 'Not allowed to view documents for this trip' });
+    }
+    const result = await pool.query(
+      `SELECT id, trip_id, expected_truck_id, doc_type, file_name, mime_type, file_size, uploaded_by_role, uploaded_by_name, created_at
+       FROM trip_documents
+       WHERE trip_id = $1
+       ORDER BY created_at DESC, id DESC`,
+      [tripId]
+    );
+    return res.json(result.rows);
+  } catch (error) {
+    console.error('Failed to load customer trip documents', error);
+    return res.status(500).json({ error: 'Failed to load documents' });
+  }
+});
+
+app.get('/customer/documents/:id/download', async (req, res) => {
+  const auth = await readCustomerFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+
+  const documentId = Number(req.params.id);
+  if (!Number.isInteger(documentId) || documentId <= 0) {
+    return res.status(400).json({ error: 'Invalid document id' });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT td.id, td.trip_id, td.file_name, td.storage_path
+       FROM trip_documents td
+       WHERE td.id = $1
+       LIMIT 1`,
+      [documentId]
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    const doc = result.rows[0];
+    const allowed = await canCustomerAccessTripDocuments(auth.user.id, doc.trip_id);
+    if (!allowed) {
+      return res.status(403).json({ error: 'Not allowed to download this document' });
+    }
+    const absolutePath = path.resolve(__dirname, doc.storage_path);
+    if (!absolutePath.startsWith(path.resolve(DOC_UPLOAD_DIR))) {
+      return res.status(403).json({ error: 'Invalid document path' });
+    }
+    if (!fs.existsSync(absolutePath)) {
+      return res.status(404).json({ error: 'Document file missing' });
+    }
+    return res.download(absolutePath, doc.file_name);
+  } catch (error) {
+    console.error('Failed to download customer document', error);
+    return res.status(500).json({ error: 'Failed to download document' });
+  }
+});
+
+app.post('/admin/customer-users', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can create customer users' });
+
+  const customerName = normalizeEmpty(req.body.customer_name);
+  const username = normalizeEmpty(req.body.username);
+  const password = normalizeEmpty(req.body.password);
+  const displayName = normalizeEmpty(req.body.display_name);
+
+  if (!customerName || !username || !password) {
+    return res.status(400).json({ error: 'customer_name, username and password are required' });
+  }
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO customer_users (customer_name, username, password, display_name, is_active)
+       VALUES ($1, $2, $3, $4, true)
+       RETURNING id, customer_name, username, display_name, is_active, created_at`,
+      [customerName, username, password, displayName]
+    );
+    return res.status(201).json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'Username already exists' });
+    }
+    console.error('Failed to create customer user', error);
+    return res.status(500).json({ error: 'Failed to create customer user' });
+  }
+});
+
+app.get('/admin/customer-users', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can view customer users' });
+  try {
+    const result = await pool.query(
+      `SELECT id, customer_name, username, display_name, is_active, created_at, updated_at
+       FROM customer_users
+       ORDER BY customer_name ASC, username ASC`
+    );
+    return res.json(result.rows);
+  } catch (error) {
+    console.error('Failed to list customer users', error);
+    return res.status(500).json({ error: 'Failed to load customer users' });
+  }
+});
+
+app.post('/customer/login', async (req, res) => {
+  const username = String(req.body.username || '').trim();
+  const password = String(req.body.password || '').trim();
+  if (!username || !password) {
+    return res.status(400).json({ error: 'username and password are required' });
+  }
+  const auth = await readCustomerFromRequest({
+    header: (name) => (name === 'x-customer-username' ? username : (name === 'x-customer-password' ? password : null))
+  });
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  return res.json({
+    ok: true,
+    user: {
+      id: auth.user.id,
+      customer_name: auth.user.customer_name,
+      username: auth.user.username,
+      display_name: auth.user.display_name
+    }
+  });
+});
+
+app.get('/customer/me', async (req, res) => {
+  const auth = await readCustomerFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  return res.json({
+    id: auth.user.id,
+    customer_name: auth.user.customer_name,
+    username: auth.user.username,
+    display_name: auth.user.display_name
+  });
+});
+
+app.post('/customer/expected-trucks', async (req, res) => {
+  const auth = await readCustomerFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+
+  const truckNumber = normalizeEmpty(req.body.truck_number);
+  const driverName = normalizeEmpty(req.body.driver_name);
+  const driverPhone = normalizeEmpty(req.body.driver_phone);
+  const expectedQty = toFiniteNumberOrNull(req.body.expected_quantity_mt);
+  const customerName = normalizeEmpty(req.body.customer_name) || auth.user.customer_name;
+  const materialType = normalizeEmpty(req.body.material_type);
+  const grade = normalizeEmpty(req.body.grade);
+  const condition = normalizeEmpty(req.body.condition);
+  const packing = normalizeEmpty(req.body.packing);
+  const location = normalizeEmpty(req.body.location);
+  const transporter = normalizeEmpty(req.body.transporter);
+  const eta = normalizeEmpty(req.body.eta);
+  const notes = normalizeEmpty(req.body.notes);
+
+  if (!truckNumber || !driverName || !driverPhone || expectedQty === null || expectedQty <= 0) {
+    return res.status(400).json({ error: 'truck_number, driver_name, driver_phone and expected_quantity_mt are required' });
+  }
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO expected_trucks (
+        submitted_by_user_id, customer_name, truck_number, driver_name, driver_phone, transporter,
+        expected_quantity_mt, material_type, grade, condition, packing, location, eta, notes,
+        status, submitted_at, status_updated_at, status_updated_by
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,
+        $7,$8,$9,$10,$11,$12,$13,$14,
+        'SUBMITTED', NOW(), NOW(), 'CUSTOMER'
+      )
+      RETURNING *`,
+      [
+        auth.user.id, customerName, truckNumber, driverName, driverPhone, transporter,
+        expectedQty, materialType, grade, condition, packing, location, eta, notes
+      ]
+    );
+    return res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Failed to create expected truck', error);
+    return res.status(500).json({ error: 'Failed to create expected truck' });
+  }
+});
+
+app.get('/customer/expected-trucks', async (req, res) => {
+  const auth = await readCustomerFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+
+  try {
+    const result = await pool.query(
+      `SELECT
+        et.*,
+        t.status AS trip_status,
+        t.final_status AS trip_final_status,
+        t.in_time AS trip_in_time,
+        t.out_time AS trip_out_time,
+        t.net_weight AS trip_net_weight
+       FROM expected_trucks et
+       LEFT JOIN trips t ON t.id = et.linked_trip_id
+       WHERE et.submitted_by_user_id = $1
+       ORDER BY et.created_at DESC, et.id DESC`,
+      [auth.user.id]
+    );
+    const rows = result.rows.map((row) => ({
+      ...row,
+      current_status: getExpectedTruckCurrentStatus(row)
+    }));
+    return res.json(rows);
+  } catch (error) {
+    console.error('Failed to load expected trucks for customer', error);
+    return res.status(500).json({ error: 'Failed to load expected trucks' });
+  }
+});
+
+app.get('/customer/dashboard-summary', async (req, res) => {
+  const auth = await readCustomerFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+
+  const customerNameFilter = normalizeEmpty(req.query.customer_name);
+  try {
+    const result = await pool.query(
+      `SELECT
+        t.id, t.truck_number, t.status, t.final_status, t.is_cancelled, t.net_weight, t.in_time, t.out_time,
+        et.customer_name
+       FROM expected_trucks et
+       JOIN trips t ON t.id = et.linked_trip_id
+       WHERE et.submitted_by_user_id = $1
+       ${customerNameFilter ? 'AND et.customer_name = $2' : ''}
+       ORDER BY t.updated_at DESC, t.id DESC`,
+      customerNameFilter ? [auth.user.id, customerNameFilter] : [auth.user.id]
+    );
+
+    const rows = result.rows;
+    const now = new Date();
+    const istDateParts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    const nowParts = Object.fromEntries(istDateParts.formatToParts(now).filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]));
+
+    const completedRows = rows.filter(isTripCompletedForCustomer);
+    const getParts = (value) => {
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return null;
+      return Object.fromEntries(istDateParts.formatToParts(d).filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]));
+    };
+
+    const summary = {
+      trucks_today: 0,
+      trucks_month: 0,
+      trucks_year: 0,
+      quantity_today_mt: 0,
+      quantity_month_mt: 0,
+      quantity_year_mt: 0
+    };
+
+    completedRows.forEach((row) => {
+      const parts = getParts(row.out_time || row.in_time);
+      if (!parts) return;
+      const net = toFiniteNumberOrNull(row.net_weight) || 0;
+      const sameYear = parts.year === nowParts.year;
+      const sameMonth = sameYear && parts.month === nowParts.month;
+      const sameDay = sameMonth && parts.day === nowParts.day;
+      if (sameYear) {
+        summary.trucks_year += 1;
+        summary.quantity_year_mt += net;
+      }
+      if (sameMonth) {
+        summary.trucks_month += 1;
+        summary.quantity_month_mt += net;
+      }
+      if (sameDay) {
+        summary.trucks_today += 1;
+        summary.quantity_today_mt += net;
+      }
+    });
+
+    return res.json({
+      summary,
+      records: rows
+    });
+  } catch (error) {
+    console.error('Failed to load customer dashboard summary', error);
+    return res.status(500).json({ error: 'Failed to load customer dashboard summary' });
+  }
+});
+
+app.get('/expected-trucks', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!['Gate', 'Dispatch', 'Admin'].includes(auth.role)) {
+    return res.status(403).json({ error: 'Only Gate/Dispatch/Admin can view expected trucks' });
+  }
+
+  const requestedStatus = normalizeExpectedTruckStatus(req.query.status || '');
+  const onlyApproved = req.query.onlyApproved === 'true';
+  const filters = [];
+  const values = [];
+  // Keep recent gate-in conversions visible briefly, hide after 24h.
+  filters.push(`NOT (et.status = 'GATE_IN_DONE' AND et.created_at <= NOW() - INTERVAL '24 hours')`);
+  if (req.query.status) {
+    values.push(requestedStatus);
+    filters.push(`et.status = $${values.length}`);
+  } else if (onlyApproved) {
+    filters.push(`et.status = 'APPROVED'`);
+  }
+  const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+
+  try {
+    const result = await pool.query(
+      `SELECT
+        et.*,
+       cu.display_name AS submitted_by_name,
+       cu.username AS submitted_by_username,
+       t.status AS trip_status,
+       t.final_status AS trip_final_status,
+       t.location AS trip_location,
+       t.in_time AS trip_in_time,
+       t.out_time AS trip_out_time
+       FROM expected_trucks et
+       JOIN customer_users cu ON cu.id = et.submitted_by_user_id
+       LEFT JOIN trips t ON t.id = et.linked_trip_id
+       ${where}
+       ORDER BY et.created_at DESC, et.id DESC`,
+      values
+    );
+    const rows = result.rows.map((row) => ({
+      ...row,
+      current_status: getExpectedTruckCurrentStatus(row)
+    }));
+    return res.json(rows);
+  } catch (error) {
+    console.error('Failed to load expected trucks', error);
+    return res.status(500).json({ error: 'Failed to load expected trucks' });
+  }
+});
+
+app.put('/expected-trucks/:id/status', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!['Dispatch', 'Admin'].includes(auth.role)) {
+    return res.status(403).json({ error: 'Only Dispatch/Admin can update expected truck status' });
+  }
+  const id = req.params.id;
+  const nextStatus = normalizeExpectedTruckStatus(req.body.status);
+  if (!['REVIEW_PENDING', 'APPROVED', 'CANCELLED'].includes(nextStatus)) {
+    return res.status(400).json({ error: 'Invalid expected truck status transition target' });
+  }
+
+  try {
+    const existing = await pool.query(`SELECT * FROM expected_trucks WHERE id = $1`, [id]);
+    if (!existing.rows.length) return res.status(404).json({ error: 'Expected truck not found' });
+    const row = existing.rows[0];
+    if (row.linked_trip_id) {
+      return res.status(400).json({ error: 'Cannot update status after gate-in conversion' });
+    }
+
+    const approvedAt = nextStatus === 'APPROVED' ? `approved_at = NOW(),` : '';
+    const expiresAt = nextStatus === 'APPROVED' ? `expires_at = NOW() + INTERVAL '24 hours',` : '';
+    const result = await pool.query(
+      `UPDATE expected_trucks
+       SET status = $1,
+           ${approvedAt}
+           ${expiresAt}
+           status_updated_at = NOW(),
+           status_updated_by = $2,
+           updated_at = NOW()
+       WHERE id = $3
+       RETURNING *`,
+      [nextStatus, auth.role, id]
+    );
+    return res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Failed to update expected truck status', error);
+    return res.status(500).json({ error: 'Failed to update expected truck status' });
+  }
+});
+
+app.post('/expected-trucks/:id/mark-gate-in', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!['Gate', 'Admin'].includes(auth.role)) {
+    return res.status(403).json({ error: 'Only Gate/Admin can mark expected truck gate-in' });
+  }
+  const id = req.params.id;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const expectedRes = await client.query(`SELECT * FROM expected_trucks WHERE id = $1 FOR UPDATE`, [id]);
+    if (!expectedRes.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Expected truck not found' });
+    }
+    const expected = expectedRes.rows[0];
+    if (expected.linked_trip_id) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Expected truck already converted to trip' });
+    }
+    if (expected.status !== 'APPROVED') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Only APPROVED expected trucks can be gate-in converted' });
+    }
+
+    const safeStatus = 'SENT_FOR_TARE_WEIGHT';
+    const nowIso = new Date().toISOString();
+    const customerNotes = normalizeEmpty(expected.notes);
+    const statusHistory = getStatusHistoryWithInitialDetails(safeStatus, {
+      customer_notes: customerNotes,
+      location: normalizeEmpty(expected.location)
+    });
+
+    const tripInsert = await client.query(
+      `INSERT INTO trips(
+        truck_number, customer_name, transporter, driver_name, driver_phone, gate_person_name,
+        material_type, grade, condition, packing, location, expected_weight,
+        customer_notes,
+        status, in_time, last_status_update_time, status_history, expected_truck_id
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+      RETURNING *`,
+      [
+        expected.truck_number,
+        expected.customer_name,
+        expected.transporter,
+        expected.driver_name,
+        expected.driver_phone,
+        normalizeEmpty(req.body.gate_person_name),
+        expected.material_type,
+        expected.grade,
+        expected.condition,
+        expected.packing,
+        expected.location,
+        expected.expected_quantity_mt,
+        customerNotes,
+        safeStatus,
+        nowIso,
+        nowIso,
+        JSON.stringify(statusHistory),
+        expected.id
+      ]
+    );
+    const trip = tripInsert.rows[0];
+
+    await client.query(
+      `UPDATE expected_trucks
+       SET linked_trip_id = $1,
+           status = 'GATE_IN_DONE',
+           status_updated_at = NOW(),
+           status_updated_by = $2,
+           updated_at = NOW()
+       WHERE id = $3`,
+      [trip.id, auth.role, expected.id]
+    );
+
+    await client.query('COMMIT');
+    return res.status(201).json(trip);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Failed to convert expected truck to trip', error);
+    return res.status(500).json({ error: 'Failed to mark gate-in for expected truck' });
+  } finally {
+    client.release();
+  }
+});
+
+async function runExpectedTruckAutomation() {
+  try {
+    await pool.query(
+      `UPDATE expected_trucks
+       SET status = 'APPROVED',
+           approved_at = COALESCE(approved_at, NOW()),
+           expires_at = COALESCE(expires_at, NOW() + INTERVAL '24 hours'),
+           status_updated_at = NOW(),
+           status_updated_by = 'SYSTEM',
+           updated_at = NOW()
+       WHERE linked_trip_id IS NULL
+         AND status IN ('SUBMITTED', 'REVIEW_PENDING')
+         AND submitted_at <= NOW() - INTERVAL '2 hours'`
+    );
+
+    await pool.query(
+      `UPDATE expected_trucks
+       SET status = 'EXPIRED',
+           status_updated_at = NOW(),
+           status_updated_by = 'SYSTEM',
+           updated_at = NOW()
+       WHERE linked_trip_id IS NULL
+         AND status = 'APPROVED'
+         AND COALESCE(expires_at, approved_at + INTERVAL '24 hours', submitted_at + INTERVAL '26 hours') <= NOW()`
+    );
+  } catch (error) {
+    console.error('Expected truck automation failed', error);
+  }
+}
+
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
 initDb()
   .then(() => {
+    runExpectedTruckAutomation();
+    setInterval(runExpectedTruckAutomation, 5 * 60 * 1000);
     app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
     });

@@ -1,12 +1,15 @@
 let userRole = null;
 let allTrips = [];
 const loadingDetailsDrafts = new Map();
+const tripDocumentsCache = new Map();
+const tripDocumentsLoading = new Set();
 
 const IST_TIMEZONE = 'Asia/Kolkata';
 const IST_OFFSET = '+05:30';
 const TRANSPORTER_STORAGE_KEY = 'transporterOptions';
 const TRANSPORTER_STORAGE_VERSION_KEY = 'transporterOptionsVersion';
 const TRANSPORTER_STORAGE_VERSION = '2026-04-17-list-1';
+const LOCATION_STORAGE_KEY = 'locationOptions';
 const BASE_TRANSPORTER_OPTIONS = [
   'Shree Ram Roadlines',
   'Kuber Roadlines',
@@ -70,7 +73,7 @@ const ROLE_PINS = {
   Dispatch: '3333',
   Loading: '4444',
   Accounts: '5555',
-  Admin: '9999'
+  Admin: '2802'
 };
 
 const ROLE_ALLOWED_TARGETS = {
@@ -81,6 +84,8 @@ const ROLE_ALLOWED_TARGETS = {
   Accounts: ['BILLING_COMPLETED'],
   Admin: STATUS_FLOW
 };
+const DOC_UPLOAD_ROLES = ['Dispatch', 'Weighbridge', 'Accounts', 'Admin'];
+const DOC_VIEW_ROLES = ['Dispatch', 'Weighbridge', 'Accounts', 'Admin'];
 
 const DISPATCH_DROPDOWNS = {
   loading_point: ['Office Front', 'Warehouse', 'Old Dry Plant', 'Near Crusher Plant', 'Glass Plant', 'Other'],
@@ -126,9 +131,11 @@ const customerSelect = document.getElementById('customer-select');
 const customerOther = document.getElementById('customer-other');
 const transporterInput = document.getElementById('transporter-input');
 const transporterSuggestions = document.getElementById('transporter-suggestions');
+const locationOptionsDatalist = document.getElementById('location-options');
 const gatePersonSelect = document.getElementById('gate-person-select');
 const gatePersonOther = document.getElementById('gate-person-other');
 let transporterOptions = [];
+let locationOptions = [];
 
 const MAIN_TABLE_COLUMNS = [
   'Truck Number',
@@ -260,6 +267,28 @@ function formatWeightMT(value) {
   return `${numeric.toFixed(3)} MT`;
 }
 
+function formatFileSize(bytes) {
+  const size = Number(bytes);
+  if (!Number.isFinite(size) || size < 0) return '-';
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function canUploadTripDocuments() {
+  return DOC_UPLOAD_ROLES.includes(getCurrentRole());
+}
+
+function canViewTripDocuments() {
+  return DOC_VIEW_ROLES.includes(getCurrentRole());
+}
+
+function canDeleteTripDocument(doc) {
+  const role = getCurrentRole();
+  if (role === 'Admin') return true;
+  return doc && doc.uploaded_by_role === role;
+}
+
 function parseStatusHistory(trip) {
   if (!trip || trip.status_history == null) return [];
   if (Array.isArray(trip.status_history)) return trip.status_history;
@@ -292,6 +321,7 @@ function statusToLabel(status) {
 
 function statusDetailLabel(key) {
   const labels = {
+    customer_notes: 'Customer Note',
     waiting_reason: 'Waiting',
     load_fix_reason: 'Load Fix',
     cancel_reason: 'Cancel',
@@ -301,6 +331,7 @@ function statusDetailLabel(key) {
     grade: 'Grade',
     condition: 'Condition',
     packing: 'Packing',
+    location: 'Location',
     eta: 'ETA',
     expected_weight: 'Expected',
     tare_weight: 'Tare',
@@ -391,6 +422,7 @@ function enrichTimelineEntryDetailsForDisplay(trip, history, entry, index) {
     'grade',
     'condition',
     'packing',
+    'location',
     'loading_point',
     'eta',
     'expected_weight',
@@ -493,6 +525,8 @@ function openTimelineModal(tripId) {
       <div><strong>Driver:</strong> ${escapeHtml(trip.driver_name || '-')}</div>
       <div><strong>Driver Phone:</strong> ${escapeHtml(trip.driver_phone || '-')}</div>
       <div><strong>Gate Operator:</strong> ${escapeHtml(trip.gate_person_name || '-')}</div>
+      <div><strong>Customer Note:</strong> ${escapeHtml(trip.customer_notes || '-')}</div>
+      <div><strong>Location:</strong> ${escapeHtml(trip.location || '-')}</div>
       <div><strong>Dispatch Manager:</strong> ${escapeHtml(trip.dispatch_manager_name || '-')}</div>
       <div><strong>Loading Manager:</strong> ${escapeHtml(trip.loading_person_name || '-')}</div>
       <div><strong>Weighbridge Operator:</strong> ${escapeHtml(trip.weight_operator_name || '-')}</div>
@@ -556,7 +590,8 @@ function applyRoleUI() {
   const role = getCurrentRole();
   const canCreate = hasRoleAccess(['Gate', 'Admin']);
   const gatePanel = form?.closest('.panel');
-  const dashboardLink = document.querySelector('a[href="/dashboard"]');
+  const dashboardLink = document.getElementById('dashboard-link');
+  const customerPortalLink = document.getElementById('customer-portal-link');
 
   if (gatePanel && !canCreate) {
     gatePanel.style.display = 'none';
@@ -564,6 +599,9 @@ function applyRoleUI() {
 
   if (dashboardLink) {
     dashboardLink.style.display = role === 'Gate' ? 'none' : 'inline-block';
+  }
+  if (customerPortalLink) {
+    customerPortalLink.style.display = role === 'Gate' ? 'none' : 'inline-block';
   }
 
   if (roleIndicator && role) {
@@ -728,6 +766,43 @@ function refreshTransporterOptions() {
   transporterOptions = merged;
 }
 
+function normalizeLocationName(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function getStoredLocationOptions() {
+  try {
+    const raw = localStorage.getItem(LOCATION_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((item) => normalizeLocationName(item)).filter(Boolean);
+  } catch (_error) {
+    return [];
+  }
+}
+
+function setStoredLocationOptions(options) {
+  const unique = Array.from(new Set((options || []).map((item) => normalizeLocationName(item)).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b));
+  localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(unique));
+}
+
+function renderLocationOptions() {
+  if (!locationOptionsDatalist) return;
+  locationOptionsDatalist.innerHTML = locationOptions
+    .map((item) => `<option value="${escapeHtml(item)}"></option>`)
+    .join('');
+}
+
+function refreshLocationOptionsFromTrips() {
+  const stored = getStoredLocationOptions();
+  const fromTrips = allTrips.map((trip) => normalizeLocationName(trip.location)).filter(Boolean);
+  locationOptions = Array.from(new Set([...stored, ...fromTrips])).sort((a, b) => a.localeCompare(b));
+  setStoredLocationOptions(locationOptions);
+  renderLocationOptions();
+}
+
 function hideTransporterSuggestions() {
   if (!transporterSuggestions) return;
   transporterSuggestions.style.display = 'none';
@@ -831,10 +906,12 @@ function getBaseTripPayload(trip) {
     grade: trip.grade,
     condition: trip.condition,
     packing: trip.packing,
+    location: trip.location,
     loading_point: trip.loading_point,
     labour_team: trip.labour_team,
     eta: trip.eta,
     expected_weight: trip.expected_weight,
+    customer_notes: trip.customer_notes,
     waiting_reason: trip.waiting_reason,
     load_fix_reason: trip.load_fix_reason,
     tare_weight: trip.tare_weight,
@@ -894,6 +971,7 @@ function getDispatchDetailsFromRow(tripId) {
     grade: resolveDropdown('grade'),
     condition: resolveDropdown('condition'),
     packing: resolveDropdown('packing'),
+    location: readValue('location'),
     loading_point: resolveDropdown('loading_point'),
     labour_team: resolveDropdown('labour_team'),
     eta: localInputToIstIso(readValue('eta')),
@@ -911,6 +989,7 @@ function getMergedDispatchDetails(tripId) {
     grade: rowDetails.grade || draft.grade || trip?.grade || '',
     condition: rowDetails.condition || draft.condition || trip?.condition || '',
     packing: rowDetails.packing || draft.packing || trip?.packing || '',
+    location: rowDetails.location || draft.location || trip?.location || '',
     loading_point: rowDetails.loading_point || draft.loading_point || trip?.loading_point || '',
     labour_team: rowDetails.labour_team || draft.labour_team || trip?.labour_team || '',
     eta: rowDetails.eta || draft.eta || trip?.eta || null,
@@ -923,6 +1002,7 @@ function getReadyForLoadingValidationError(details) {
   if (!details.grade) return 'Grade is required before moving to ready for loading';
   if (!details.condition) return 'Condition is required before moving to ready for loading';
   if (!details.packing) return 'Packing is required before moving to ready for loading';
+  if (!details.location) return 'Location is required before moving to ready for loading';
   if (!details.loading_point) return 'Loading point is required before moving to ready for loading';
   if (!details.eta) return 'ETA is required before moving to ready for loading';
   const expected = Number(details.expected_weight);
@@ -1035,6 +1115,7 @@ async function applyStatusChange(tripId, requestedStatus, extraFields = {}) {
       grade: extraFields.grade || draft.grade || existingTrip.grade,
       condition: extraFields.condition || draft.condition || existingTrip.condition,
       packing: extraFields.packing || draft.packing || existingTrip.packing,
+      location: extraFields.location || draft.location || existingTrip.location,
       loading_point: extraFields.loading_point || draft.loading_point || existingTrip.loading_point,
       eta: extraFields.eta || draft.eta || existingTrip.eta,
       expected_weight: extraFields.expected_weight || draft.expected_weight || existingTrip.expected_weight
@@ -1485,6 +1566,159 @@ async function sendForLoadFix(tripId) {
   });
 }
 
+async function fetchTripDocuments(tripId, force = false) {
+  const key = String(tripId);
+  if (!force && tripDocumentsCache.has(key)) return tripDocumentsCache.get(key);
+  if (tripDocumentsLoading.has(key)) return tripDocumentsCache.get(key) || [];
+  if (!canViewTripDocuments()) return [];
+
+  tripDocumentsLoading.add(key);
+  try {
+    const response = await fetch(`/trip/${tripId}/documents`, {
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || 'Failed to load documents');
+    }
+    const docs = await response.json();
+    tripDocumentsCache.set(key, docs);
+    return docs;
+  } finally {
+    tripDocumentsLoading.delete(key);
+  }
+}
+
+function renderTripDocumentsSection(trip) {
+  const canUpload = canUploadTripDocuments();
+  const canView = canViewTripDocuments();
+  if (!canUpload && !canView) return '';
+
+  const docs = tripDocumentsCache.get(String(trip.id)) || [];
+  const listHtml = !canView
+    ? '<div class="mini-muted">Document list hidden for this role</div>'
+    : (docs.length
+      ? docs.map((doc) => {
+        const type = doc.doc_type ? `${escapeHtml(doc.doc_type)} • ` : '';
+        const uploaderName = doc.uploaded_by_name ? ` (${escapeHtml(doc.uploaded_by_name)})` : '';
+        const deleteBtn = canDeleteTripDocument(doc)
+          ? `<button class="workflow-btn danger" data-action="delete-doc" data-trip-id="${trip.id}" data-doc-id="${doc.id}" type="button">Delete</button>`
+          : '';
+        return `
+          <div class="workflow-row">
+            <button class="truck-link-btn" data-action="download-doc" data-doc-id="${doc.id}" data-doc-name="${escapeHtml(doc.file_name)}" type="button">${escapeHtml(doc.file_name)}</button>
+            <span class="mini-muted">${type}${formatFileSize(doc.file_size)} • ${escapeHtml(doc.uploaded_by_role || '-')} ${uploaderName}</span>
+            ${deleteBtn}
+          </div>
+        `;
+      }).join('')
+      : '<div class="mini-muted">No documents uploaded</div>');
+
+  const uploadHtml = canUpload ? `
+    <div class="workflow-row">
+      <input type="text" class="dispatch-input" placeholder="Document type (Invoice/Bill/etc.)" data-doc-type data-trip-id="${trip.id}" />
+      <input type="file" class="dispatch-input" data-doc-file data-trip-id="${trip.id}" accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,application/pdf,image/png,image/jpeg,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+      <button class="workflow-btn primary" data-action="upload-doc" data-trip-id="${trip.id}" type="button">Upload</button>
+    </div>
+  ` : '';
+
+  return `
+    <div class="workflow-group">
+      <div class="mini-muted"><strong>Trip Documents</strong></div>
+      ${uploadHtml}
+      ${listHtml}
+    </div>
+  `;
+}
+
+async function downloadTripDocument(docId, fileName = 'document') {
+  try {
+    const response = await fetch(`/documents/${docId}/download`, {
+      headers: {
+        ...getAuthHeaders()
+      }
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || 'Failed to download document');
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName || 'document';
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    showMessage(error.message, false);
+  }
+}
+
+async function uploadTripDocument(tripId) {
+  if (!canUploadTripDocuments()) {
+    showMessage('Role cannot upload documents', false);
+    return;
+  }
+  const fileInput = document.querySelector(`[data-doc-file][data-trip-id="${tripId}"]`);
+  const typeInput = document.querySelector(`[data-doc-type][data-trip-id="${tripId}"]`);
+  const file = fileInput?.files?.[0];
+  if (!file) {
+    showMessage('Select a file to upload', false);
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+  if (typeInput?.value?.trim()) {
+    formData.append('doc_type', typeInput.value.trim());
+  }
+
+  try {
+    const response = await fetch(`/trip/${tripId}/documents`, {
+      method: 'POST',
+      headers: {
+        ...getAuthHeaders()
+      },
+      body: formData
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || 'Failed to upload document');
+    }
+    if (fileInput) fileInput.value = '';
+    if (typeInput) typeInput.value = '';
+    await fetchTripDocuments(tripId, true);
+    showMessage('Document uploaded');
+    applyFilters();
+  } catch (error) {
+    showMessage(error.message, false);
+  }
+}
+
+async function deleteTripDocument(tripId, docId) {
+  const confirmDelete = window.confirm('Delete this document?');
+  if (!confirmDelete) return;
+  try {
+    const response = await fetch(`/trip/${tripId}/documents/${docId}`, {
+      method: 'DELETE',
+      headers: {
+        ...getAuthHeaders()
+      }
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || 'Failed to delete document');
+    }
+    await fetchTripDocuments(tripId, true);
+    showMessage('Document deleted');
+    applyFilters();
+  } catch (error) {
+    showMessage(error.message, false);
+  }
+}
+
 function getWeightsView(trip) {
   return `
     <div class="weight-readonly">
@@ -1521,6 +1755,7 @@ function getDispatchDetailsView(trip) {
   if (trip.grade) items.push(`Grade: ${escapeHtml(trip.grade)}`);
   if (trip.condition) items.push(`Condition: ${escapeHtml(trip.condition)}`);
   if (trip.packing) items.push(`Packing: ${escapeHtml(trip.packing)}`);
+  if (trip.location) items.push(`Location: ${escapeHtml(trip.location)}`);
   if (trip.loading_point) items.push(`Loading: ${escapeHtml(trip.loading_point)}`);
   if (expectedWeightValue !== null && expectedWeightValue !== undefined && expectedWeightValue !== '') {
     items.push(`Expected: ${escapeHtml(formatWeightMT(expectedWeightValue))}`);
@@ -1537,6 +1772,7 @@ function getDispatchDetailsView(trip) {
   if (trip.billing_done_by) items.push(`Billing Done By: ${escapeHtml(trip.billing_done_by)}`);
   if (trip.eta) items.push(`ETA: ${formatDateTime(trip.eta)}`);
   if (trip.load_fix_reason) items.push(`Load Fix Reason: ${escapeHtml(trip.load_fix_reason)}`);
+  if (trip.customer_notes) items.push(`Customer Note: ${escapeHtml(trip.customer_notes)}`);
   const grossAttempts = parseGrossWeightAttempts(trip);
   if (grossAttempts.length) {
     const lastAttempt = grossAttempts[grossAttempts.length - 1];
@@ -1608,10 +1844,12 @@ const ADMIN_EDITABLE_FIELDS = [
   { key: 'grade', label: 'Grade', type: 'text' },
   { key: 'condition', label: 'Condition', type: 'text' },
   { key: 'packing', label: 'Packing', type: 'text' },
+  { key: 'location', label: 'Location', type: 'text' },
   { key: 'eta', label: 'ETA', type: 'datetime-local' },
   { key: 'waiting_reason', label: 'Waiting Reason', type: 'text' },
   { key: 'load_fix_reason', label: 'Load Fix Reason', type: 'text' },
   { key: 'expected_weight', label: 'Expected Weight (MT)', type: 'number' },
+  { key: 'customer_notes', label: 'Customer Note', type: 'text' },
   { key: 'tare_weight', label: 'Tare Weight (MT)', type: 'number' },
   { key: 'gross_weight', label: 'Gross Weight (MT)', type: 'number' },
   { key: 'cancel_reason', label: 'Cancel Reason', type: 'text' }
@@ -1724,6 +1962,9 @@ function renderAdminManualEditor(trip) {
         <button class="workflow-btn primary" data-action="admin-save" data-trip-id="${trip.id}" type="button">
           Save Manual Data
         </button>
+        <button class="workflow-btn danger" data-action="admin-delete-trip" data-trip-id="${trip.id}" type="button">
+          Delete Trip Entry
+        </button>
       </div>
     </div>
   `;
@@ -1740,6 +1981,7 @@ function getDispatchEditor(trip) {
   const gradeValue = draft.grade ?? trip.grade ?? '';
   const conditionValue = draft.condition ?? trip.condition ?? '';
   const packingValue = draft.packing ?? trip.packing ?? '';
+  const locationValue = draft.location ?? trip.location ?? '';
   const loadingPointValue = draft.loading_point ?? trip.loading_point ?? '';
   const expectedWeightValue = draft.expected_weight ?? trip.expected_weight ?? '';
   return `
@@ -1748,6 +1990,9 @@ function getDispatchEditor(trip) {
       <label>Grade ${renderDispatchSelect('grade', trip.id, gradeValue)}</label>
       <label>Condition ${renderDispatchSelect('condition', trip.id, conditionValue)}</label>
       <label>Packing ${renderDispatchSelect('packing', trip.id, packingValue)}</label>
+      <label>Location
+        <input type="text" list="location-options" data-trip-id="${trip.id}" data-dispatch-field="location" class="dispatch-input" value="${escapeHtml(String(locationValue))}" />
+      </label>
       <label>Loading Point ${renderDispatchSelect('loading_point', trip.id, loadingPointValue)}</label>
       <label>Expected Weight (MT)
         <input type="number" step="0.001" min="0" data-trip-id="${trip.id}" data-dispatch-field="expected_weight" class="dispatch-input" value="${escapeHtml(String(expectedWeightValue))}" />
@@ -1916,6 +2161,11 @@ function getWorkflowActions(trip) {
     actionBlocks.push(`<div class="workflow-row">${buttons}</div>`);
   }
 
+  const documentsSection = renderTripDocumentsSection(trip);
+  if (documentsSection) {
+    actionBlocks.push(documentsSection);
+  }
+
   if (role === 'Admin') {
     actionBlocks.push(renderAdminManualEditor(trip));
   }
@@ -1964,6 +2214,19 @@ function renderTripsTable(trips) {
     .forEach((button) => updateLoadingButtonState(button.dataset.tripId));
   document.querySelectorAll('[data-weight-field="net_weight_preview"]')
     .forEach((input) => updateGrossNetPreview(input.dataset.tripId));
+  hydrateVisibleTripDocuments(trips);
+}
+
+function hydrateVisibleTripDocuments(trips) {
+  if (!canViewTripDocuments()) return;
+  const uniqueTripIds = Array.from(new Set((trips || []).map((trip) => String(trip.id))))
+    .filter((tripId) => !tripDocumentsCache.has(String(tripId)) && !tripDocumentsLoading.has(String(tripId)));
+  if (!uniqueTripIds.length) return;
+  Promise.all(uniqueTripIds.map((tripId) => fetchTripDocuments(tripId)))
+    .then(() => applyFilters())
+    .catch((error) => {
+      console.error('Failed to hydrate trip documents', error);
+    });
 }
 
 function renderTripsMobileList(trips) {
@@ -2019,6 +2282,7 @@ async function loadTrips() {
     const response = await fetch('/trips');
     allTrips = await response.json();
     refreshTransporterOptions();
+    refreshLocationOptionsFromTrips();
     applyFilters();
   } catch (error) {
     console.error('Failed to load trips:', error);
@@ -2079,8 +2343,10 @@ async function handleStatusTargetClick(button) {
       showMessage('Waiting reason is mandatory', false);
       return;
     }
+    const dispatchDetails = getMergedDispatchDetails(tripId);
     await applyStatusChange(tripId, 'WAITING', {
       waiting_reason: reason.trim(),
+      location: dispatchDetails.location || null,
       dispatch_manager_name: dispatchName,
       dispatch_done_by: dispatchName
     });
@@ -2133,6 +2399,7 @@ async function handleStatusTargetClick(button) {
     extraFields.grade = dispatchDetails.grade;
     extraFields.condition = dispatchDetails.condition;
     extraFields.packing = dispatchDetails.packing;
+    extraFields.location = dispatchDetails.location;
     extraFields.loading_point = dispatchDetails.loading_point;
     const parsedExpectedWeight = Number.parseFloat(dispatchDetails.expected_weight);
     if (!Number.isFinite(parsedExpectedWeight) || parsedExpectedWeight <= 0) {
@@ -2335,6 +2602,22 @@ function wireRowEvents() {
   document.querySelectorAll('[data-action="admin-save"]').forEach((button) => {
     button.addEventListener('click', () => saveAdminManualData(button.dataset.tripId));
   });
+
+  document.querySelectorAll('[data-action="admin-delete-trip"]').forEach((button) => {
+    button.addEventListener('click', () => deleteAdminTrip(button.dataset.tripId));
+  });
+
+  document.querySelectorAll('[data-action="upload-doc"]').forEach((button) => {
+    button.addEventListener('click', () => uploadTripDocument(button.dataset.tripId));
+  });
+
+  document.querySelectorAll('[data-action="delete-doc"]').forEach((button) => {
+    button.addEventListener('click', () => deleteTripDocument(button.dataset.tripId, button.dataset.docId));
+  });
+
+  document.querySelectorAll('[data-action="download-doc"]').forEach((button) => {
+    button.addEventListener('click', () => downloadTripDocument(button.dataset.docId, button.dataset.docName || 'document'));
+  });
 }
 
 function valuesEquivalentForAdmin(field, newValue, oldValue) {
@@ -2401,6 +2684,40 @@ async function saveAdminManualData(tripId) {
   try {
     await putTrip(tripId, payload);
     showMessage('Manual data updated successfully');
+    await loadTrips();
+  } catch (error) {
+    showMessage(error.message, false);
+    console.error(error);
+  }
+}
+
+async function deleteAdminTrip(tripId) {
+  if (!hasRoleAccess(['Admin'])) {
+    showMessage('Only Admin can delete trips', false);
+    return;
+  }
+  const trip = getTripById(tripId);
+  if (!trip) {
+    showMessage('Trip not found', false);
+    return;
+  }
+  const confirmed = window.confirm(`Delete trip ${trip.truck_number || trip.id} permanently?`);
+  if (!confirmed) return;
+
+  try {
+    const response = await fetch(`/trip/${tripId}`, {
+      method: 'DELETE',
+      headers: {
+        ...getAuthHeaders()
+      }
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || 'Failed to delete trip');
+    }
+    tripDocumentsCache.delete(String(tripId));
+    loadingDetailsDrafts.delete(String(tripId));
+    showMessage('Trip deleted');
     await loadTrips();
   } catch (error) {
     showMessage(error.message, false);

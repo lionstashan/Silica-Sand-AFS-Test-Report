@@ -45,7 +45,7 @@ const rolePINs = {
   'Dispatch': '3333',
   'Loading': '4444',
   'Accounts': '5555',
-  'Admin': '9999'
+  'Admin': '2802'
 };
 
 function getStoredRole() {

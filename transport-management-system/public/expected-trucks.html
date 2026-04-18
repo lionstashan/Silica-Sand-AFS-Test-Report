@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Expected Trucks</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="role-modal" style="display:none;">
+    <div class="role-modal-content">
+      <h2>Select Role</h2>
+      <div class="role-buttons">
+        <button class="role-btn" data-role="Gate">Gate</button>
+        <button class="role-btn" data-role="Dispatch">Dispatch</button>
+        <button class="role-btn" data-role="Admin">Admin</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pin-modal" style="display:none;">
+    <div class="pin-modal-content">
+      <h2>Enter PIN</h2>
+      <p id="pin-role-label"></p>
+      <input type="password" id="pin-input" placeholder="Enter 4-digit PIN" maxlength="4" />
+      <button id="pin-submit-btn">Submit</button>
+      <button id="pin-cancel-btn">Back</button>
+      <p id="pin-error-message" style="color:#b91c1c; display:none;"></p>
+    </div>
+  </div>
+
+  <header>
+    <h1>Expected Trucks</h1>
+    <p>Pre-gate customer submissions for gate-in conversion.</p>
+    <nav>
+      <span id="role-indicator" class="role-indicator" style="display:none;"></span>
+      <a href="/" class="nav-link">← Main</a>
+      <a href="/dashboard" class="nav-link">Dashboard</a>
+      <a href="/customer" class="nav-link">Customer Portal</a>
+      <a href="#" id="logout-link" class="nav-link" style="display:none;">Logout</a>
+    </nav>
+  </header>
+
+  <section class="panel" style="display:none;">
+    <div class="filters">
+      <div class="filter-group">
+        <label>Status
+          <select id="status-filter">
+            <option value="">All</option>
+            <option value="SUBMITTED">SUBMITTED</option>
+            <option value="REVIEW_PENDING">REVIEW_PENDING</option>
+            <option value="APPROVED">APPROVED</option>
+            <option value="CANCELLED">CANCELLED</option>
+            <option value="EXPIRED">EXPIRED</option>
+            <option value="GATE_IN_DONE">GATE_IN_DONE</option>
+          </select>
+        </label>
+        <label>Search Truck
+          <input type="text" id="truck-search" placeholder="Truck number" />
+        </label>
+        <button id="refresh-btn" type="button">Refresh</button>
+      </div>
+    </div>
+    <div id="message"></div>
+    <div class="table-container desktop-only">
+      <table class="trip-table-dashboard-active">
+        <thead>
+          <tr>
+            <th>Truck</th>
+            <th>Current Status</th>
+            <th>Customer</th>
+            <th>Driver</th>
+            <th>Expected (MT)</th>
+            <th>Material</th>
+            <th>Submitted By</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="expected-table"></tbody>
+      </table>
+    </div>
+    <div id="expected-mobile-list" class="mobile-trip-list mobile-only"></div>
+  </section>
+
+  <script src="expected-trucks.js?v=20260418-3"></script>
+</body>
+</html>

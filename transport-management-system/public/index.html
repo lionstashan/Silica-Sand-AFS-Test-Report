@@ -39,7 +39,9 @@
     <p>Record truck entries at the gate.</p>
     <nav>
       <span id="role-indicator" class="role-indicator" style="display: none;"></span>
-      <a href="/dashboard" class="nav-link">Dashboard →</a>
+      <a href="/dashboard" id="dashboard-link" class="nav-link">Dashboard →</a>
+      <a href="/expected-trucks-page" id="expected-trucks-link" class="nav-link">Expected Trucks</a>
+      <a href="/customer" id="customer-portal-link" class="nav-link">Customer Portal</a>
       <a href="#" id="logout-link" class="nav-link" style="display: none;">Logout</a>
     </nav>
   </header>
@@ -151,6 +153,8 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260417-19"></script>
+  <datalist id="location-options"></datalist>
+
+  <script src="app.js?v=20260418-22"></script>
 </body>
 </html>

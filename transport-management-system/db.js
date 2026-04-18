@@ -37,10 +37,12 @@ async function initDb() {
       grade TEXT,
       condition TEXT,
       packing TEXT,
+      location TEXT,
       loading_point TEXT,
       labour_team TEXT,
       eta TIMESTAMPTZ,
       expected_weight NUMERIC,
+      customer_notes TEXT,
       waiting_reason TEXT,
       load_fix_reason TEXT,
       tare_weight NUMERIC,
@@ -66,6 +68,7 @@ async function initDb() {
     ADD COLUMN IF NOT EXISTS labour_team TEXT,
     ADD COLUMN IF NOT EXISTS eta TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS expected_weight NUMERIC,
+    ADD COLUMN IF NOT EXISTS customer_notes TEXT,
     ADD COLUMN IF NOT EXISTS waiting_reason TEXT,
     ADD COLUMN IF NOT EXISTS load_fix_reason TEXT,
     ADD COLUMN IF NOT EXISTS last_status_update_time TIMESTAMPTZ,
@@ -82,7 +85,8 @@ async function initDb() {
     ADD COLUMN IF NOT EXISTS loading_done_by TEXT,
     ADD COLUMN IF NOT EXISTS billing_done_by TEXT,
     ADD COLUMN IF NOT EXISTS condition TEXT,
-    ADD COLUMN IF NOT EXISTS packing TEXT
+    ADD COLUMN IF NOT EXISTS packing TEXT,
+    ADD COLUMN IF NOT EXISTS location TEXT
   `);
   await pool.query(`
     ALTER TABLE trips
@@ -110,6 +114,84 @@ async function initDb() {
     ALTER TABLE trips
     ALTER COLUMN in_time TYPE TIMESTAMPTZ USING in_time AT TIME ZONE 'Asia/Kolkata',
     ALTER COLUMN out_time TYPE TIMESTAMPTZ USING out_time AT TIME ZONE 'Asia/Kolkata'
+  `);
+  await pool.query(`
+    ALTER TABLE trips
+    ADD COLUMN IF NOT EXISTS expected_truck_id INTEGER
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS customer_users (
+      id SERIAL PRIMARY KEY,
+      customer_name TEXT NOT NULL,
+      username TEXT NOT NULL UNIQUE,
+      password TEXT NOT NULL,
+      display_name TEXT,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expected_trucks (
+      id SERIAL PRIMARY KEY,
+      submitted_by_user_id INTEGER NOT NULL REFERENCES customer_users(id) ON DELETE CASCADE,
+      customer_name TEXT,
+      truck_number TEXT NOT NULL,
+      driver_name TEXT NOT NULL,
+      driver_phone TEXT NOT NULL,
+      transporter TEXT,
+      expected_quantity_mt NUMERIC NOT NULL,
+      material_type TEXT,
+      grade TEXT,
+      condition TEXT,
+      packing TEXT,
+      location TEXT,
+      eta TIMESTAMPTZ,
+      notes TEXT,
+      status TEXT NOT NULL DEFAULT 'SUBMITTED',
+      linked_trip_id INTEGER REFERENCES trips(id) ON DELETE SET NULL,
+      submitted_at TIMESTAMPTZ DEFAULT NOW(),
+      approved_at TIMESTAMPTZ,
+      expires_at TIMESTAMPTZ,
+      status_updated_at TIMESTAMPTZ DEFAULT NOW(),
+      status_updated_by TEXT DEFAULT 'CUSTOMER',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_expected_trucks_status ON expected_trucks(status)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_expected_trucks_linked_trip ON expected_trucks(linked_trip_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_expected_trucks_submitted_by ON expected_trucks(submitted_by_user_id)
+  `);
+  await pool.query(`
+    ALTER TABLE expected_trucks
+    ADD COLUMN IF NOT EXISTS location TEXT
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS trip_documents (
+      id SERIAL PRIMARY KEY,
+      trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+      expected_truck_id INTEGER REFERENCES expected_trucks(id) ON DELETE SET NULL,
+      doc_type TEXT,
+      file_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      file_size INTEGER NOT NULL,
+      storage_path TEXT NOT NULL,
+      uploaded_by_role TEXT NOT NULL,
+      uploaded_by_name TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_trip_documents_trip_id ON trip_documents(trip_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_trip_documents_expected_id ON trip_documents(expected_truck_id)
   `);
   console.log('Connected to database');
 }
