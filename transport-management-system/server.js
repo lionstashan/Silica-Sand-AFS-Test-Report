@@ -1,8 +1,10 @@
 require('dotenv').config();
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const express = require('express');
 const multer = require('multer');
+const bcrypt = require('bcryptjs');
 const { initDb, pool } = require('./db');
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -86,6 +88,9 @@ const DOC_ALLOWED_MIME_TYPES = new Set([
 ]);
 const DOC_MAX_SIZE_BYTES = 10 * 1024 * 1024;
 const DOC_UPLOAD_DIR = path.resolve(process.env.DOC_UPLOAD_DIR || path.join(__dirname, 'uploads', 'docs'));
+const CUSTOMER_TOKEN_SECRET = String(process.env.CUSTOMER_TOKEN_SECRET || 'change-me-customer-token-secret');
+const CUSTOMER_TOKEN_TTL_SECONDS = Number.parseInt(process.env.CUSTOMER_TOKEN_TTL_SECONDS || '604800', 10); // 7 days
+const BCRYPT_COST = Number.parseInt(process.env.BCRYPT_COST || '10', 10);
 fs.mkdirSync(DOC_UPLOAD_DIR, { recursive: true });
 
 const documentStorage = multer.diskStorage({
@@ -340,19 +345,90 @@ function getUploaderDisplayNameForRole(role, trip) {
   return null;
 }
 
-async function readCustomerFromRequest(req) {
-  const username = String(req.header('x-customer-username') || '').trim();
-  const password = String(req.header('x-customer-password') || '').trim();
-  if (!username || !password) {
-    return { error: 'Missing customer credentials', status: 401 };
+function toBase64Url(value) {
+  const buffer = Buffer.isBuffer(value) ? value : Buffer.from(String(value), 'utf8');
+  return buffer.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function fromBase64Url(value) {
+  const normalized = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
+  const padding = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
+  return Buffer.from(`${normalized}${padding}`, 'base64');
+}
+
+function createCustomerToken(user) {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    sub: user.id,
+    username: user.username,
+    iat: now,
+    exp: now + CUSTOMER_TOKEN_TTL_SECONDS
+  };
+  const headerPart = toBase64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const payloadPart = toBase64Url(JSON.stringify(payload));
+  const signature = crypto
+    .createHmac('sha256', CUSTOMER_TOKEN_SECRET)
+    .update(`${headerPart}.${payloadPart}`)
+    .digest();
+  const signaturePart = toBase64Url(signature);
+  return `${headerPart}.${payloadPart}.${signaturePart}`;
+}
+
+function verifyCustomerToken(token) {
+  const parts = String(token || '').split('.');
+  if (parts.length !== 3) return { error: 'Invalid customer token format', status: 401 };
+  const [headerPart, payloadPart, signaturePart] = parts;
+  const expectedSignaturePart = toBase64Url(
+    crypto
+      .createHmac('sha256', CUSTOMER_TOKEN_SECRET)
+      .update(`${headerPart}.${payloadPart}`)
+      .digest()
+  );
+  if (signaturePart !== expectedSignaturePart) {
+    return { error: 'Invalid customer token signature', status: 401 };
   }
+
+  try {
+    const payload = JSON.parse(fromBase64Url(payloadPart).toString('utf8'));
+    const now = Math.floor(Date.now() / 1000);
+    if (!payload || typeof payload !== 'object' || !payload.sub || !payload.username) {
+      return { error: 'Invalid customer token payload', status: 401 };
+    }
+    if (!payload.exp || payload.exp <= now) {
+      return { error: 'Customer token expired', status: 401 };
+    }
+    return { payload };
+  } catch (_error) {
+    return { error: 'Invalid customer token payload', status: 401 };
+  }
+}
+
+async function getActiveCustomerUserByIdAndUsername(id, username) {
+  const result = await pool.query(
+    `SELECT id, customer_name, username, display_name, is_active
+     FROM customer_users
+     WHERE id = $1 AND username = $2
+     LIMIT 1`,
+    [id, username]
+  );
+  if (!result.rows.length) {
+    return { error: 'Invalid customer credentials', status: 403 };
+  }
+  const user = result.rows[0];
+  if (!user.is_active) {
+    return { error: 'Customer user is inactive', status: 403 };
+  }
+  return { user };
+}
+
+async function authenticateCustomerWithPassword(username, password) {
   try {
     const result = await pool.query(
-      `SELECT id, customer_name, username, display_name, is_active
+      `SELECT id, customer_name, username, display_name, is_active, password
        FROM customer_users
-       WHERE username = $1 AND password = $2
+       WHERE username = $1
        LIMIT 1`,
-      [username, password]
+      [username]
     );
     if (!result.rows.length) {
       return { error: 'Invalid customer credentials', status: 403 };
@@ -361,11 +437,63 @@ async function readCustomerFromRequest(req) {
     if (!user.is_active) {
       return { error: 'Customer user is inactive', status: 403 };
     }
-    return { user };
+
+    const storedPassword = String(user.password || '');
+    const isHashed = /^\$2[abxy]\$\d{2}\$/.test(storedPassword);
+    const passwordMatches = isHashed
+      ? await bcrypt.compare(password, storedPassword)
+      : storedPassword === password;
+
+    if (!passwordMatches) {
+      return { error: 'Invalid customer credentials', status: 403 };
+    }
+
+    if (!isHashed) {
+      const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
+      await pool.query(
+        `UPDATE customer_users
+         SET password = $1, updated_at = NOW()
+         WHERE id = $2`,
+        [passwordHash, user.id]
+      );
+    }
+
+    return {
+      user: {
+        id: user.id,
+        customer_name: user.customer_name,
+        username: user.username,
+        display_name: user.display_name,
+        is_active: user.is_active
+      }
+    };
   } catch (error) {
-    console.error('Customer auth failed', error);
+    console.error('Customer password auth failed', error);
     return { error: 'Failed to validate customer credentials', status: 500 };
   }
+}
+
+async function readCustomerFromRequest(req) {
+  const bearer = String(req.header('authorization') || '').trim();
+  const tokenHeader = String(req.header('x-customer-token') || '').trim();
+  const token = tokenHeader || (bearer.toLowerCase().startsWith('bearer ') ? bearer.slice(7).trim() : '');
+  if (token) {
+    const verified = verifyCustomerToken(token);
+    if (verified.error) return verified;
+    try {
+      return await getActiveCustomerUserByIdAndUsername(verified.payload.sub, verified.payload.username);
+    } catch (error) {
+      console.error('Customer token auth failed', error);
+      return { error: 'Failed to validate customer credentials', status: 500 };
+    }
+  }
+
+  const username = String(req.header('x-customer-username') || '').trim();
+  const password = String(req.header('x-customer-password') || '').trim();
+  if (!username || !password) {
+    return { error: 'Missing customer credentials', status: 401 };
+  }
+  return authenticateCustomerWithPassword(username, password);
 }
 
 async function canCustomerAccessTripDocuments(customerUserId, tripId) {
@@ -1440,11 +1568,12 @@ app.post('/admin/customer-users', async (req, res) => {
   }
 
   try {
+    const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
     const result = await pool.query(
       `INSERT INTO customer_users (customer_name, username, password, display_name, is_active)
        VALUES ($1, $2, $3, $4, true)
        RETURNING id, customer_name, username, display_name, is_active, created_at`,
-      [customerName, username, password, displayName]
+      [customerName, username, passwordHash, displayName]
     );
     return res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -1479,12 +1608,12 @@ app.post('/customer/login', async (req, res) => {
   if (!username || !password) {
     return res.status(400).json({ error: 'username and password are required' });
   }
-  const auth = await readCustomerFromRequest({
-    header: (name) => (name === 'x-customer-username' ? username : (name === 'x-customer-password' ? password : null))
-  });
+  const auth = await authenticateCustomerWithPassword(username, password);
   if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  const token = createCustomerToken(auth.user);
   return res.json({
     ok: true,
+    token,
     user: {
       id: auth.user.id,
       customer_name: auth.user.customer_name,

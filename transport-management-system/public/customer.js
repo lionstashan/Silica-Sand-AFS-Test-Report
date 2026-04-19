@@ -1,6 +1,7 @@
 const IST_TIMEZONE = 'Asia/Kolkata';
 const STORAGE_USERNAME_KEY = 'customerUsername';
 const STORAGE_PASSWORD_KEY = 'customerPassword';
+const STORAGE_TOKEN_KEY = 'customerToken';
 const TRANSPORTER_STORAGE_KEY = 'transporterOptions';
 const TRANSPORTER_STORAGE_VERSION_KEY = 'transporterOptionsVersion';
 const TRANSPORTER_STORAGE_VERSION = '2026-04-17-list-1';
@@ -502,6 +503,12 @@ function resetCustomerFormEnhancements() {
 }
 
 function getCustomerAuthHeaders() {
+  const token = localStorage.getItem(STORAGE_TOKEN_KEY) || '';
+  if (token) {
+    return {
+      'x-customer-token': token
+    };
+  }
   const username = localStorage.getItem(STORAGE_USERNAME_KEY) || '';
   const password = localStorage.getItem(STORAGE_PASSWORD_KEY) || '';
   if (!username || !password) return {};
@@ -511,14 +518,24 @@ function getCustomerAuthHeaders() {
   };
 }
 
-function setAuthCredentials(username, password) {
+function setAuthCredentials(username, token = '', password = '') {
   localStorage.setItem(STORAGE_USERNAME_KEY, username);
-  localStorage.setItem(STORAGE_PASSWORD_KEY, password);
+  if (token) {
+    localStorage.setItem(STORAGE_TOKEN_KEY, token);
+    localStorage.removeItem(STORAGE_PASSWORD_KEY);
+  } else if (password) {
+    localStorage.setItem(STORAGE_PASSWORD_KEY, password);
+    localStorage.removeItem(STORAGE_TOKEN_KEY);
+  } else {
+    localStorage.removeItem(STORAGE_PASSWORD_KEY);
+    localStorage.removeItem(STORAGE_TOKEN_KEY);
+  }
 }
 
 function clearAuthCredentials() {
   localStorage.removeItem(STORAGE_USERNAME_KEY);
   localStorage.removeItem(STORAGE_PASSWORD_KEY);
+  localStorage.removeItem(STORAGE_TOKEN_KEY);
 }
 
 function applyAuthedUI() {
@@ -563,7 +580,7 @@ async function login(username, password) {
   }
   const data = await response.json();
   customerUser = data.user;
-  setAuthCredentials(username, password);
+  setAuthCredentials(username, data.token || '', data.token ? '' : password);
 }
 
 async function loadMe() {
