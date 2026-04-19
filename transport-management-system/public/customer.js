@@ -618,6 +618,7 @@ function renderExpectedRows(data) {
   if (!isMobile) {
     expectedTable.innerHTML = data.map((row) => `
       <tr>
+        <td>${row.linked_trip_id ? `#${row.linked_trip_id}` : '-'}</td>
         <td>${getTruckTimelineLink(row)}</td>
         <td>${escapeHtml(row.current_status || row.status)}</td>
         <td>${escapeHtml(row.customer_name || '-')}</td>
@@ -626,7 +627,6 @@ function renderExpectedRows(data) {
         <td>${escapeHtml([row.material_type, row.grade, row.condition, row.packing, row.location].filter(Boolean).join(' / ') || '-')}</td>
         <td>${getDocLinks(row)}</td>
         <td>${formatDateTime(row.submitted_at)}</td>
-        <td>${row.linked_trip_id ? `#${row.linked_trip_id}` : '-'}</td>
       </tr>
     `).join('');
     expectedMobileList.innerHTML = '';
@@ -639,6 +639,7 @@ function renderExpectedRows(data) {
           <div>${escapeHtml(row.current_status || row.status)}</div>
         </div>
         <div class="mobile-trip-grid">
+          <div><strong>Trp No.:</strong> ${row.linked_trip_id ? `#${row.linked_trip_id}` : '-'}</div>
           <div><strong>Customer:</strong> ${escapeHtml(row.customer_name || '-')}</div>
           <div><strong>Expected:</strong> ${formatWeight(row.expected_quantity_mt)}</div>
           <div><strong>Net Weight:</strong> ${formatWeight(row.trip_net_weight)}</div>
@@ -649,7 +650,6 @@ function renderExpectedRows(data) {
           <div><strong>Location:</strong> ${escapeHtml(row.location || '-')}</div>
           <div><strong>Docs:</strong> ${getDocLinks(row)}</div>
           <div><strong>Submitted:</strong> ${formatDateTime(row.submitted_at)}</div>
-          <div><strong>Trip:</strong> ${row.linked_trip_id ? `#${row.linked_trip_id}` : '-'}</div>
         </div>
       </article>
     `).join('');

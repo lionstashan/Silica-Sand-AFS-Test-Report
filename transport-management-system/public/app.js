@@ -20,7 +20,6 @@ const BASE_TRANSPORTER_OPTIONS = [
   'Ravi Road Lines'
 ];
 const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Admin'];
-const BILLING_VISIBLE_STATUSES = ['BILLING_PENDING', 'BILLING_COMPLETED', 'COMPLETED', 'EXITED'];
 
 const STATUS_FLOW = [
   'IN_GATE',
@@ -138,6 +137,7 @@ let transporterOptions = [];
 let locationOptions = [];
 
 const MAIN_TABLE_COLUMNS = [
+  'Trp No.',
   'Truck Number',
   'Status',
   'Customer',
@@ -705,10 +705,6 @@ function getDelayClass(timeSpent) {
 }
 
 function getVisibleTripsForRole(trips) {
-  const role = getCurrentRole();
-  if (role === 'Accounts') {
-    return trips.filter((trip) => BILLING_VISIBLE_STATUSES.includes(trip.status));
-  }
   return trips;
 }
 
@@ -1730,6 +1726,24 @@ function getWeightsView(trip) {
 }
 
 function getDispatchDetailsView(trip) {
+  const role = getCurrentRole();
+  if (role === 'Accounts') {
+    const accountItems = [
+      ['Material', trip.material_type],
+      ['Grade', trip.grade],
+      ['Condition', trip.condition],
+      ['Packing', trip.packing],
+      ['Net Weight', formatWeightMT(getCurrentWeightValue(trip, 'net_weight'))],
+      ['Out Time', formatDateTime(trip.out_time)]
+    ];
+
+    return `
+      <div class="workflow-details">
+        ${accountItems.map(([label, value]) => `<div>${escapeHtml(label)}: ${escapeHtml(value || '-')}</div>`).join('')}
+      </div>
+    `;
+  }
+
   const status = normalizeStatus(trip.status);
   const draft = getLoadingDraft(trip.id);
   const showLoadingDetailsHintStatuses = new Set([
@@ -2111,7 +2125,7 @@ function getWorkflowActions(trip) {
     `);
   }
 
-  if (['AT_DISPATCH', 'WAITING'].includes(status)) {
+  if (hasRoleAccess(['Dispatch', 'Admin']) && ['AT_DISPATCH', 'WAITING'].includes(status)) {
     actionBlocks.push(getDispatchEditor(trip));
   }
 
@@ -2130,23 +2144,11 @@ function getWorkflowActions(trip) {
   }
 
   if (hasRoleAccess(['Accounts', 'Admin']) && ['BILLING_PENDING', 'BILLING_COMPLETED'].includes(status)) {
-    const tareValue = getCurrentWeightValue(trip, 'tare_weight');
-    const grossValue = getCurrentWeightValue(trip, 'gross_weight');
-    const netValue = getCurrentWeightValue(trip, 'net_weight');
-    const expectedValue = getCurrentWeightValue(trip, 'expected_weight');
-    const expected = Number(expectedValue);
-    const net = Number(netValue);
-    const variance = Number.isFinite(expected) && Number.isFinite(net) ? (net - expected) : null;
     actionBlocks.push(`
       <div class="workflow-group">
         <label>Accounts Manager
           ${renderPersonSelect('Accounts', trip.id, trip.accounts_person_name || '')}
         </label>
-        <div class="mini-muted"><strong>Tare:</strong> ${formatWeightMT(tareValue)}</div>
-        <div class="mini-muted"><strong>Gross:</strong> ${formatWeightMT(grossValue)}</div>
-        <div class="mini-muted"><strong>Net:</strong> ${formatWeightMT(netValue)}</div>
-        <div class="mini-muted"><strong>Expected:</strong> ${formatWeightMT(expectedValue)}</div>
-        <div class="mini-muted"><strong>Variance:</strong> ${variance === null ? '-' : formatWeightMT(variance)}</div>
       </div>
     `);
   }
@@ -2195,6 +2197,7 @@ function renderTripsTable(trips) {
 
       return `
         <tr class="${delayClass}" data-trip-row="${trip.id}">
+          <td>${trip.id}</td>
           <td>${getTruckTimelineButton(trip)}</td>
           <td>${getStatusWithReasonDetails(trip)}</td>
           <td>${escapeHtml(trip.customer_name || '')}</td>
@@ -2246,6 +2249,7 @@ function renderTripsMobileList(trips) {
           <div>${getStatusWithReasonDetails(trip)}</div>
         </div>
         <div class="mobile-trip-grid">
+          <div><strong>Trp No.:</strong> ${trip.id}</div>
           <div><strong>Customer:</strong> ${escapeHtml(trip.customer_name || '-')}</div>
           ${renderMobileRoleNames(trip)}
           <div><strong>In Time:</strong> ${formatDateTime(trip.in_time)}</div>
@@ -2316,8 +2320,7 @@ function updateTimeMetrics() {
 
 function refreshStatusFilterOptions() {
   const statusFilter = document.getElementById('status-filter');
-  const role = getCurrentRole();
-  const statuses = role === 'Accounts' ? BILLING_VISIBLE_STATUSES : STATUS_FLOW;
+  const statuses = STATUS_FLOW;
 
   statusFilter.innerHTML = [
     '<option value="">All Statuses</option>',

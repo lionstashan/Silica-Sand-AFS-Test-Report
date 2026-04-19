@@ -6,7 +6,6 @@ const timelineModalTitle = document.getElementById('timeline-modal-title');
 const timelineModalBody = document.getElementById('timeline-modal-body');
 const IST_TIMEZONE = 'Asia/Kolkata';
 const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Admin'];
-const BILLING_VISIBLE_STATUSES = ['BILLING_PENDING', 'BILLING_COMPLETED', 'COMPLETED', 'EXITED'];
 const DISPATCH_ZONE_STATUSES = [
   'AT_DISPATCH',
   'WAITING'
@@ -287,9 +286,7 @@ function getTruckNumbers(trips) {
 }
 
 function updateSummaryCards(trips) {
-  const visibleTrips = getCurrentRole() === 'Accounts'
-    ? trips.filter((trip) => BILLING_VISIBLE_STATUSES.includes(trip.status))
-    : trips;
+  const visibleTrips = trips;
   const nowIst = getIstDateParts(new Date());
   const inPlantTrips = visibleTrips.filter((trip) => trip.status !== 'EXITED');
   const completedToday = visibleTrips.filter((trip) => {
@@ -682,9 +679,7 @@ function getTruckDetailLink(trip) {
 }
 
 function updateActiveTripsTable(trips) {
-  const sourceTrips = getCurrentRole() === 'Accounts'
-    ? trips.filter((trip) => BILLING_VISIBLE_STATUSES.includes(trip.status))
-    : trips;
+  const sourceTrips = trips;
 
   const activeTrips = sourceTrips.filter(trip =>
     trip.status !== 'COMPLETED' && trip.status !== 'CANCELLED' && trip.status !== 'EXITED' && !trip.is_cancelled
@@ -703,6 +698,7 @@ function updateActiveTripsTable(trips) {
 
     return `
       <tr class="${delayClass}" data-active-trip-row="${trip.id}">
+        <td>${trip.id}</td>
         <td>${getTruckDetailLink(trip)}</td>
         <td>${getStatusWithCancelReason(trip)}</td>
         <td>${trip.customer_name || ''}</td>
@@ -729,6 +725,7 @@ function updateActiveTripsTable(trips) {
             <div>${getStatusWithCancelReason(trip)}</div>
           </div>
           <div class="mobile-trip-grid">
+            <div><strong>Trp No.:</strong> ${trip.id}</div>
             <div><strong>Customer:</strong> ${escapeHtml(trip.customer_name || '-')}</div>
             ${renderMobileRoleNames(trip)}
             <div><strong>Expected:</strong> ${formatWeightMT(trip.expected_weight)}</div>
@@ -778,6 +775,7 @@ function renderReportTable(trips) {
       : (isCancelledTrip(trip) ? 'CANCELLED' : 'COMPLETED');
     return `
       <tr>
+        <td>${trip.id}</td>
         <td>${getTruckDetailLink(trip)}</td>
         <td>${trip.customer_name || ''}</td>
         <td>${statusLabel}</td>
@@ -810,6 +808,7 @@ function renderReportTable(trips) {
             <div>${getStatusBadge(trip.status, statusLabel)}</div>
           </div>
           <div class="mobile-trip-grid">
+            <div><strong>Trp No.:</strong> ${trip.id}</div>
             <div><strong>Customer:</strong> ${escapeHtml(trip.customer_name || '-')}</div>
             <div><strong>Expected:</strong> ${formatWeightMT(trip.expected_weight)}</div>
             <div><strong>Net:</strong> ${formatWeightMT(trip.net_weight)}</div>
