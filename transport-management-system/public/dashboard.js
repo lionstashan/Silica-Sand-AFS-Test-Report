@@ -223,7 +223,7 @@ function getStatusWithCancelReason(trip) {
   const exitedOutcome = getExitedOutcome(trip);
   const displayStatus = trip.status === 'EXITED'
     ? (exitedOutcome === 'CANCELLED' ? 'CANCELLED / EXITED' : 'COMPLETED / EXITED')
-    : trip.status;
+    : getStatusLabelForDisplay(trip.status, trip);
   const statusBadge = getStatusBadge(trip.status, displayStatus);
   const parts = [statusBadge];
   if (trip.status === 'WAITING' && trip.waiting_reason) {
@@ -477,6 +477,24 @@ function parseStatusHistory(trip) {
   return [];
 }
 
+function getWaitingStageFromDetails(details) {
+  if (!details || typeof details !== 'object') return '';
+  if (details.loading_done_by || details.loading_person_name) return 'LOADING';
+  if (details.dispatch_done_by || details.dispatch_manager_name) return 'DISPATCH';
+  return '';
+}
+
+function getLatestWaitingStageFromHistory(trip) {
+  const history = parseStatusHistory(trip);
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index];
+    if (String(entry?.status || '').trim().toUpperCase() !== 'WAITING') continue;
+    const stage = getWaitingStageFromDetails(entry?.details);
+    if (stage) return stage;
+  }
+  return '';
+}
+
 function parseGrossWeightAttempts(trip) {
   if (!trip || trip.gross_weight_attempts == null) return [];
   if (Array.isArray(trip.gross_weight_attempts)) return trip.gross_weight_attempts;
@@ -516,11 +534,21 @@ function statusToLabel(status) {
   return String(status || '').replaceAll('_', ' ');
 }
 
+function getStatusLabelForDisplay(status, trip = null, details = null) {
+  const normalized = String(status || '').trim().toUpperCase();
+  if (normalized !== 'WAITING') return statusToLabel(status);
+  const waitingStage = getWaitingStageFromDetails(details)
+    || (trip ? getLatestWaitingStageFromHistory(trip) : '');
+  if (waitingStage === 'LOADING') return 'WAITING (LOADING)';
+  if (waitingStage === 'DISPATCH') return 'WAITING (DISPATCH)';
+  return 'WAITING';
+}
+
 function getStageDurationSummary(trip) {
   const history = parseStatusHistory(trip);
   const totals = new Map();
   history.forEach((entry) => {
-    const status = statusToLabel(entry?.status || '');
+    const status = getStatusLabelForDisplay(entry?.status || '', null, entry?.details);
     const minutes = getStatusDurationMinutes(entry);
     if (!status || minutes === null || Number.isNaN(minutes)) return;
     totals.set(status, (totals.get(status) || 0) + minutes);
@@ -607,7 +635,7 @@ function renderStatusTimeline(trip) {
     const isCurrent = !entry.exit_time;
     return `
       <article class="timeline-item ${isCurrent ? 'timeline-item-current' : ''}">
-        <div class="timeline-item-status">${escapeHtml(statusToLabel(entry.status))}</div>
+        <div class="timeline-item-status">${escapeHtml(getStatusLabelForDisplay(entry.status, null, entry.details))}</div>
         <div class="timeline-item-times">
           <span>${formatTimeOnly(entry.entry_time)} → ${entry.exit_time ? formatTimeOnly(entry.exit_time) : 'Now'}</span>
           <span>${formatMinutes(getStatusDurationMinutes(entry))}</span>
@@ -627,7 +655,7 @@ function openTimelineModal(tripId) {
   timelineModalTitle.textContent = `Status Timeline - ${trip.truck_number || 'Truck'}`;
   timelineModalBody.innerHTML = `
     <div class="timeline-meta">
-      <div><strong>Current:</strong> ${escapeHtml(statusToLabel(trip.status || '-'))}</div>
+      <div><strong>Current:</strong> ${escapeHtml(getStatusLabelForDisplay(trip.status || '-', trip))}</div>
       <div><strong>In Time:</strong> ${formatDateTime(trip.in_time)}</div>
       <div><strong>Transporter:</strong> ${escapeHtml(trip.transporter || '-')}</div>
       <div><strong>Driver:</strong> ${escapeHtml(trip.driver_name || '-')}</div>

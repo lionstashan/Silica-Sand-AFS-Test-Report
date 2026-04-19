@@ -46,7 +46,7 @@ const STATUS_TRANSITIONS = {
   TARE_WEIGHT_DONE: ['AT_DISPATCH'],
   AT_DISPATCH: ['WAITING', 'READY_FOR_LOADING'],
   WAITING: ['READY_FOR_LOADING'],
-  READY_FOR_LOADING: ['LOADING_IN_PROGRESS'],
+  READY_FOR_LOADING: ['WAITING', 'LOADING_IN_PROGRESS'],
   LOADING_IN_PROGRESS: ['LOADING_COMPLETED'],
   LOADING_COMPLETED: ['GROSS_WEIGHT_PENDING'],
   GROSS_WEIGHT_PENDING: ['LOAD_FIX_REQUIRED', 'GROSS_WEIGHT_DONE'],
@@ -78,7 +78,7 @@ const ROLE_PINS = {
 const ROLE_ALLOWED_TARGETS = {
   Gate: ['EXITED'],
   Dispatch: ['AT_DISPATCH', 'WAITING', 'READY_FOR_LOADING', 'CANCELLED'],
-  Loading: ['LOADING_IN_PROGRESS', 'LOADING_COMPLETED'],
+  Loading: ['WAITING', 'LOADING_IN_PROGRESS', 'LOADING_COMPLETED'],
   Weighbridge: ['TARE_WEIGHT_DONE', 'LOAD_FIX_REQUIRED', 'GROSS_WEIGHT_DONE'],
   Accounts: ['BILLING_COMPLETED'],
   Admin: STATUS_FLOW
@@ -125,6 +125,9 @@ const roleIndicator = document.getElementById('role-indicator');
 const timelineModal = document.getElementById('timeline-modal');
 const timelineModalTitle = document.getElementById('timeline-modal-title');
 const timelineModalBody = document.getElementById('timeline-modal-body');
+const adminWorkflowModal = document.getElementById('admin-workflow-modal');
+const adminWorkflowModalTitle = document.getElementById('admin-workflow-modal-title');
+const adminWorkflowModalBody = document.getElementById('admin-workflow-modal-body');
 
 const customerSelect = document.getElementById('customer-select');
 const customerOther = document.getElementById('customer-other');
@@ -303,6 +306,24 @@ function parseStatusHistory(trip) {
   return [];
 }
 
+function getWaitingStageFromDetails(details) {
+  if (!details || typeof details !== 'object') return '';
+  if (details.loading_done_by || details.loading_person_name) return 'LOADING';
+  if (details.dispatch_done_by || details.dispatch_manager_name) return 'DISPATCH';
+  return '';
+}
+
+function getLatestWaitingStageFromHistory(trip) {
+  const history = parseStatusHistory(trip);
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index];
+    if (normalizeStatus(entry?.status) !== 'WAITING') continue;
+    const stage = getWaitingStageFromDetails(entry?.details);
+    if (stage) return stage;
+  }
+  return '';
+}
+
 function getLatestStatusDetailValue(trip, field) {
   const history = parseStatusHistory(trip);
   for (let index = history.length - 1; index >= 0; index -= 1) {
@@ -317,6 +338,16 @@ function getLatestStatusDetailValue(trip, field) {
 
 function statusToLabel(status) {
   return String(status || '').replaceAll('_', ' ');
+}
+
+function getStatusLabelForDisplay(status, trip = null, details = null) {
+  const normalized = normalizeStatus(status);
+  if (normalized !== 'WAITING') return statusToLabel(status);
+  const waitingStage = getWaitingStageFromDetails(details)
+    || (trip ? getLatestWaitingStageFromHistory(trip) : '');
+  if (waitingStage === 'LOADING') return 'WAITING (LOADING)';
+  if (waitingStage === 'DISPATCH') return 'WAITING (DISPATCH)';
+  return 'WAITING';
 }
 
 function statusDetailLabel(key) {
@@ -459,7 +490,7 @@ function getStageDurationSummary(trip) {
   const history = parseStatusHistory(trip);
   const totals = new Map();
   history.forEach((entry) => {
-    const status = statusToLabel(entry?.status || '');
+    const status = getStatusLabelForDisplay(entry?.status || '', null, entry?.details);
     const minutes = getStatusDurationMinutes(entry);
     if (!status || minutes === null || Number.isNaN(minutes)) return;
     totals.set(status, (totals.get(status) || 0) + minutes);
@@ -487,6 +518,12 @@ function closeTimelineModal() {
   document.body.style.overflow = 'auto';
 }
 
+function closeAdminWorkflowModal() {
+  if (!adminWorkflowModal) return;
+  adminWorkflowModal.style.display = 'none';
+  document.body.style.overflow = 'auto';
+}
+
 function renderStatusTimeline(trip) {
   const history = parseStatusHistory(trip);
   if (!history.length) {
@@ -498,7 +535,7 @@ function renderStatusTimeline(trip) {
     const current = !entry.exit_time;
     return `
       <article class="timeline-item ${current ? 'timeline-item-current' : ''}">
-        <div class="timeline-item-status">${escapeHtml(statusToLabel(displayEntry.status))}</div>
+        <div class="timeline-item-status">${escapeHtml(getStatusLabelForDisplay(displayEntry.status, null, displayEntry.details))}</div>
         <div class="timeline-item-times">
           <span>${formatTimeOnly(displayEntry.entry_time)} → ${displayEntry.exit_time ? formatTimeOnly(displayEntry.exit_time) : 'Now'}</span>
           <span>${formatMinutes(getStatusDurationMinutes(displayEntry))}</span>
@@ -519,7 +556,7 @@ function openTimelineModal(tripId) {
   timelineModalTitle.textContent = `Status Timeline - ${trip.truck_number || 'Truck'}`;
   timelineModalBody.innerHTML = `
     <div class="timeline-meta">
-      <div><strong>Current:</strong> ${escapeHtml(statusToLabel(trip.status || '-'))}</div>
+      <div><strong>Current:</strong> ${escapeHtml(getStatusLabelForDisplay(trip.status || '-', trip))}</div>
       <div><strong>In Time:</strong> ${formatDateTime(trip.in_time)}</div>
       <div><strong>Transporter:</strong> ${escapeHtml(trip.transporter || '-')}</div>
       <div><strong>Driver:</strong> ${escapeHtml(trip.driver_name || '-')}</div>
@@ -588,7 +625,7 @@ function hideModals() {
 
 function applyRoleUI() {
   const role = getCurrentRole();
-  const canCreate = hasRoleAccess(['Gate', 'Admin']);
+  const canCreate = hasRoleAccess(['Gate']);
   const gatePanel = form?.closest('.panel');
   const dashboardLink = document.getElementById('dashboard-link');
   const customerPortalLink = document.getElementById('customer-portal-link');
@@ -683,7 +720,7 @@ function renderMobileRoleNames(trip) {
 function getStatusWithReasonDetails(trip) {
   const statusLabel = trip.status === 'EXITED'
     ? (trip.final_status === 'CANCELLED' ? 'CANCELLED / EXITED' : 'COMPLETED / EXITED')
-    : trip.status;
+    : getStatusLabelForDisplay(trip.status, trip);
   const parts = [getStatusBadge(trip.status, statusLabel)];
   if (normalizeStatus(trip.status) === 'WAITING' && trip.waiting_reason) {
     parts.push(`<div class="reason-chip">Waiting: ${escapeHtml(trip.waiting_reason)}</div>`);
@@ -705,6 +742,14 @@ function getDelayClass(timeSpent) {
 }
 
 function getVisibleTripsForRole(trips) {
+  const role = getCurrentRole();
+  if (role === 'Gate') {
+    return trips.filter((trip) =>
+      trip.status !== 'CANCELLED' &&
+      trip.status !== 'EXITED' &&
+      !trip.is_cancelled
+    );
+  }
   return trips;
 }
 
@@ -2070,9 +2115,9 @@ function getAllowedManualTargets(trip) {
   return Array.from(deduped);
 }
 
-function getWorkflowActions(trip) {
-  const role = getCurrentRole();
-  const status = normalizeStatus(trip.status);
+function buildWorkflowActionBlocks(trip, role, status, options = {}) {
+  const includeDocuments = options.includeDocuments !== false;
+  const includeAdminEditor = options.includeAdminEditor !== false;
   const actionBlocks = [];
 
   if ((role === 'Dispatch' || role === 'Admin') && status !== 'CANCELLED' && status !== 'COMPLETED' && status !== 'EXITED') {
@@ -2163,13 +2208,37 @@ function getWorkflowActions(trip) {
     actionBlocks.push(`<div class="workflow-row">${buttons}</div>`);
   }
 
-  const documentsSection = renderTripDocumentsSection(trip);
+  const documentsSection = includeDocuments ? renderTripDocumentsSection(trip) : '';
   if (documentsSection) {
     actionBlocks.push(documentsSection);
   }
 
-  if (role === 'Admin') {
+  if (role === 'Admin' && includeAdminEditor) {
     actionBlocks.push(renderAdminManualEditor(trip));
+  }
+
+  if (!actionBlocks.length) {
+    return actionBlocks;
+  }
+
+  return actionBlocks;
+}
+
+function getWorkflowActions(trip) {
+  const role = getCurrentRole();
+  const status = normalizeStatus(trip.status);
+  const actionBlocks = buildWorkflowActionBlocks(trip, role, status);
+
+  if (role === 'Admin') {
+    return `
+      <div class="workflow-container">
+        <div class="workflow-row">
+          <button class="workflow-btn" data-action="admin-view-fields" data-admin-section="fields" data-trip-id="${trip.id}" type="button">View Fields</button>
+          <button class="workflow-btn primary" data-action="admin-view-actions" data-admin-section="actions" data-trip-id="${trip.id}" type="button">View Actions</button>
+          <button class="workflow-btn" data-action="admin-view-tools" data-admin-section="tools" data-trip-id="${trip.id}" type="button">Edit Fields</button>
+        </div>
+      </div>
+    `;
   }
 
   if (!actionBlocks.length) {
@@ -2182,6 +2251,52 @@ function getWorkflowActions(trip) {
       ${actionBlocks.join('')}
     </div>
   `;
+}
+
+function openAdminWorkflowModal(tripId, section = 'fields') {
+  const trip = getTripById(tripId);
+  if (!trip || !adminWorkflowModal || !adminWorkflowModalTitle || !adminWorkflowModalBody) return;
+
+  const modalSection = ['actions', 'tools'].includes(section) ? section : 'fields';
+  adminWorkflowModalTitle.textContent = modalSection === 'actions'
+    ? `Actions - ${trip.truck_number || `#${trip.id}`}`
+    : (modalSection === 'tools'
+      ? `Admin Tools - ${trip.truck_number || `#${trip.id}`}`
+      : `Fields - ${trip.truck_number || `#${trip.id}`}`);
+
+  if (modalSection === 'fields') {
+    adminWorkflowModalBody.innerHTML = `
+      <div class="workflow-container">
+        ${getDispatchDetailsView(trip)}
+      </div>
+    `;
+  } else if (modalSection === 'actions') {
+    const actionBlocks = buildWorkflowActionBlocks(trip, 'Admin', normalizeStatus(trip.status), {
+      includeDocuments: false,
+      includeAdminEditor: false
+    });
+    adminWorkflowModalBody.innerHTML = `
+      <div class="workflow-container">
+        ${actionBlocks.length ? actionBlocks.join('') : '<span>-</span>'}
+      </div>
+    `;
+    bindRowActionHandlers(adminWorkflowModalBody);
+  } else {
+    const toolsBlocks = [];
+    const documentsSection = renderTripDocumentsSection(trip);
+    if (documentsSection) toolsBlocks.push(documentsSection);
+    const adminEditor = renderAdminManualEditor(trip);
+    if (adminEditor) toolsBlocks.push(adminEditor);
+    adminWorkflowModalBody.innerHTML = `
+      <div class="workflow-container">
+        ${toolsBlocks.length ? toolsBlocks.join('') : '<span>-</span>'}
+      </div>
+    `;
+    bindRowActionHandlers(adminWorkflowModalBody);
+  }
+
+  adminWorkflowModal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
 }
 
 function renderTripsTable(trips) {
@@ -2320,7 +2435,10 @@ function updateTimeMetrics() {
 
 function refreshStatusFilterOptions() {
   const statusFilter = document.getElementById('status-filter');
-  const statuses = STATUS_FLOW;
+  const role = getCurrentRole();
+  const statuses = role === 'Gate'
+    ? STATUS_FLOW.filter((status) => !['CANCELLED', 'EXITED'].includes(status))
+    : STATUS_FLOW;
 
   statusFilter.innerHTML = [
     '<option value="">All Statuses</option>',
@@ -2336,23 +2454,40 @@ async function handleStatusTargetClick(button) {
   const extraFields = {};
 
   if (targetStatus === 'WAITING') {
-    const dispatchName = getPersonValueFromRow(tripId, 'Dispatch', trip.dispatch_manager_name || '');
-    if (!dispatchName) {
-      showMessage('Select dispatch manager name', false);
-      return;
-    }
-    const reason = window.prompt('Enter waiting reason:');
+    const currentStatus = normalizeStatus(trip.status);
+    const role = getCurrentRole();
+    const isLoadingStageWait = currentStatus === 'READY_FOR_LOADING' && (role === 'Loading' || role === 'Admin');
+    const reasonPrompt = isLoadingStageWait
+      ? 'Enter waiting reason (e.g. loading point busy):'
+      : 'Enter waiting reason:';
+    const reason = window.prompt(reasonPrompt, isLoadingStageWait ? 'Loading point busy' : '');
     if (!reason || !reason.trim()) {
       showMessage('Waiting reason is mandatory', false);
       return;
     }
     const dispatchDetails = getMergedDispatchDetails(tripId);
-    await applyStatusChange(tripId, 'WAITING', {
+    const waitingPayload = {
       waiting_reason: reason.trim(),
-      location: dispatchDetails.location || null,
-      dispatch_manager_name: dispatchName,
-      dispatch_done_by: dispatchName
-    });
+      location: dispatchDetails.location || null
+    };
+    if (isLoadingStageWait) {
+      const loadingName = getPersonValueFromRow(tripId, 'Loading', trip.loading_person_name || '');
+      if (!loadingName) {
+        showMessage('Select loading manager name', false);
+        return;
+      }
+      waitingPayload.loading_person_name = loadingName;
+      waitingPayload.loading_done_by = loadingName;
+    } else {
+      const dispatchName = getPersonValueFromRow(tripId, 'Dispatch', trip.dispatch_manager_name || '');
+      if (!dispatchName) {
+        showMessage('Select dispatch manager name', false);
+        return;
+      }
+      waitingPayload.dispatch_manager_name = dispatchName;
+      waitingPayload.dispatch_done_by = dispatchName;
+    }
+    await applyStatusChange(tripId, 'WAITING', waitingPayload);
     return;
   }
 
@@ -2501,40 +2636,44 @@ function updateLoadingButtonState(tripId) {
   button.disabled = !hasTare || !loadingPerson || !loadingTeam;
 }
 
-function wireRowEvents() {
-  document.querySelectorAll('[data-action="view-timeline"]').forEach((button) => {
+function bindRowActionHandlers(root = document) {
+  root.querySelectorAll('[data-action="view-timeline"]').forEach((button) => {
     button.addEventListener('click', () => openTimelineModal(button.dataset.tripId));
   });
 
-  document.querySelectorAll('[data-action="status-change"]').forEach((button) => {
+  root.querySelectorAll('[data-action="admin-view-fields"], [data-action="admin-view-actions"], [data-action="admin-view-tools"]').forEach((button) => {
+    button.addEventListener('click', () => openAdminWorkflowModal(button.dataset.tripId, button.dataset.adminSection));
+  });
+
+  root.querySelectorAll('[data-action="status-change"]').forEach((button) => {
     button.addEventListener('click', () => handleStatusTargetClick(button));
   });
 
-  document.querySelectorAll('[data-action="cancel"]').forEach((button) => {
+  root.querySelectorAll('[data-action="cancel"]').forEach((button) => {
     button.addEventListener('click', () => cancelTrip(button.dataset.tripId));
   });
 
-  document.querySelectorAll('[data-action="save-tare"]').forEach((button) => {
+  root.querySelectorAll('[data-action="save-tare"]').forEach((button) => {
     button.addEventListener('click', () => saveTareWeight(button.dataset.tripId));
   });
 
-  document.querySelectorAll('[data-action="mark-tare-done"]').forEach((button) => {
+  root.querySelectorAll('[data-action="mark-tare-done"]').forEach((button) => {
     button.addEventListener('click', () => markTareDone(button.dataset.tripId));
   });
 
-  document.querySelectorAll('[data-action="save-gross"]').forEach((button) => {
+  root.querySelectorAll('[data-action="save-gross"]').forEach((button) => {
     button.addEventListener('click', () => saveGrossWeight(button.dataset.tripId));
   });
 
-  document.querySelectorAll('[data-action="send-load-fix"]').forEach((button) => {
+  root.querySelectorAll('[data-action="send-load-fix"]').forEach((button) => {
     button.addEventListener('click', () => sendForLoadFix(button.dataset.tripId));
   });
 
-  document.querySelectorAll('[data-action="mark-gross-done"]').forEach((button) => {
+  root.querySelectorAll('[data-action="mark-gross-done"]').forEach((button) => {
     button.addEventListener('click', () => markGrossDone(button.dataset.tripId));
   });
 
-  document.querySelectorAll('.dispatch-input[data-dispatch-field]').forEach((input) => {
+  root.querySelectorAll('.dispatch-input[data-dispatch-field]').forEach((input) => {
     input.addEventListener('change', () => handleDispatchInputChange(input));
     input.addEventListener('change', () => persistDispatchDraft(input));
     input.addEventListener('input', () => {
@@ -2543,14 +2682,14 @@ function wireRowEvents() {
     });
   });
 
-  document.querySelectorAll('.dispatch-other-input').forEach((input) => {
+  root.querySelectorAll('.dispatch-other-input').forEach((input) => {
     input.addEventListener('input', () => {
       persistDispatchDraft(input);
       updateLoadingButtonState(input.dataset.tripId);
     });
   });
 
-  document.querySelectorAll('.weight-input[data-weight-field="tare_weight"], .weight-input[data-weight-field="gross_weight"]').forEach((input) => {
+  root.querySelectorAll('.weight-input[data-weight-field="tare_weight"], .weight-input[data-weight-field="gross_weight"]').forEach((input) => {
     const tripId = input.dataset.tripId;
     if (!tripId) return;
     const syncPreview = () => updateGrossNetPreview(tripId);
@@ -2558,7 +2697,7 @@ function wireRowEvents() {
     input.addEventListener('change', syncPreview);
   });
 
-  document.querySelectorAll('.person-input[data-person-role]').forEach((selectEl) => {
+  root.querySelectorAll('.person-input[data-person-role]').forEach((selectEl) => {
     selectEl.addEventListener('change', () => {
       const tripId = selectEl.dataset.tripId;
       const roleName = selectEl.dataset.personRole;
@@ -2577,7 +2716,7 @@ function wireRowEvents() {
     });
   });
 
-  document.querySelectorAll('.person-other-input').forEach((input) => {
+  root.querySelectorAll('.person-other-input').forEach((input) => {
     input.addEventListener('input', () => {
       const roleName = input.dataset.personOtherRole;
       if (roleName === 'Loading') {
@@ -2587,7 +2726,7 @@ function wireRowEvents() {
     });
   });
 
-  document.querySelectorAll('[data-admin-select-field]').forEach((selectEl) => {
+  root.querySelectorAll('[data-admin-select-field]').forEach((selectEl) => {
     selectEl.addEventListener('change', () => {
       const tripId = selectEl.dataset.tripId;
       const field = selectEl.dataset.adminSelectField;
@@ -2602,25 +2741,29 @@ function wireRowEvents() {
     });
   });
 
-  document.querySelectorAll('[data-action="admin-save"]').forEach((button) => {
+  root.querySelectorAll('[data-action="admin-save"]').forEach((button) => {
     button.addEventListener('click', () => saveAdminManualData(button.dataset.tripId));
   });
 
-  document.querySelectorAll('[data-action="admin-delete-trip"]').forEach((button) => {
+  root.querySelectorAll('[data-action="admin-delete-trip"]').forEach((button) => {
     button.addEventListener('click', () => deleteAdminTrip(button.dataset.tripId));
   });
 
-  document.querySelectorAll('[data-action="upload-doc"]').forEach((button) => {
+  root.querySelectorAll('[data-action="upload-doc"]').forEach((button) => {
     button.addEventListener('click', () => uploadTripDocument(button.dataset.tripId));
   });
 
-  document.querySelectorAll('[data-action="delete-doc"]').forEach((button) => {
+  root.querySelectorAll('[data-action="delete-doc"]').forEach((button) => {
     button.addEventListener('click', () => deleteTripDocument(button.dataset.tripId, button.dataset.docId));
   });
 
-  document.querySelectorAll('[data-action="download-doc"]').forEach((button) => {
+  root.querySelectorAll('[data-action="download-doc"]').forEach((button) => {
     button.addEventListener('click', () => downloadTripDocument(button.dataset.docId, button.dataset.docName || 'document'));
   });
+}
+
+function wireRowEvents() {
+  bindRowActionHandlers(document);
 }
 
 function valuesEquivalentForAdmin(field, newValue, oldValue) {
@@ -2730,14 +2873,21 @@ async function deleteAdminTrip(tripId) {
 
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelector('[data-action="close-timeline"]')?.addEventListener('click', closeTimelineModal);
+  document.querySelector('[data-action="close-admin-workflow"]')?.addEventListener('click', closeAdminWorkflowModal);
   timelineModal?.addEventListener('click', (event) => {
     if (event.target === timelineModal) {
       closeTimelineModal();
     }
   });
+  adminWorkflowModal?.addEventListener('click', (event) => {
+    if (event.target === adminWorkflowModal) {
+      closeAdminWorkflowModal();
+    }
+  });
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       closeTimelineModal();
+      closeAdminWorkflowModal();
     }
   });
 
@@ -2834,8 +2984,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    if (!hasRoleAccess(['Gate', 'Admin'])) {
-      showMessage('Only Gate/Admin can create trips', false);
+    if (!hasRoleAccess(['Gate'])) {
+      showMessage('Only Gate can create trips', false);
       return;
     }
 
