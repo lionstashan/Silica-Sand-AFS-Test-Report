@@ -2,10 +2,14 @@ const IST_TIMEZONE = 'Asia/Kolkata';
 const STORAGE_USERNAME_KEY = 'customerUsername';
 const STORAGE_PASSWORD_KEY = 'customerPassword';
 const STORAGE_TOKEN_KEY = 'customerToken';
+const STORAGE_ADMIN_SELECTED_CUSTOMER_ID_KEY = 'adminSelectedCustomerUserId';
 const TRANSPORTER_STORAGE_KEY = 'transporterOptions';
 const TRANSPORTER_STORAGE_VERSION_KEY = 'transporterOptionsVersion';
 const TRANSPORTER_STORAGE_VERSION = '2026-04-17-list-1';
 const LOCATION_STORAGE_KEY = 'locationOptions';
+const ROLE_PINS = {
+  Admin: '2802'
+};
 
 const BASE_TRANSPORTER_OPTIONS = [
   'Shree Ram Roadlines',
@@ -32,12 +36,19 @@ const CUSTOMER_DROPDOWN_CONFIG = [
 ];
 
 let customerUser = null;
+let adminViewMode = false;
+let adminCustomerUsers = [];
+let selectedAdminCustomerId = null;
 let expectedRows = [];
 let transporterOptions = [];
 let tripDocumentsByTripId = new Map();
 let tripTimelineByTripId = new Map();
 
 const loginPanel = document.getElementById('login-panel');
+const adminCustomerPanel = document.getElementById('admin-customer-panel');
+const adminCustomerSelect = document.getElementById('admin-customer-select');
+const adminCustomerRefreshBtn = document.getElementById('admin-customer-refresh-btn');
+const adminCustomerMessageEl = document.getElementById('admin-customer-message');
 const appPanel = document.getElementById('app-panel');
 const summaryPanel = document.getElementById('summary-panel');
 const listPanel = document.getElementById('list-panel');
@@ -237,9 +248,10 @@ async function fetchCustomerTripTimeline(tripId) {
   if (tripTimelineByTripId.has(cacheKey)) {
     return tripTimelineByTripId.get(cacheKey);
   }
-  const response = await fetch(`/customer/trips/${encodeURIComponent(tripId)}/timeline`, {
-    headers: getCustomerAuthHeaders()
-  });
+  const endpoint = adminViewMode
+    ? withAdminCustomerQuery(buildPortalEndpoint(`/trips/${encodeURIComponent(tripId)}/timeline`))
+    : buildPortalEndpoint(`/trips/${encodeURIComponent(tripId)}/timeline`);
+  const response = await fetch(endpoint, { headers: getPortalAuthHeaders() });
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     throw new Error(err.error || 'Failed to load trip timeline');
@@ -319,6 +331,58 @@ function showLoginMessage(text, success = false) {
   if (!loginMessageEl) return;
   loginMessageEl.textContent = text;
   loginMessageEl.style.color = success ? '#047857' : '#b91c1c';
+}
+
+function showAdminCustomerMessage(text, success = true) {
+  if (!adminCustomerMessageEl) return;
+  adminCustomerMessageEl.textContent = text;
+  adminCustomerMessageEl.style.color = success ? '#047857' : '#b91c1c';
+}
+
+function isAdminSession() {
+  return localStorage.getItem('userRole') === 'Admin';
+}
+
+function getAdminAuthHeaders() {
+  if (!isAdminSession()) return {};
+  return {
+    'x-user-role': 'Admin',
+    'x-user-pin': ROLE_PINS.Admin
+  };
+}
+
+function getPortalAuthHeaders() {
+  return adminViewMode ? getAdminAuthHeaders() : getCustomerAuthHeaders();
+}
+
+function getSelectedAdminCustomerId() {
+  const parsed = Number(selectedAdminCustomerId);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function getSelectedAdminCustomerIdOrThrow() {
+  const selectedId = getSelectedAdminCustomerId();
+  if (!selectedId) {
+    throw new Error('Select a customer to load portal data');
+  }
+  return selectedId;
+}
+
+function buildPortalEndpoint(path) {
+  return adminViewMode ? `/admin/customer-portal${path}` : `/customer${path}`;
+}
+
+function withAdminCustomerQuery(path, params = {}) {
+  if (!adminViewMode) return path;
+  const selectedId = getSelectedAdminCustomerIdOrThrow();
+  const searchParams = new URLSearchParams({
+    customer_user_id: String(selectedId)
+  });
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === null || value === undefined || value === '') return;
+    searchParams.set(key, String(value));
+  });
+  return `${path}?${searchParams.toString()}`;
 }
 
 function normalizeListValue(value) {
@@ -540,23 +604,35 @@ function clearAuthCredentials() {
 
 function applyAuthedUI() {
   loginPanel.style.display = 'none';
-  appPanel.style.display = 'block';
+  appPanel.style.display = adminViewMode ? 'none' : 'block';
+  if (adminCustomerPanel) adminCustomerPanel.style.display = adminViewMode ? 'block' : 'none';
   summaryPanel.style.display = 'block';
   listPanel.style.display = 'block';
   const indicator = document.getElementById('customer-indicator');
   indicator.style.display = 'inline-block';
-  indicator.textContent = `Customer: ${customerUser?.username || customerUser?.customer_name || customerUser?.display_name || '-'}`;
+  if (adminViewMode) {
+    const selected = adminCustomerUsers.find((row) => String(row.id) === String(selectedAdminCustomerId));
+    const selectedLabel = selected
+      ? `${selected.customer_name || '-'} (${selected.username || '-'})`
+      : 'Select customer';
+    indicator.textContent = `Role: Admin | Customer View: ${selectedLabel}`;
+  } else {
+    indicator.textContent = `Customer: ${customerUser?.username || customerUser?.customer_name || customerUser?.display_name || '-'}`;
+  }
   document.getElementById('logout-link').style.display = 'inline-block';
   if (customerNameInput) {
-    const defaultCustomerName = String(customerUser?.customer_name || '').trim();
+    const defaultCustomerName = adminViewMode
+      ? ''
+      : String(customerUser?.customer_name || '').trim();
     customerNameInput.value = defaultCustomerName;
-    customerNameInput.readOnly = true;
+    customerNameInput.readOnly = !adminViewMode;
   }
   showLoginMessage('', true);
 }
 
 function applyLoggedOutUI() {
   loginPanel.style.display = 'block';
+  if (adminCustomerPanel) adminCustomerPanel.style.display = 'none';
   appPanel.style.display = 'none';
   summaryPanel.style.display = 'none';
   listPanel.style.display = 'none';
@@ -589,6 +665,44 @@ async function loadMe() {
   customerUser = await response.json();
 }
 
+function renderAdminCustomerOptions() {
+  if (!adminCustomerSelect) return;
+  const optionsHtml = [
+    '<option value="">Select customer</option>',
+    ...adminCustomerUsers.map((row) => {
+      const labelName = row.customer_name || '-';
+      const labelUser = row.username || '-';
+      const display = row.display_name ? ` | ${row.display_name}` : '';
+      return `<option value="${escapeHtml(String(row.id))}">${escapeHtml(`${labelName} (${labelUser})${display}`)}</option>`;
+    })
+  ].join('');
+  adminCustomerSelect.innerHTML = optionsHtml;
+  if (selectedAdminCustomerId) {
+    adminCustomerSelect.value = String(selectedAdminCustomerId);
+  }
+}
+
+async function loadAdminCustomerUsers() {
+  const response = await fetch('/admin/customer-portal/customers', {
+    headers: getAdminAuthHeaders()
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to load customers');
+  }
+  adminCustomerUsers = await response.json();
+  const hasSelection = adminCustomerUsers.some((row) => String(row.id) === String(selectedAdminCustomerId));
+  if (!hasSelection) {
+    selectedAdminCustomerId = adminCustomerUsers.length ? Number(adminCustomerUsers[0].id) : null;
+  }
+  if (selectedAdminCustomerId) {
+    localStorage.setItem(STORAGE_ADMIN_SELECTED_CUSTOMER_ID_KEY, String(selectedAdminCustomerId));
+  } else {
+    localStorage.removeItem(STORAGE_ADMIN_SELECTED_CUSTOMER_ID_KEY);
+  }
+  renderAdminCustomerOptions();
+}
+
 function renderSummary(summary) {
   const card = (title, value, cls) => `
     <div class="summary-card ${cls}">
@@ -608,10 +722,10 @@ function renderSummary(summary) {
 
 async function loadSummary() {
   const customerFilter = String(document.getElementById('customer-filter').value || '').trim();
-  const qs = customerFilter ? `?customer_name=${encodeURIComponent(customerFilter)}` : '';
-  const response = await fetch(`/customer/dashboard-summary${qs}`, {
-    headers: getCustomerAuthHeaders()
-  });
+  const endpoint = adminViewMode
+    ? withAdminCustomerQuery(buildPortalEndpoint('/dashboard-summary'), { customer_name: customerFilter })
+    : `${buildPortalEndpoint('/dashboard-summary')}${customerFilter ? `?customer_name=${encodeURIComponent(customerFilter)}` : ''}`;
+  const response = await fetch(endpoint, { headers: getPortalAuthHeaders() });
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     throw new Error(err.error || 'Failed to load summary');
@@ -685,9 +799,10 @@ function wireCustomerDocumentEvents() {
 
 async function downloadCustomerDocument(docId, fileName = 'document') {
   try {
-    const response = await fetch(`/customer/documents/${docId}/download`, {
-      headers: getCustomerAuthHeaders()
-    });
+    const endpoint = adminViewMode
+      ? withAdminCustomerQuery(buildPortalEndpoint(`/documents/${docId}/download`))
+      : buildPortalEndpoint(`/documents/${docId}/download`);
+    const response = await fetch(endpoint, { headers: getPortalAuthHeaders() });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
       throw new Error(err.error || 'Failed to download document');
@@ -707,9 +822,10 @@ async function downloadCustomerDocument(docId, fileName = 'document') {
 }
 
 async function fetchCustomerTripDocuments(tripId) {
-  const response = await fetch(`/customer/trip-documents?trip_id=${encodeURIComponent(tripId)}`, {
-    headers: getCustomerAuthHeaders()
-  });
+  const endpoint = adminViewMode
+    ? withAdminCustomerQuery(buildPortalEndpoint('/trip-documents'), { trip_id: tripId })
+    : `${buildPortalEndpoint('/trip-documents')}?trip_id=${encodeURIComponent(tripId)}`;
+  const response = await fetch(endpoint, { headers: getPortalAuthHeaders() });
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     throw new Error(err.error || 'Failed to load trip documents');
@@ -736,9 +852,10 @@ async function refreshTripDocumentsForRows(rows) {
 }
 
 async function loadExpectedTrucks() {
-  const response = await fetch('/customer/expected-trucks', {
-    headers: getCustomerAuthHeaders()
-  });
+  const endpoint = adminViewMode
+    ? withAdminCustomerQuery(buildPortalEndpoint('/expected-trucks'))
+    : buildPortalEndpoint('/expected-trucks');
+  const response = await fetch(endpoint, { headers: getPortalAuthHeaders() });
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     throw new Error(err.error || 'Failed to load expected trucks');
@@ -756,7 +873,24 @@ async function bootstrapAuthenticated() {
   await Promise.all([loadSummary(), loadExpectedTrucks()]);
 }
 
+async function bootstrapAdminView() {
+  await loadAdminCustomerUsers();
+  applyAuthedUI();
+  if (!getSelectedAdminCustomerId()) {
+    renderSummary({});
+    expectedRows = [];
+    renderExpectedRows(expectedRows);
+    showAdminCustomerMessage('No active customers found', false);
+    return;
+  }
+  showAdminCustomerMessage('', true);
+  await Promise.all([loadSummary(), loadExpectedTrucks()]);
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
+  adminViewMode = isAdminSession();
+  selectedAdminCustomerId = Number(localStorage.getItem(STORAGE_ADMIN_SELECTED_CUSTOMER_ID_KEY) || 0) || null;
+
   document.querySelector('[data-action="close-timeline"]')?.addEventListener('click', closeTimelineModal);
   timelineModal?.addEventListener('click', (event) => {
     if (event.target === timelineModal) closeTimelineModal();
@@ -770,6 +904,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   refreshLocationOptions();
 
   document.getElementById('customer-login-form').addEventListener('submit', async (event) => {
+    if (adminViewMode) return;
     event.preventDefault();
     const formData = new FormData(event.target);
     const username = String(formData.get('username') || '').trim();
@@ -785,6 +920,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   document.getElementById('expected-form').addEventListener('submit', async (event) => {
+    if (adminViewMode) {
+      event.preventDefault();
+      showMessage('Submission is disabled in Admin Customer View mode', false);
+      return;
+    }
     event.preventDefault();
     const formData = new FormData(event.target);
     const payload = {
@@ -830,25 +970,97 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('summary-refresh-btn').addEventListener('click', async () => {
     try {
       await loadSummary();
-      showMessage('Summary refreshed');
+      if (adminViewMode) {
+        showAdminCustomerMessage('Summary refreshed');
+      } else {
+        showMessage('Summary refreshed');
+      }
     } catch (error) {
-      showMessage(error.message, false);
+      if (adminViewMode) {
+        showAdminCustomerMessage(error.message, false);
+      } else {
+        showMessage(error.message, false);
+      }
     }
   });
 
   document.getElementById('logout-link').addEventListener('click', (event) => {
     event.preventDefault();
+    if (adminViewMode) {
+      localStorage.removeItem('userRole');
+      localStorage.removeItem(STORAGE_ADMIN_SELECTED_CUSTOMER_ID_KEY);
+      window.location.reload();
+      return;
+    }
     clearAuthCredentials();
     customerUser = null;
     applyLoggedOutUI();
     showMessage('Logged out');
   });
 
+  adminCustomerRefreshBtn?.addEventListener('click', async () => {
+    if (!adminViewMode) return;
+    try {
+      await loadAdminCustomerUsers();
+      applyAuthedUI();
+      if (getSelectedAdminCustomerId()) {
+        await Promise.all([loadSummary(), loadExpectedTrucks()]);
+      }
+      showAdminCustomerMessage('Customer list refreshed');
+    } catch (error) {
+      showAdminCustomerMessage(error.message, false);
+    }
+  });
+
+  adminCustomerSelect?.addEventListener('change', async () => {
+    if (!adminViewMode) return;
+    const selectedValue = Number(adminCustomerSelect.value || 0);
+    selectedAdminCustomerId = Number.isInteger(selectedValue) && selectedValue > 0 ? selectedValue : null;
+    if (selectedAdminCustomerId) {
+      localStorage.setItem(STORAGE_ADMIN_SELECTED_CUSTOMER_ID_KEY, String(selectedAdminCustomerId));
+    } else {
+      localStorage.removeItem(STORAGE_ADMIN_SELECTED_CUSTOMER_ID_KEY);
+    }
+    applyAuthedUI();
+    if (!selectedAdminCustomerId) {
+      renderSummary({});
+      expectedRows = [];
+      renderExpectedRows(expectedRows);
+      return;
+    }
+    try {
+      await Promise.all([loadSummary(), loadExpectedTrucks()]);
+      showAdminCustomerMessage('Customer data loaded');
+    } catch (error) {
+      showAdminCustomerMessage(error.message, false);
+    }
+  });
+
   window.addEventListener('resize', () => renderExpectedRows(expectedRows));
 
   try {
-    await bootstrapAuthenticated();
-  } catch (_error) {
-    applyLoggedOutUI();
+    if (adminViewMode) {
+      await bootstrapAdminView();
+    } else {
+      await bootstrapAuthenticated();
+    }
+  } catch (error) {
+    if (adminViewMode) {
+      loginPanel.style.display = 'none';
+      if (adminCustomerPanel) adminCustomerPanel.style.display = 'block';
+      appPanel.style.display = 'none';
+      summaryPanel.style.display = 'none';
+      listPanel.style.display = 'none';
+      document.getElementById('logout-link').style.display = 'inline-block';
+      const indicator = document.getElementById('customer-indicator');
+      indicator.style.display = 'inline-block';
+      indicator.textContent = 'Role: Admin | Customer View: Unavailable';
+      showAdminCustomerMessage(
+        error?.message || 'Admin customer portal is unavailable. Ensure latest server code is running.',
+        false
+      );
+    } else {
+      applyLoggedOutUI();
+    }
   }
 });

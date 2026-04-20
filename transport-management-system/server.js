@@ -508,6 +508,126 @@ async function canCustomerAccessTripDocuments(customerUserId, tripId) {
   return result.rows.length > 0;
 }
 
+function parseCustomerUserId(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function loadExpectedTrucksForCustomerUser(customerUserId) {
+  const result = await pool.query(
+    `SELECT
+      et.*,
+      t.status AS trip_status,
+      t.final_status AS trip_final_status,
+      t.in_time AS trip_in_time,
+      t.out_time AS trip_out_time,
+      t.net_weight AS trip_net_weight,
+      COALESCE(t.status_history, '[]'::jsonb) AS trip_status_history
+     FROM expected_trucks et
+     LEFT JOIN trips t ON t.id = et.linked_trip_id
+     WHERE et.submitted_by_user_id = $1
+     ORDER BY et.created_at DESC, et.id DESC`,
+    [customerUserId]
+  );
+  return result.rows.map((row) => ({
+    ...row,
+    current_status: getExpectedTruckCurrentStatus(row)
+  }));
+}
+
+async function loadCustomerDashboardSummary(customerUserId, customerNameFilter) {
+  const result = await pool.query(
+    `SELECT
+      t.id, t.truck_number, t.status, t.final_status, t.is_cancelled, t.net_weight, t.in_time, t.out_time,
+      et.customer_name
+     FROM expected_trucks et
+     JOIN trips t ON t.id = et.linked_trip_id
+     WHERE et.submitted_by_user_id = $1
+     ${customerNameFilter ? 'AND et.customer_name = $2' : ''}
+     ORDER BY t.updated_at DESC, t.id DESC`,
+    customerNameFilter ? [customerUserId, customerNameFilter] : [customerUserId]
+  );
+
+  const rows = result.rows;
+  const now = new Date();
+  const istDateParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  const nowParts = Object.fromEntries(istDateParts.formatToParts(now).filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]));
+
+  const completedRows = rows.filter(isTripCompletedForCustomer);
+  const getParts = (value) => {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return null;
+    return Object.fromEntries(istDateParts.formatToParts(d).filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]));
+  };
+
+  const summary = {
+    trucks_today: 0,
+    trucks_month: 0,
+    trucks_year: 0,
+    quantity_today_mt: 0,
+    quantity_month_mt: 0,
+    quantity_year_mt: 0
+  };
+
+  completedRows.forEach((row) => {
+    const parts = getParts(row.out_time || row.in_time);
+    if (!parts) return;
+    const net = toFiniteNumberOrNull(row.net_weight) || 0;
+    const sameYear = parts.year === nowParts.year;
+    const sameMonth = sameYear && parts.month === nowParts.month;
+    const sameDay = sameMonth && parts.day === nowParts.day;
+    if (sameYear) {
+      summary.trucks_year += 1;
+      summary.quantity_year_mt += net;
+    }
+    if (sameMonth) {
+      summary.trucks_month += 1;
+      summary.quantity_month_mt += net;
+    }
+    if (sameDay) {
+      summary.trucks_today += 1;
+      summary.quantity_today_mt += net;
+    }
+  });
+
+  return {
+    summary,
+    records: rows
+  };
+}
+
+async function loadCustomerTripTimeline(tripId, customerUserId) {
+  const result = await pool.query(
+    `SELECT
+      t.id,
+      t.truck_number,
+      t.status,
+      t.final_status,
+      t.is_cancelled,
+      t.in_time,
+      t.out_time,
+      t.expected_weight,
+      t.net_weight,
+      t.material_type,
+      t.grade,
+      t.condition,
+      t.packing,
+      t.location,
+      COALESCE(t.status_history, '[]'::jsonb) AS status_history
+     FROM trips t
+     JOIN expected_trucks et ON (et.id = t.expected_truck_id OR et.linked_trip_id = t.id)
+     WHERE t.id = $1 AND et.submitted_by_user_id = $2
+     LIMIT 1`,
+    [tripId, customerUserId]
+  );
+  return result.rows[0] || null;
+}
+
 function normalizeExpectedTruckStatus(status) {
   const normalized = String(status || '').toUpperCase();
   return EXPECTED_TRUCK_STATUSES.includes(normalized) ? normalized : 'SUBMITTED';
@@ -1599,6 +1719,167 @@ app.get('/admin/customer-users', async (req, res) => {
   } catch (error) {
     console.error('Failed to list customer users', error);
     return res.status(500).json({ error: 'Failed to load customer users' });
+  }
+});
+
+app.get('/admin/customer-portal/customers', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can view customer portal customers' });
+  try {
+    const result = await pool.query(
+      `SELECT id, customer_name, username, display_name, is_active
+       FROM customer_users
+       WHERE is_active = true
+       ORDER BY customer_name ASC, username ASC`
+    );
+    return res.json(result.rows);
+  } catch (error) {
+    console.error('Failed to load admin customer portal customer list', error);
+    return res.status(500).json({ error: 'Failed to load customers' });
+  }
+});
+
+app.get('/admin/customer-portal/expected-trucks', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can view customer portal data' });
+
+  const customerUserId = parseCustomerUserId(req.query.customer_user_id);
+  if (!customerUserId) {
+    return res.status(400).json({ error: 'customer_user_id is required' });
+  }
+
+  try {
+    const rows = await loadExpectedTrucksForCustomerUser(customerUserId);
+    return res.json(rows);
+  } catch (error) {
+    console.error('Failed to load expected trucks for admin customer portal', error);
+    return res.status(500).json({ error: 'Failed to load expected trucks' });
+  }
+});
+
+app.get('/admin/customer-portal/dashboard-summary', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can view customer portal summary' });
+
+  const customerUserId = parseCustomerUserId(req.query.customer_user_id);
+  if (!customerUserId) {
+    return res.status(400).json({ error: 'customer_user_id is required' });
+  }
+
+  const customerNameFilter = normalizeEmpty(req.query.customer_name);
+  try {
+    const data = await loadCustomerDashboardSummary(customerUserId, customerNameFilter);
+    return res.json(data);
+  } catch (error) {
+    console.error('Failed to load admin customer portal dashboard summary', error);
+    return res.status(500).json({ error: 'Failed to load customer dashboard summary' });
+  }
+});
+
+app.get('/admin/customer-portal/trip-documents', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can view customer portal documents' });
+
+  const customerUserId = parseCustomerUserId(req.query.customer_user_id);
+  if (!customerUserId) {
+    return res.status(400).json({ error: 'customer_user_id is required' });
+  }
+
+  const tripId = Number(req.query.trip_id || 0);
+  if (!Number.isInteger(tripId) || tripId <= 0) {
+    return res.status(400).json({ error: 'trip_id is required' });
+  }
+
+  try {
+    const allowed = await canCustomerAccessTripDocuments(customerUserId, tripId);
+    if (!allowed) {
+      return res.status(403).json({ error: 'Selected customer cannot access documents for this trip' });
+    }
+    const result = await pool.query(
+      `SELECT id, trip_id, expected_truck_id, doc_type, file_name, mime_type, file_size, uploaded_by_role, uploaded_by_name, created_at
+       FROM trip_documents
+       WHERE trip_id = $1
+       ORDER BY created_at DESC, id DESC`,
+      [tripId]
+    );
+    return res.json(result.rows);
+  } catch (error) {
+    console.error('Failed to load admin customer portal trip documents', error);
+    return res.status(500).json({ error: 'Failed to load documents' });
+  }
+});
+
+app.get('/admin/customer-portal/trips/:id/timeline', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can view customer portal timeline' });
+
+  const customerUserId = parseCustomerUserId(req.query.customer_user_id);
+  if (!customerUserId) {
+    return res.status(400).json({ error: 'customer_user_id is required' });
+  }
+
+  const tripId = Number(req.params.id);
+  if (!Number.isInteger(tripId) || tripId <= 0) {
+    return res.status(400).json({ error: 'Invalid trip id' });
+  }
+
+  try {
+    const trip = await loadCustomerTripTimeline(tripId, customerUserId);
+    if (!trip) return res.status(404).json({ error: 'Trip not found' });
+    return res.json(trip);
+  } catch (error) {
+    console.error('Failed to load admin customer portal trip timeline', error);
+    return res.status(500).json({ error: 'Failed to load trip timeline' });
+  }
+});
+
+app.get('/admin/customer-portal/documents/:id/download', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can download customer portal documents' });
+
+  const customerUserId = parseCustomerUserId(req.query.customer_user_id);
+  if (!customerUserId) {
+    return res.status(400).json({ error: 'customer_user_id is required' });
+  }
+
+  const documentId = Number(req.params.id);
+  if (!Number.isInteger(documentId) || documentId <= 0) {
+    return res.status(400).json({ error: 'Invalid document id' });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT td.id, td.trip_id, td.file_name, td.storage_path
+       FROM trip_documents td
+       WHERE td.id = $1
+       LIMIT 1`,
+      [documentId]
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    const doc = result.rows[0];
+    const allowed = await canCustomerAccessTripDocuments(customerUserId, doc.trip_id);
+    if (!allowed) {
+      return res.status(403).json({ error: 'Selected customer cannot access this document' });
+    }
+    const absolutePath = path.resolve(__dirname, doc.storage_path);
+    if (!absolutePath.startsWith(path.resolve(DOC_UPLOAD_DIR))) {
+      return res.status(403).json({ error: 'Invalid document path' });
+    }
+    if (!fs.existsSync(absolutePath)) {
+      return res.status(404).json({ error: 'Document file missing' });
+    }
+    return res.download(absolutePath, doc.file_name);
+  } catch (error) {
+    console.error('Failed to download admin customer portal document', error);
+    return res.status(500).json({ error: 'Failed to download document' });
   }
 });
 

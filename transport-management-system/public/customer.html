@@ -34,6 +34,21 @@
     <div id="login-message"></div>
   </section>
 
+  <section class="panel" id="admin-customer-panel" style="display:none;">
+    <h2>Admin Customer View</h2>
+    <div class="filters">
+      <div class="filter-group">
+        <label>Select Customer
+          <select id="admin-customer-select">
+            <option value="">Select customer</option>
+          </select>
+        </label>
+        <button type="button" id="admin-customer-refresh-btn">Refresh Customers</button>
+      </div>
+    </div>
+    <div id="admin-customer-message"></div>
+  </section>
+
   <section class="panel" id="app-panel" style="display:none;">
     <h2>Submit Expected Truck</h2>
     <form id="expected-form">
@@ -147,6 +162,6 @@
   </div>
 
   <datalist id="customer-location-options"></datalist>
-  <script src="customer.js?v=20260418-11"></script>
+  <script src="customer.js?v=20260420-1"></script>
 </body>
 </html>
