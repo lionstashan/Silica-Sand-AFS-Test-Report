@@ -20,6 +20,7 @@ const BASE_TRANSPORTER_OPTIONS = [
   'Ravi Road Lines'
 ];
 const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Admin'];
+const TASK_STATUSES = ['OPEN', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED'];
 
 const STATUS_FLOW = [
   'IN_GATE',
@@ -128,6 +129,21 @@ const timelineModalBody = document.getElementById('timeline-modal-body');
 const adminWorkflowModal = document.getElementById('admin-workflow-modal');
 const adminWorkflowModalTitle = document.getElementById('admin-workflow-modal-title');
 const adminWorkflowModalBody = document.getElementById('admin-workflow-modal-body');
+const tasksLink = document.getElementById('tasks-link');
+const taskNotificationsBtn = document.getElementById('task-notifications-btn');
+const taskNotificationBadge = document.getElementById('task-notification-badge');
+const tasksModal = document.getElementById('tasks-modal');
+const tasksTable = document.getElementById('tasks-table');
+const tasksMobileList = document.getElementById('tasks-mobile-list');
+const tasksMessageEl = document.getElementById('tasks-message');
+const taskDetailModal = document.getElementById('task-detail-modal');
+const taskDetailTitle = document.getElementById('task-detail-title');
+const taskDetailBody = document.getElementById('task-detail-body');
+const createTaskBtn = document.getElementById('create-task-btn');
+const createTaskPanel = document.getElementById('create-task-panel');
+const createTaskForm = document.getElementById('create-task-form');
+const taskAssigneeOptions = document.getElementById('task-assignee-options');
+const taskMarkAllReadBtn = document.getElementById('task-mark-all-read-btn');
 
 const customerSelect = document.getElementById('customer-select');
 const customerOther = document.getElementById('customer-other');
@@ -138,6 +154,13 @@ const gatePersonSelect = document.getElementById('gate-person-select');
 const gatePersonOther = document.getElementById('gate-person-other');
 let transporterOptions = [];
 let locationOptions = [];
+let tasksRows = [];
+let taskNotificationRows = [];
+let tasksNotificationPoll = null;
+let currentTaskDetail = null;
+let hasUserInteractedForSound = false;
+let lastUnreadTaskCount = null;
+const taskSoundMuted = false;
 
 const MAIN_TABLE_COLUMNS = [
   'Trp No.',
@@ -601,6 +624,408 @@ function showMessage(text, success = true) {
   messageEl.style.color = success ? '#047857' : '#b91c1c';
 }
 
+function showTasksMessage(text, success = true) {
+  if (!tasksMessageEl) return;
+  tasksMessageEl.textContent = text;
+  tasksMessageEl.style.color = success ? '#047857' : '#b91c1c';
+}
+
+function playTaskNotificationSound() {
+  if (taskSoundMuted || !hasUserInteractedForSound) return;
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const audioContext = new AudioCtx();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+    gainNode.gain.setValueAtTime(0.0001, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.12, audioContext.currentTime + 0.02);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.22);
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    oscillator.start();
+    oscillator.stop(audioContext.currentTime + 0.24);
+    oscillator.onended = () => {
+      audioContext.close().catch(() => {});
+    };
+  } catch (_error) {}
+}
+
+function getTaskStatusChip(status) {
+  const raw = String(status || 'OPEN').toUpperCase();
+  const safe = TASK_STATUSES.includes(raw) ? raw : 'OPEN';
+  const cls = safe.toLowerCase().replace(/_/g, '-');
+  return `<span class="task-status-chip task-status-${cls}">${escapeHtml(safe)}</span>`;
+}
+
+function openTasksModal() {
+  if (!tasksModal) return;
+  tasksModal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeTasksModal() {
+  if (!tasksModal) return;
+  tasksModal.style.display = 'none';
+  document.body.style.overflow = 'auto';
+}
+
+function openTaskDetailModal() {
+  if (!taskDetailModal) return;
+  taskDetailModal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeTaskDetailModal() {
+  if (!taskDetailModal) return;
+  taskDetailModal.style.display = 'none';
+  currentTaskDetail = null;
+  document.body.style.overflow = tasksModal?.style.display === 'flex' ? 'hidden' : 'auto';
+}
+
+function renderTaskAssigneeSuggestions(rows = []) {
+  if (!taskAssigneeOptions) return;
+  const unique = new Set();
+  const options = rows
+    .map((row) => {
+      const name = String(row?.name || '').trim();
+      const team = String(row?.team || '').trim();
+      if (!name) return '';
+      const label = team ? `${name} (${team})` : name;
+      const key = label.toLowerCase();
+      if (unique.has(key)) return '';
+      unique.add(key);
+      return `<option value="${escapeHtml(label)}"></option>`;
+    })
+    .filter(Boolean);
+  taskAssigneeOptions.innerHTML = options.join('');
+}
+
+async function loadTaskAssignees() {
+  try {
+    const response = await fetch('/tasks/assignees', { headers: getAuthHeaders() });
+    if (!response.ok) return;
+    const rows = await response.json();
+    renderTaskAssigneeSuggestions(rows);
+  } catch (_error) {}
+}
+
+function renderTasksRows(rows) {
+  const isMobile = window.matchMedia('(max-width: 768px)').matches;
+  if (!isMobile) {
+    tasksTable.innerHTML = rows.map((task) => `
+      <tr>
+        <td>
+          <button type="button" class="task-id-link" data-action="open-task-detail" data-task-id="${task.id}">#${task.id}</button>
+        </td>
+        <td>${escapeHtml(task.title || '-')}</td>
+        <td>${escapeHtml(task.team || '-')}</td>
+        <td>${escapeHtml(task.assignee_name_snapshot || '-')}</td>
+        <td>${getTaskStatusChip(task.status)}</td>
+        <td>${formatDateTime(task.eta)}</td>
+      </tr>
+    `).join('');
+    tasksMobileList.innerHTML = '';
+  } else {
+    tasksTable.innerHTML = '';
+    tasksMobileList.innerHTML = rows.map((task) => `
+      <article class="mobile-trip-card">
+        <div class="mobile-trip-head">
+          <div class="mobile-trip-truck">
+            <button type="button" class="task-id-link" data-action="open-task-detail" data-task-id="${task.id}">Task #${task.id}</button>
+          </div>
+          <div>${getTaskStatusChip(task.status)}</div>
+        </div>
+        <div class="mobile-trip-grid">
+          <div><strong>Title:</strong> ${escapeHtml(task.title || '-')}</div>
+          <div><strong>Team:</strong> ${escapeHtml(task.team || '-')}</div>
+          <div><strong>Assignee:</strong> ${escapeHtml(task.assignee_name_snapshot || '-')}</div>
+          <div><strong>ETA:</strong> ${formatDateTime(task.eta)}</div>
+        </div>
+      </article>
+    `).join('');
+  }
+
+  document.querySelectorAll('[data-action="open-task-detail"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const taskId = Number(btn.dataset.taskId || 0);
+      if (!taskId) return;
+      await loadTaskDetail(taskId);
+    });
+  });
+}
+
+async function loadTasks() {
+  try {
+    const response = await fetch('/tasks', { headers: getAuthHeaders() });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || 'Failed to load tasks');
+    }
+    tasksRows = await response.json();
+    renderTasksRows(tasksRows);
+  } catch (error) {
+    showTasksMessage(error.message, false);
+  }
+}
+
+async function downloadTaskCommentAttachment(commentId) {
+  try {
+    const response = await fetch(`/tasks/comments/${commentId}/download`, {
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || 'Failed to download attachment');
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'attachment';
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    showTasksMessage(error.message, false);
+  }
+}
+
+function renderTaskDetail(taskData) {
+  const task = taskData?.task || {};
+  const comments = Array.isArray(taskData?.comments) ? taskData.comments : [];
+  const activity = Array.isArray(taskData?.activity) ? taskData.activity : [];
+  const role = getCurrentRole();
+  const canManage = role === 'Admin' || role === task.team;
+
+  taskDetailTitle.textContent = `Task #${task.id} - ${task.title || ''}`;
+  taskDetailBody.innerHTML = `
+    <div class="task-detail-grid">
+      <div><strong>Team:</strong> ${escapeHtml(task.team || '-')}</div>
+      <div><strong>Assignee:</strong> ${escapeHtml(task.assignee_name_snapshot || '-')}</div>
+      <div><strong>Status:</strong> ${getTaskStatusChip(task.status)}</div>
+      <div><strong>ETA:</strong> ${formatDateTime(task.eta)}</div>
+      <div><strong>Description:</strong> ${escapeHtml(task.description || '-')}</div>
+      <div><strong>Updated:</strong> ${formatDateTime(task.updated_at)}</div>
+    </div>
+
+    ${canManage ? `
+      <div class="workflow-group">
+        <h4>Task Update</h4>
+        <form id="task-update-form">
+          <div class="form-grid">
+            <label>Status
+              <select name="status" required>
+                ${TASK_STATUSES.map((status) => `<option value="${status}" ${status === task.status ? 'selected' : ''}>${status}</option>`).join('')}
+              </select>
+            </label>
+            <label>Team
+              <select name="team" required>
+                <option value="">Select team</option>
+                ${VALID_ROLES.map((team) => `<option value="${team}" ${team === task.team ? 'selected' : ''}>${team}</option>`).join('')}
+              </select>
+            </label>
+            <label>Assignee
+              <input type="text" name="assignee_name" value="${escapeHtml(task.assignee_name_snapshot || '')}" list="task-assignee-options" required />
+            </label>
+          </div>
+          <div class="actions">
+            <button type="submit" class="workflow-btn primary">Save Task</button>
+          </div>
+        </form>
+      </div>
+    ` : ''}
+    <div class="workflow-group">
+      <h4>Add Comment</h4>
+      <form id="task-comment-form" enctype="multipart/form-data">
+        <div class="form-grid">
+          <label>Comment
+            <textarea name="comment" rows="2"></textarea>
+          </label>
+          <label>Upload (Optional)
+            <input type="file" name="attachment" />
+          </label>
+        </div>
+        <div class="actions">
+          <button type="submit" class="workflow-btn primary">Add Comment</button>
+        </div>
+      </form>
+    </div>
+    <div class="task-comments-wrap">
+      <h4>Comments</h4>
+      ${comments.length ? comments.map((item) => `
+        <div class="task-comment-item">
+          <div><strong>${escapeHtml(item.created_by_name || item.created_by_role || '-')}</strong> · ${formatDateTime(item.created_at)}</div>
+          <div>${escapeHtml(item.comment_text || '-')}</div>
+          ${item.attachment_name ? `<div><button type="button" class="truck-link-btn" data-action="download-task-comment" data-comment-id="${item.id}">${escapeHtml(item.attachment_name)}</button></div>` : ''}
+        </div>
+      `).join('') : '<div class="mini-muted">No comments yet</div>'}
+    </div>
+    <div class="task-activity-wrap">
+      <h4>Activity</h4>
+      ${activity.length ? activity.map((item) => `
+        <div class="task-activity-item">
+          <div><strong>${escapeHtml(item.action_type || '-')}</strong> · ${formatDateTime(item.created_at)}</div>
+          <div class="mini-muted">${escapeHtml(item.actor_name || item.actor_role || '-')}</div>
+          ${item.note ? `<div>${escapeHtml(item.note)}</div>` : ''}
+          ${(item.from_value || item.to_value) ? `<div class="mini-muted">${escapeHtml(item.from_value || '-')} → ${escapeHtml(item.to_value || '-')}</div>` : ''}
+        </div>
+      `).join('') : '<div class="mini-muted">No activity yet</div>'}
+    </div>
+  `;
+
+  taskDetailBody.querySelector('#task-update-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const formData = new FormData(event.target);
+    const nextStatus = String(formData.get('status') || '').trim();
+    const nextTeam = String(formData.get('team') || '').trim();
+    const nextAssignee = String(formData.get('assignee_name') || '').trim();
+    const statusChanged = nextStatus && nextStatus !== String(task.status || '').toUpperCase();
+    const assignmentChanged = nextTeam !== String(task.team || '') || nextAssignee !== String(task.assignee_name_snapshot || '');
+
+    if (!statusChanged && !assignmentChanged) {
+      showTasksMessage('No changes to save');
+      return;
+    }
+
+    try {
+      if (statusChanged) {
+        const statusResp = await fetch(`/tasks/${task.id}/status`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders()
+          },
+          body: JSON.stringify({ status: nextStatus })
+        });
+        if (!statusResp.ok) {
+          const error = await statusResp.json().catch(() => ({}));
+          throw new Error(error.error || 'Failed to update status');
+        }
+      }
+
+      if (assignmentChanged) {
+        const reassignResp = await fetch(`/tasks/${task.id}/reassign`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders()
+          },
+          body: JSON.stringify({
+            team: nextTeam,
+            assignee_name: nextAssignee
+          })
+        });
+        if (!reassignResp.ok) {
+          const error = await reassignResp.json().catch(() => ({}));
+          throw new Error(error.error || 'Failed to reassign task');
+        }
+      }
+
+      await Promise.all([loadTaskDetail(task.id), loadTasks(), loadTaskNotifications()]);
+      showTasksMessage('Task saved');
+    } catch (error) {
+      showTasksMessage(error.message, false);
+    }
+  });
+
+  taskDetailBody.querySelector('#task-comment-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const formData = new FormData(event.target);
+    try {
+      const response = await fetch(`/tasks/${task.id}/comments`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: formData
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || 'Failed to add comment');
+      }
+      await Promise.all([loadTaskDetail(task.id), loadTasks(), loadTaskNotifications()]);
+      showTasksMessage('Comment added');
+    } catch (error) {
+      showTasksMessage(error.message, false);
+    }
+  });
+
+  taskDetailBody.querySelectorAll('[data-action="download-task-comment"]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const commentId = Number(btn.dataset.commentId || 0);
+      if (!commentId) return;
+      downloadTaskCommentAttachment(commentId);
+    });
+  });
+}
+
+async function loadTaskDetail(taskId) {
+  try {
+    const response = await fetch(`/tasks/${taskId}`, {
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || 'Failed to load task detail');
+    }
+    currentTaskDetail = await response.json();
+    renderTaskDetail(currentTaskDetail);
+    openTaskDetailModal();
+  } catch (error) {
+    showTasksMessage(error.message, false);
+  }
+}
+
+function renderTaskNotificationBadge(unreadCount) {
+  if (!taskNotificationBadge) return;
+  const count = Number(unreadCount || 0);
+  if (count <= 0) {
+    taskNotificationBadge.style.display = 'none';
+    taskNotificationBadge.textContent = '0';
+    return;
+  }
+  taskNotificationBadge.style.display = 'inline-block';
+  taskNotificationBadge.textContent = String(count);
+}
+
+async function loadTaskNotifications() {
+  try {
+    const response = await fetch('/task-notifications', { headers: getAuthHeaders() });
+    if (!response.ok) return;
+    const data = await response.json();
+    taskNotificationRows = Array.isArray(data.rows) ? data.rows : [];
+    const unreadCount = Number(data.unread_count || 0);
+    if (lastUnreadTaskCount !== null && unreadCount > lastUnreadTaskCount) {
+      playTaskNotificationSound();
+    }
+    lastUnreadTaskCount = unreadCount;
+    renderTaskNotificationBadge(unreadCount);
+  } catch (_error) {}
+}
+
+async function markAllTaskNotificationsRead() {
+  try {
+    const response = await fetch('/task-notifications/mark-read', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({})
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || 'Failed to mark notifications read');
+    }
+    await loadTaskNotifications();
+    showTasksMessage('Task alerts marked as read');
+  } catch (error) {
+    showTasksMessage(error.message, false);
+  }
+}
+
 function showRoleSelection() {
   document.getElementById('role-modal').style.display = 'flex';
   document.getElementById('pin-modal').style.display = 'none';
@@ -629,6 +1054,7 @@ function applyRoleUI() {
   const gatePanel = form?.closest('.panel');
   const dashboardLink = document.getElementById('dashboard-link');
   const customerPortalLink = document.getElementById('customer-portal-link');
+  const canSeeTasks = !!role;
 
   if (gatePanel && !canCreate) {
     gatePanel.style.display = 'none';
@@ -639,6 +1065,15 @@ function applyRoleUI() {
   }
   if (customerPortalLink) {
     customerPortalLink.style.display = role === 'Gate' ? 'none' : 'inline-block';
+  }
+  if (tasksLink) {
+    tasksLink.style.display = canSeeTasks ? 'inline-block' : 'none';
+  }
+  if (taskNotificationsBtn) {
+    taskNotificationsBtn.style.display = canSeeTasks ? 'inline-block' : 'none';
+  }
+  if (createTaskBtn) {
+    createTaskBtn.style.display = role === 'Admin' ? 'inline-block' : 'none';
   }
 
   if (roleIndicator && role) {
@@ -2874,6 +3309,8 @@ async function deleteAdminTrip(tripId) {
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelector('[data-action="close-timeline"]')?.addEventListener('click', closeTimelineModal);
   document.querySelector('[data-action="close-admin-workflow"]')?.addEventListener('click', closeAdminWorkflowModal);
+  document.querySelector('[data-action="close-tasks"]')?.addEventListener('click', closeTasksModal);
+  document.querySelector('[data-action="close-task-detail"]')?.addEventListener('click', closeTaskDetailModal);
   timelineModal?.addEventListener('click', (event) => {
     if (event.target === timelineModal) {
       closeTimelineModal();
@@ -2884,10 +3321,23 @@ document.addEventListener('DOMContentLoaded', () => {
       closeAdminWorkflowModal();
     }
   });
+  tasksModal?.addEventListener('click', (event) => {
+    if (event.target === tasksModal) {
+      closeTasksModal();
+    }
+  });
+  taskDetailModal?.addEventListener('click', (event) => {
+    if (event.target === taskDetailModal) {
+      closeTaskDetailModal();
+    }
+  });
   document.addEventListener('keydown', (event) => {
+    hasUserInteractedForSound = true;
     if (event.key === 'Escape') {
       closeTimelineModal();
       closeAdminWorkflowModal();
+      closeTaskDetailModal();
+      closeTasksModal();
     }
   });
 
@@ -2936,11 +3386,79 @@ document.addEventListener('DOMContentLoaded', () => {
     logout();
   });
 
+  tasksLink?.addEventListener('click', async (event) => {
+    event.preventDefault();
+    await Promise.all([loadTasks(), loadTaskNotifications()]);
+    openTasksModal();
+  });
+
+  taskNotificationsBtn?.addEventListener('click', async () => {
+    await Promise.all([loadTasks(), loadTaskNotifications()]);
+    openTasksModal();
+  });
+
+  createTaskBtn?.addEventListener('click', () => {
+    const isOpen = createTaskPanel?.style.display === 'block';
+    if (createTaskPanel) createTaskPanel.style.display = isOpen ? 'none' : 'block';
+  });
+
+  createTaskForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const role = getCurrentRole();
+    if (role !== 'Admin') {
+      showTasksMessage('Only Admin can create tasks', false);
+      return;
+    }
+    const formData = new FormData(createTaskForm);
+    const etaLocal = String(formData.get('eta') || '').trim();
+    const payload = {
+      title: String(formData.get('title') || '').trim(),
+      description: String(formData.get('description') || '').trim(),
+      team: String(formData.get('team') || '').trim(),
+      assignee_name: String(formData.get('assignee_name') || '').trim(),
+      eta: etaLocal ? `${etaLocal}:00${IST_OFFSET}` : '',
+      comment: String(formData.get('comment') || '').trim()
+    };
+    try {
+      const response = await fetch('/tasks', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || 'Failed to create task');
+      }
+      showTasksMessage('Task created');
+      createTaskForm.reset();
+      if (createTaskPanel) createTaskPanel.style.display = 'none';
+      await Promise.all([loadTasks(), loadTaskNotifications()]);
+    } catch (error) {
+      showTasksMessage(error.message, false);
+    }
+  });
+
+  taskMarkAllReadBtn?.addEventListener('click', async () => {
+    await markAllTaskNotificationsRead();
+  });
+
   initializeRole();
   syncTripsTableHeader();
   refreshStatusFilterOptions();
   refreshTransporterOptions();
   loadTrips();
+  loadTaskAssignees();
+  loadTaskNotifications();
+
+  if (tasksNotificationPoll) clearInterval(tasksNotificationPoll);
+  tasksNotificationPoll = setInterval(() => {
+    const role = getCurrentRole();
+    if (!role) return;
+    loadTaskNotifications();
+  }, 15000);
 
   setInterval(updateTimeMetrics, 5000);
   window.addEventListener('resize', () => {
@@ -2974,6 +3492,7 @@ document.addEventListener('DOMContentLoaded', () => {
     transporterInput.focus();
   });
   document.addEventListener('click', (event) => {
+    hasUserInteractedForSound = true;
     if (!transporterInput || !transporterSuggestions) return;
     const clickedInsideInput = transporterInput.contains(event.target);
     const clickedInsideList = transporterSuggestions.contains(event.target);

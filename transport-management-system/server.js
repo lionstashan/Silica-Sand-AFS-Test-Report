@@ -88,6 +88,8 @@ const DOC_ALLOWED_MIME_TYPES = new Set([
 ]);
 const DOC_MAX_SIZE_BYTES = 10 * 1024 * 1024;
 const DOC_UPLOAD_DIR = path.resolve(process.env.DOC_UPLOAD_DIR || path.join(__dirname, 'uploads', 'docs'));
+const TASK_STATUSES = ['OPEN', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED'];
+const TASK_TEAMS = VALID_ROLES;
 const CUSTOMER_TOKEN_SECRET = String(process.env.CUSTOMER_TOKEN_SECRET || 'change-me-customer-token-secret');
 const CUSTOMER_TOKEN_TTL_SECONDS = Number.parseInt(process.env.CUSTOMER_TOKEN_TTL_SECONDS || '604800', 10); // 7 days
 const BCRYPT_COST = Number.parseInt(process.env.BCRYPT_COST || '10', 10);
@@ -120,6 +122,20 @@ const uploadDocument = multer({
   }
 });
 
+const uploadTaskCommentAttachment = multer({
+  storage: documentStorage,
+  limits: { fileSize: DOC_MAX_SIZE_BYTES },
+  fileFilter: (_req, file, cb) => {
+    const ext = String(path.extname(file.originalname || '')).toLowerCase();
+    const mime = String(file.mimetype || '').toLowerCase();
+    if (!DOC_ALLOWED_EXTENSIONS.has(ext) || !DOC_ALLOWED_MIME_TYPES.has(mime)) {
+      cb(new Error('Unsupported file type'));
+      return;
+    }
+    cb(null, true);
+  }
+});
+
 app.use(express.json());
 app.use((req, res, next) => {
   if (req.path.endsWith('.js') || req.path.endsWith('.css') || req.path.endsWith('.html')) {
@@ -133,6 +149,16 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 function normalizeStatus(status) {
   return STATUS_FLOW.includes(status) ? status : 'IN_GATE';
+}
+
+function normalizeTaskStatus(status) {
+  const normalized = String(status || '').toUpperCase();
+  return TASK_STATUSES.includes(normalized) ? normalized : null;
+}
+
+function normalizeTaskTeam(team) {
+  const normalized = String(team || '').trim();
+  return TASK_TEAMS.includes(normalized) ? normalized : null;
 }
 
 function normalizeEmpty(value) {
@@ -511,6 +537,140 @@ async function canCustomerAccessTripDocuments(customerUserId, tripId) {
 function parseCustomerUserId(value) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parsePositiveId(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function canRoleActOnTask(role, task) {
+  if (role === 'Admin') return true;
+  return role === task.team;
+}
+
+async function logTaskActivity(client, {
+  taskId,
+  actionType,
+  fromValue = null,
+  toValue = null,
+  note = null,
+  actorRole,
+  actorName = null
+}) {
+  await client.query(
+    `INSERT INTO task_activity (task_id, action_type, from_value, to_value, note, actor_role, actor_name)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [taskId, actionType, fromValue, toValue, note, actorRole, actorName]
+  );
+}
+
+async function createTaskNotification(client, {
+  taskId,
+  targetRole,
+  eventType,
+  eventMessage = null
+}) {
+  if (!TASK_TEAMS.includes(targetRole)) return;
+  await client.query(
+    `INSERT INTO task_notifications (task_id, target_role, event_type, event_message, is_read, created_at)
+     VALUES ($1, $2, $3, $4, false, NOW())`,
+    [taskId, targetRole, eventType, eventMessage]
+  );
+}
+
+async function getTaskById(taskId) {
+  const result = await pool.query(
+    `SELECT
+      id, title, description, team, assignee_user_id, assignee_name_snapshot,
+      status, eta, created_by_role, created_by_name, created_at, updated_at,
+      done_at, done_by_role, done_by_name
+     FROM tasks
+     WHERE id = $1
+     LIMIT 1`,
+    [taskId]
+  );
+  return result.rows[0] || null;
+}
+
+async function getTaskComments(taskId) {
+  const result = await pool.query(
+    `SELECT
+      id, task_id, comment_text, attachment_name, attachment_mime_type, attachment_size,
+      created_by_role, created_by_name, created_at
+     FROM task_comments
+     WHERE task_id = $1
+     ORDER BY created_at ASC, id ASC`,
+    [taskId]
+  );
+  return result.rows;
+}
+
+async function getTaskActivity(taskId) {
+  const result = await pool.query(
+    `SELECT
+      id, task_id, action_type, from_value, to_value, note, actor_role, actor_name, created_at
+     FROM task_activity
+     WHERE task_id = $1
+     ORDER BY created_at ASC, id ASC`,
+    [taskId]
+  );
+  return result.rows;
+}
+
+async function getTaskAssigneeSuggestions() {
+  const fromTrips = await pool.query(
+    `SELECT DISTINCT name FROM (
+      SELECT dispatch_manager_name AS name FROM trips
+      UNION
+      SELECT loading_person_name AS name FROM trips
+      UNION
+      SELECT weight_operator_name AS name FROM trips
+      UNION
+      SELECT accounts_person_name AS name FROM trips
+      UNION
+      SELECT dispatch_done_by AS name FROM trips
+      UNION
+      SELECT tare_done_by AS name FROM trips
+      UNION
+      SELECT gross_done_by AS name FROM trips
+      UNION
+      SELECT loading_done_by AS name FROM trips
+      UNION
+      SELECT billing_done_by AS name FROM trips
+    ) x
+    WHERE name IS NOT NULL AND TRIM(name) <> ''`
+  );
+
+  const seeded = [
+    { team: 'Gate', name: 'X' },
+    { team: 'Gate', name: 'Y' },
+    { team: 'Gate', name: 'Z' },
+    { team: 'Dispatch', name: 'Jitendra Yadav' },
+    { team: 'Loading', name: 'Rajesh Kumar' },
+    { team: 'Loading', name: 'Jai Bhagwan' },
+    { team: 'Weighbridge', name: 'Anil Sharma' },
+    { team: 'Weighbridge', name: 'Ajay' },
+    { team: 'Accounts', name: 'Ashutosh' }
+  ];
+
+  const unique = new Set();
+  const merged = [];
+  seeded.forEach((row) => {
+    const key = `${row.team}|${row.name}`.toLowerCase();
+    if (unique.has(key)) return;
+    unique.add(key);
+    merged.push(row);
+  });
+  fromTrips.rows.forEach((row) => {
+    const clean = String(row.name || '').trim();
+    if (!clean) return;
+    const key = `any|${clean}`.toLowerCase();
+    if (unique.has(key)) return;
+    unique.add(key);
+    merged.push({ team: null, name: clean });
+  });
+  return merged.sort((a, b) => String(a.name).localeCompare(String(b.name)));
 }
 
 async function loadExpectedTrucksForCustomerUser(customerUserId) {
@@ -1719,6 +1879,507 @@ app.get('/admin/customer-users', async (req, res) => {
   } catch (error) {
     console.error('Failed to list customer users', error);
     return res.status(500).json({ error: 'Failed to load customer users' });
+  }
+});
+
+app.get('/tasks/assignees', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  try {
+    const suggestions = await getTaskAssigneeSuggestions();
+    return res.json(suggestions);
+  } catch (error) {
+    console.error('Failed to load task assignee suggestions', error);
+    return res.status(500).json({ error: 'Failed to load assignee suggestions' });
+  }
+});
+
+app.post('/tasks', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can create tasks' });
+
+  const title = normalizeEmpty(req.body.title);
+  const description = normalizeEmpty(req.body.description);
+  const team = normalizeTaskTeam(req.body.team);
+  const assigneeName = normalizeEmpty(req.body.assignee_name);
+  const eta = normalizeEmpty(req.body.eta);
+  const assigneeUserId = parsePositiveId(req.body.assignee_user_id);
+  const initialComment = normalizeEmpty(req.body.comment);
+
+  if (!title || !description || !team || !assigneeName || !eta) {
+    return res.status(400).json({ error: 'title, description, team, assignee_name and eta are required' });
+  }
+  const etaDate = new Date(eta);
+  if (Number.isNaN(etaDate.getTime())) {
+    return res.status(400).json({ error: 'Invalid eta' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const inserted = await client.query(
+      `INSERT INTO tasks (
+        title, description, team, assignee_user_id, assignee_name_snapshot, status, eta,
+        created_by_role, created_by_name, created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, 'OPEN', $6,
+        $7, $8, NOW(), NOW()
+      )
+      RETURNING id, title, description, team, assignee_user_id, assignee_name_snapshot, status, eta, created_by_role, created_by_name, created_at, updated_at`,
+      [title, description, team, assigneeUserId, assigneeName, etaDate.toISOString(), auth.role, 'Admin']
+    );
+    const task = inserted.rows[0];
+
+    await logTaskActivity(client, {
+      taskId: task.id,
+      actionType: 'CREATE',
+      toValue: `team:${team}|assignee:${assigneeName}|eta:${task.eta}`,
+      actorRole: auth.role,
+      actorName: 'Admin'
+    });
+
+    if (initialComment) {
+      await client.query(
+        `INSERT INTO task_comments (task_id, comment_text, created_by_role, created_by_name, created_at)
+         VALUES ($1, $2, $3, $4, NOW())`,
+        [task.id, initialComment, auth.role, 'Admin']
+      );
+      await logTaskActivity(client, {
+        taskId: task.id,
+        actionType: 'COMMENT',
+        note: initialComment,
+        actorRole: auth.role,
+        actorName: 'Admin'
+      });
+    }
+
+    await createTaskNotification(client, {
+      taskId: task.id,
+      targetRole: team,
+      eventType: 'TASK_ASSIGNED',
+      eventMessage: `Task #${task.id} assigned to ${team}`
+    });
+
+    await client.query('COMMIT');
+    return res.status(201).json(task);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Failed to create task', error);
+    return res.status(500).json({ error: 'Failed to create task' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/tasks', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+
+  const statusFilter = normalizeTaskStatus(req.query.status);
+  const teamFilter = normalizeTaskTeam(req.query.team);
+  const filters = [];
+  const values = [];
+  if (req.query.status) {
+    if (!statusFilter) return res.status(400).json({ error: 'Invalid status filter' });
+    values.push(statusFilter);
+    filters.push(`t.status = $${values.length}`);
+  }
+  if (req.query.team) {
+    if (!teamFilter) return res.status(400).json({ error: 'Invalid team filter' });
+    values.push(teamFilter);
+    filters.push(`t.team = $${values.length}`);
+  }
+  const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+  try {
+    const result = await pool.query(
+      `SELECT
+        t.id, t.title, t.description, t.team, t.assignee_user_id, t.assignee_name_snapshot,
+        t.status, t.eta, t.created_by_role, t.created_by_name, t.created_at, t.updated_at,
+        t.done_at, t.done_by_role, t.done_by_name
+       FROM tasks t
+       ${where}
+       ORDER BY
+         CASE WHEN t.status IN ('OPEN', 'IN_PROGRESS', 'BLOCKED') THEN 0 ELSE 1 END ASC,
+         t.eta ASC,
+         t.id DESC`,
+      values
+    );
+    return res.json(result.rows);
+  } catch (error) {
+    console.error('Failed to load tasks', error);
+    return res.status(500).json({ error: 'Failed to load tasks' });
+  }
+});
+
+app.get('/tasks/:id', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+
+  const taskId = parsePositiveId(req.params.id);
+  if (!taskId) return res.status(400).json({ error: 'Invalid task id' });
+  try {
+    const task = await getTaskById(taskId);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+    const [comments, activity] = await Promise.all([
+      getTaskComments(taskId),
+      getTaskActivity(taskId)
+    ]);
+    return res.json({ task, comments, activity });
+  } catch (error) {
+    console.error('Failed to load task details', error);
+    return res.status(500).json({ error: 'Failed to load task details' });
+  }
+});
+
+app.put('/tasks/:id/status', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+
+  const taskId = parsePositiveId(req.params.id);
+  const nextStatus = normalizeTaskStatus(req.body.status);
+  const note = normalizeEmpty(req.body.note);
+  if (!taskId || !nextStatus) return res.status(400).json({ error: 'Valid task id and status are required' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const existingResult = await client.query(
+      `SELECT id, team, assignee_name_snapshot, status
+       FROM tasks
+       WHERE id = $1
+       LIMIT 1
+       FOR UPDATE`,
+      [taskId]
+    );
+    if (!existingResult.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    const task = existingResult.rows[0];
+    if (!canRoleActOnTask(auth.role, task)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Only Admin or assigned team can update this task' });
+    }
+    if (task.status === 'CANCELLED' && auth.role !== 'Admin') {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Only Admin can change status of a cancelled task' });
+    }
+    const updateResult = await client.query(
+      `UPDATE tasks
+       SET status = $1,
+           updated_at = NOW(),
+           done_at = CASE WHEN $1 = 'DONE' THEN NOW() ELSE NULL END,
+           done_by_role = CASE WHEN $1 = 'DONE' THEN $2 ELSE NULL END,
+           done_by_name = CASE WHEN $1 = 'DONE' THEN $3 ELSE NULL END
+       WHERE id = $4
+       RETURNING id, title, description, team, assignee_user_id, assignee_name_snapshot, status, eta, created_by_role, created_by_name, created_at, updated_at, done_at, done_by_role, done_by_name`,
+      [nextStatus, auth.role, auth.role, taskId]
+    );
+    const updatedTask = updateResult.rows[0];
+
+    await logTaskActivity(client, {
+      taskId,
+      actionType: 'STATUS_CHANGE',
+      fromValue: task.status,
+      toValue: nextStatus,
+      note,
+      actorRole: auth.role,
+      actorName: auth.role
+    });
+
+    if (nextStatus === 'DONE') {
+      await createTaskNotification(client, {
+        taskId,
+        targetRole: 'Admin',
+        eventType: 'TASK_DONE',
+        eventMessage: `Task #${taskId} marked DONE by ${auth.role}`
+      });
+    } else {
+      await createTaskNotification(client, {
+        taskId,
+        targetRole: 'Admin',
+        eventType: 'TASK_STATUS_UPDATED',
+        eventMessage: `Task #${taskId} status changed to ${nextStatus}`
+      });
+    }
+
+    await client.query('COMMIT');
+    return res.json(updatedTask);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Failed to update task status', error);
+    return res.status(500).json({ error: 'Failed to update task status' });
+  } finally {
+    client.release();
+  }
+});
+
+app.put('/tasks/:id/reassign', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+
+  const taskId = parsePositiveId(req.params.id);
+  const nextTeam = normalizeTaskTeam(req.body.team);
+  const nextAssignee = normalizeEmpty(req.body.assignee_name);
+  const nextAssigneeUserId = parsePositiveId(req.body.assignee_user_id);
+  if (!taskId || !nextTeam || !nextAssignee) {
+    return res.status(400).json({ error: 'task id, team and assignee_name are required' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const existingResult = await client.query(
+      `SELECT id, team, assignee_name_snapshot, status
+       FROM tasks
+       WHERE id = $1
+       LIMIT 1
+       FOR UPDATE`,
+      [taskId]
+    );
+    if (!existingResult.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    const task = existingResult.rows[0];
+    if (!canRoleActOnTask(auth.role, task)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Only Admin or assigned team can reassign this task' });
+    }
+    if (task.status === 'CANCELLED' && auth.role !== 'Admin') {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Only Admin can modify a cancelled task' });
+    }
+
+    const nextStatus = ['DONE', 'CANCELLED'].includes(task.status) ? 'OPEN' : task.status;
+    const updateResult = await client.query(
+      `UPDATE tasks
+       SET team = $1,
+           assignee_user_id = $2,
+           assignee_name_snapshot = $3,
+           status = $4,
+           updated_at = NOW(),
+           done_at = CASE WHEN $4 = 'DONE' THEN done_at ELSE NULL END,
+           done_by_role = CASE WHEN $4 = 'DONE' THEN done_by_role ELSE NULL END,
+           done_by_name = CASE WHEN $4 = 'DONE' THEN done_by_name ELSE NULL END
+       WHERE id = $5
+       RETURNING id, title, description, team, assignee_user_id, assignee_name_snapshot, status, eta, created_by_role, created_by_name, created_at, updated_at, done_at, done_by_role, done_by_name`,
+      [nextTeam, nextAssigneeUserId, nextAssignee, nextStatus, taskId]
+    );
+    const updatedTask = updateResult.rows[0];
+
+    await logTaskActivity(client, {
+      taskId,
+      actionType: 'REASSIGN',
+      fromValue: `team:${task.team}|assignee:${task.assignee_name_snapshot}`,
+      toValue: `team:${nextTeam}|assignee:${nextAssignee}`,
+      actorRole: auth.role,
+      actorName: auth.role
+    });
+
+    await createTaskNotification(client, {
+      taskId,
+      targetRole: nextTeam,
+      eventType: 'TASK_REASSIGNED',
+      eventMessage: `Task #${taskId} reassigned to ${nextTeam}`
+    });
+    await createTaskNotification(client, {
+      taskId,
+      targetRole: 'Admin',
+      eventType: 'TASK_REASSIGNED',
+      eventMessage: `Task #${taskId} reassigned to ${nextTeam} by ${auth.role}`
+    });
+
+    await client.query('COMMIT');
+    return res.json(updatedTask);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Failed to reassign task', error);
+    return res.status(500).json({ error: 'Failed to reassign task' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/tasks/:id/comments', (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+
+  const taskId = parsePositiveId(req.params.id);
+  if (!taskId) return res.status(400).json({ error: 'Invalid task id' });
+
+  uploadTaskCommentAttachment.single('attachment')(req, res, async (uploadError) => {
+    if (uploadError) {
+      return res.status(400).json({ error: uploadError.message || 'Failed to upload attachment' });
+    }
+
+    const commentText = normalizeEmpty(req.body.comment || req.body.comment_text);
+    const file = req.file || null;
+    if (!commentText && !file) {
+      return res.status(400).json({ error: 'comment or attachment is required' });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const taskResult = await client.query(
+        `SELECT id, team FROM tasks WHERE id = $1 LIMIT 1 FOR UPDATE`,
+        [taskId]
+      );
+      if (!taskResult.rows.length) {
+        await client.query('ROLLBACK');
+        if (file?.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
+        return res.status(404).json({ error: 'Task not found' });
+      }
+
+      const inserted = await client.query(
+        `INSERT INTO task_comments (
+          task_id, comment_text, attachment_name, attachment_mime_type, attachment_size, attachment_path,
+          created_by_role, created_by_name, created_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6,
+          $7, $8, NOW()
+        )
+        RETURNING id, task_id, comment_text, attachment_name, attachment_mime_type, attachment_size, created_by_role, created_by_name, created_at`,
+        [
+          taskId,
+          commentText,
+          file?.originalname || null,
+          file?.mimetype || null,
+          file?.size || null,
+          file?.path || null,
+          auth.role,
+          auth.role
+        ]
+      );
+      const comment = inserted.rows[0];
+
+      await logTaskActivity(client, {
+        taskId,
+        actionType: file ? 'COMMENT_UPLOAD' : 'COMMENT',
+        note: commentText || file?.originalname || 'Attachment added',
+        actorRole: auth.role,
+        actorName: auth.role
+      });
+
+      const targetTeam = taskResult.rows[0].team;
+      await createTaskNotification(client, {
+        taskId,
+        targetRole: targetTeam,
+        eventType: 'TASK_COMMENT',
+        eventMessage: `New comment on task #${taskId}`
+      });
+      await createTaskNotification(client, {
+        taskId,
+        targetRole: 'Admin',
+        eventType: 'TASK_COMMENT',
+        eventMessage: `New comment on task #${taskId} by ${auth.role}`
+      });
+
+      await client.query('COMMIT');
+      return res.status(201).json(comment);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      if (file?.path && fs.existsSync(file.path)) {
+        try { fs.unlinkSync(file.path); } catch (_error) {}
+      }
+      console.error('Failed to add task comment', error);
+      return res.status(500).json({ error: 'Failed to add task comment' });
+    } finally {
+      client.release();
+    }
+  });
+});
+
+app.get('/tasks/comments/:id/download', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+
+  const commentId = parsePositiveId(req.params.id);
+  if (!commentId) return res.status(400).json({ error: 'Invalid comment id' });
+  try {
+    const result = await pool.query(
+      `SELECT id, attachment_name, attachment_path
+       FROM task_comments
+       WHERE id = $1
+       LIMIT 1`,
+      [commentId]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Attachment not found' });
+    const comment = result.rows[0];
+    if (!comment.attachment_path) return res.status(404).json({ error: 'No attachment for this comment' });
+    const absolutePath = path.resolve(__dirname, comment.attachment_path);
+    if (!absolutePath.startsWith(path.resolve(DOC_UPLOAD_DIR))) {
+      return res.status(403).json({ error: 'Invalid attachment path' });
+    }
+    if (!fs.existsSync(absolutePath)) {
+      return res.status(404).json({ error: 'Attachment file missing' });
+    }
+    return res.download(absolutePath, comment.attachment_name || 'attachment');
+  } catch (error) {
+    console.error('Failed to download task comment attachment', error);
+    return res.status(500).json({ error: 'Failed to download attachment' });
+  }
+});
+
+app.get('/task-notifications', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  try {
+    const [rowsResult, unreadResult] = await Promise.all([
+      pool.query(
+        `SELECT id, task_id, target_role, event_type, event_message, is_read, created_at, read_at
+         FROM task_notifications
+         WHERE target_role = $1
+         ORDER BY created_at DESC, id DESC
+         LIMIT 50`,
+        [auth.role]
+      ),
+      pool.query(
+        `SELECT COUNT(*)::int AS unread_count
+         FROM task_notifications
+         WHERE target_role = $1 AND is_read = false`,
+        [auth.role]
+      )
+    ]);
+    return res.json({
+      unread_count: unreadResult.rows[0]?.unread_count || 0,
+      rows: rowsResult.rows
+    });
+  } catch (error) {
+    console.error('Failed to load task notifications', error);
+    return res.status(500).json({ error: 'Failed to load task notifications' });
+  }
+});
+
+app.post('/task-notifications/mark-read', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+
+  const notificationIds = Array.isArray(req.body.notification_ids) ? req.body.notification_ids : [];
+  try {
+    if (!notificationIds.length) {
+      await pool.query(
+        `UPDATE task_notifications
+         SET is_read = true, read_at = NOW()
+         WHERE target_role = $1 AND is_read = false`,
+        [auth.role]
+      );
+      return res.json({ ok: true });
+    }
+    const cleaned = notificationIds.map((id) => parsePositiveId(id)).filter(Boolean);
+    if (!cleaned.length) return res.status(400).json({ error: 'No valid notification ids' });
+    await pool.query(
+      `UPDATE task_notifications
+       SET is_read = true, read_at = NOW()
+       WHERE target_role = $1 AND id = ANY($2::int[])`,
+      [auth.role, cleaned]
+    );
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error('Failed to mark task notifications as read', error);
+    return res.status(500).json({ error: 'Failed to update notifications' });
   }
 });
 

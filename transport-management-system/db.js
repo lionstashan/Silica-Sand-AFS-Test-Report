@@ -211,6 +211,85 @@ async function initDb() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_trip_documents_expected_id ON trip_documents(expected_truck_id)
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      team TEXT NOT NULL,
+      assignee_user_id INTEGER,
+      assignee_name_snapshot TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'OPEN',
+      eta TIMESTAMPTZ NOT NULL,
+      created_by_role TEXT NOT NULL,
+      created_by_name TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      done_at TIMESTAMPTZ,
+      done_by_role TEXT,
+      done_by_name TEXT
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_tasks_team ON tasks(team)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_tasks_eta ON tasks(eta)
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS task_comments (
+      id SERIAL PRIMARY KEY,
+      task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      comment_text TEXT,
+      attachment_name TEXT,
+      attachment_mime_type TEXT,
+      attachment_size INTEGER,
+      attachment_path TEXT,
+      created_by_role TEXT NOT NULL,
+      created_by_name TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_task_comments_task_id ON task_comments(task_id)
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS task_activity (
+      id SERIAL PRIMARY KEY,
+      task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      action_type TEXT NOT NULL,
+      from_value TEXT,
+      to_value TEXT,
+      note TEXT,
+      actor_role TEXT NOT NULL,
+      actor_name TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_task_activity_task_id ON task_activity(task_id)
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS task_notifications (
+      id SERIAL PRIMARY KEY,
+      task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+      target_role TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      event_message TEXT,
+      is_read BOOLEAN DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      read_at TIMESTAMPTZ
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_task_notifications_role_read ON task_notifications(target_role, is_read)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_task_notifications_created_at ON task_notifications(created_at DESC)
+  `);
   console.log('Connected to database');
 }
 
