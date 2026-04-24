@@ -1245,6 +1245,7 @@ tr:nth-child(even) {
 
   input,
   select,
+  textarea,
   .filter-group input,
   .filter-group select {
     width: 100%;
