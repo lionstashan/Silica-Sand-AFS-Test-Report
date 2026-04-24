@@ -1,9 +1,12 @@
 // Role-based access control with PIN authentication
 let userRole = null;
 let refreshInterval;
+let taskNotificationPoll = null;
 const timelineModal = document.getElementById('timeline-modal');
 const timelineModalTitle = document.getElementById('timeline-modal-title');
 const timelineModalBody = document.getElementById('timeline-modal-body');
+const taskNotificationsBtn = document.getElementById('task-notifications-btn');
+const taskNotificationBadge = document.getElementById('task-notification-badge');
 const IST_TIMEZONE = 'Asia/Kolkata';
 const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Admin'];
 const DISPATCH_ZONE_STATUSES = [
@@ -111,6 +114,30 @@ function showAppContent() {
     roleIndicator.style.display = 'inline-block';
     roleIndicator.textContent = `Role: ${userRole}`;
   }
+  if (taskNotificationsBtn) {
+    taskNotificationsBtn.style.display = 'inline-block';
+  }
+}
+
+function renderTaskNotificationBadge(unreadCount) {
+  if (!taskNotificationBadge) return;
+  const count = Number(unreadCount || 0);
+  if (count <= 0) {
+    taskNotificationBadge.style.display = 'none';
+    taskNotificationBadge.textContent = '0';
+    return;
+  }
+  taskNotificationBadge.style.display = 'inline-block';
+  taskNotificationBadge.textContent = String(count);
+}
+
+async function loadTaskNotifications() {
+  try {
+    const response = await fetch('/task-notifications', { headers: getAuthHeaders() });
+    if (!response.ok) return;
+    const data = await response.json();
+    renderTaskNotificationBadge(data.unread_count || 0);
+  } catch (_error) {}
 }
 
 function validatePIN(role, pin) {
@@ -120,6 +147,7 @@ function validatePIN(role, pin) {
 function logout() {
   localStorage.removeItem('userRole');
   userRole = null;
+  if (taskNotificationPoll) clearInterval(taskNotificationPoll);
   window.location.reload();
 }
 
@@ -173,9 +201,18 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     logout();
   });
+  taskNotificationsBtn?.addEventListener('click', () => {
+    window.location.href = '/';
+  });
 
   // Initialize role on page load
   initializeRole();
+  loadTaskNotifications();
+  if (taskNotificationPoll) clearInterval(taskNotificationPoll);
+  taskNotificationPoll = setInterval(() => {
+    if (!getCurrentRole()) return;
+    loadTaskNotifications();
+  }, 15000);
 });
 
 function getStatusBadge(status, labelOverride = null) {

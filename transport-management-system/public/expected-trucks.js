@@ -12,12 +12,15 @@ const IST_TIMEZONE = 'Asia/Kolkata';
 let userRole = null;
 let rows = [];
 let refreshTimer = null;
+let taskNotificationPoll = null;
 
 const table = document.getElementById('expected-table');
 const mobileList = document.getElementById('expected-mobile-list');
 const statusFilter = document.getElementById('status-filter');
 const truckSearch = document.getElementById('truck-search');
 const messageEl = document.getElementById('message');
+const taskNotificationsBtn = document.getElementById('task-notifications-btn');
+const taskNotificationBadge = document.getElementById('task-notification-badge');
 
 function escapeHtml(value) {
   return String(value || '')
@@ -84,6 +87,28 @@ function showAppContent() {
   roleIndicator.style.display = 'inline-block';
   roleIndicator.textContent = `Role: ${userRole}`;
   document.getElementById('logout-link').style.display = 'inline-block';
+  if (taskNotificationsBtn) taskNotificationsBtn.style.display = 'inline-block';
+}
+
+function renderTaskNotificationBadge(unreadCount) {
+  if (!taskNotificationBadge) return;
+  const count = Number(unreadCount || 0);
+  if (count <= 0) {
+    taskNotificationBadge.style.display = 'none';
+    taskNotificationBadge.textContent = '0';
+    return;
+  }
+  taskNotificationBadge.style.display = 'inline-block';
+  taskNotificationBadge.textContent = String(count);
+}
+
+async function loadTaskNotifications() {
+  try {
+    const response = await fetch('/task-notifications', { headers: getAuthHeaders() });
+    if (!response.ok) return;
+    const data = await response.json();
+    renderTaskNotificationBadge(data.unread_count || 0);
+  } catch (_error) {}
 }
 
 function initializeRole() {
@@ -100,6 +125,7 @@ function initializeRole() {
 function logout() {
   localStorage.removeItem('userRole');
   userRole = null;
+  if (taskNotificationPoll) clearInterval(taskNotificationPoll);
   window.location.reload();
 }
 
@@ -277,12 +303,21 @@ document.addEventListener('DOMContentLoaded', () => {
     event.preventDefault();
     logout();
   });
+  taskNotificationsBtn?.addEventListener('click', () => {
+    window.location.href = '/';
+  });
   document.getElementById('refresh-btn').addEventListener('click', loadExpectedTrucks);
   statusFilter.addEventListener('change', applyFilters);
   truckSearch.addEventListener('input', applyFilters);
   window.addEventListener('resize', applyFilters);
 
   initializeRole();
+  loadTaskNotifications();
+  if (taskNotificationPoll) clearInterval(taskNotificationPoll);
+  taskNotificationPoll = setInterval(() => {
+    if (!getStoredRole()) return;
+    loadTaskNotifications();
+  }, 15000);
   if (userRole) {
     loadExpectedTrucks();
     startAutoRefresh();
