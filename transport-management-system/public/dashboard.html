@@ -17,7 +17,15 @@
         <button class="role-btn" data-role="Dispatch">Dispatch</button>
         <button class="role-btn" data-role="Loading">Loading</button>
         <button class="role-btn" data-role="Accounts">Accounts</button>
+        <button class="role-btn" data-role="Manager">Manager</button>
         <button class="role-btn" data-role="Admin">Admin</button>
+      </div>
+      <div class="public-portal-links">
+        <p>Portal Access</p>
+        <div class="public-portal-links-row">
+          <a href="/expense" class="public-portal-link">Expense Portal</a>
+          <a href="/customer" class="public-portal-link">Customer Portal</a>
+        </div>
       </div>
     </div>
   </div>
@@ -46,7 +54,8 @@
     </div>
     <nav>
       <a href="/" class="nav-link">← Back to Main</a>
-      <a href="/" class="nav-link">Tasks</a>
+      <a href="/?openTasks=1" class="nav-link">Tasks</a>
+      <a href="/expense" id="expense-link" class="nav-link" style="display:none;">Expense Portal</a>
       <a href="/expected-trucks-page" class="nav-link">Expected Trucks</a>
       <a href="/customer" class="nav-link">Customer Portal</a>
     </nav>
@@ -141,6 +150,6 @@
   </div>
 
   <footer class="footer-watermark">© Indus Silica Sand</footer>
-  <script src="dashboard.js?v=20260417-5"></script>
+  <script src="dashboard.js?v=20260508-2"></script>
 </body>
 </html>

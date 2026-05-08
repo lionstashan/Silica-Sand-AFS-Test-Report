@@ -19,7 +19,7 @@ const BASE_TRANSPORTER_OPTIONS = [
   'Jambeshwar Road Lines',
   'Ravi Road Lines'
 ];
-const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Admin'];
+const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Manager', 'Admin'];
 const TASK_STATUSES = ['OPEN', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED'];
 
 const STATUS_FLOW = [
@@ -73,6 +73,7 @@ const ROLE_PINS = {
   Dispatch: 'D9M4',
   Loading: 'L5Q8',
   Accounts: 'A6R1',
+  Manager: 'M2N6',
   Admin: '2802'
 };
 
@@ -82,6 +83,7 @@ const ROLE_ALLOWED_TARGETS = {
   Loading: ['WAITING', 'LOADING_IN_PROGRESS', 'LOADING_COMPLETED'],
   Weighbridge: ['TARE_WEIGHT_DONE', 'LOAD_FIX_REQUIRED', 'GROSS_WEIGHT_DONE'],
   Accounts: ['BILLING_COMPLETED'],
+  Manager: [],
   Admin: STATUS_FLOW
 };
 const DOC_UPLOAD_ROLES = ['Dispatch', 'Weighbridge', 'Accounts', 'Admin'];
@@ -157,6 +159,7 @@ let locationOptions = [];
 let tasksRows = [];
 let taskNotificationRows = [];
 let tasksNotificationPoll = null;
+let expenseNotificationPoll = null;
 let currentTaskDetail = null;
 let hasUserInteractedForSound = false;
 let lastUnreadTaskCount = null;
@@ -195,6 +198,60 @@ function getAuthHeaders() {
     'x-user-role': role,
     'x-user-pin': pin
   };
+}
+
+async function ensureExpenseTokenForRole() {
+  const role = getCurrentRole();
+  if (!['Admin', 'Accounts', 'Manager'].includes(role)) return null;
+  const existing = localStorage.getItem('expenseToken');
+  if (existing) return existing;
+  try {
+    const response = await fetch('/expense/sso', { method: 'POST', headers: getAuthHeaders() });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.token) return null;
+    localStorage.setItem('expenseToken', data.token);
+    localStorage.setItem('expenseUser', JSON.stringify(data.user || {}));
+    return data.token;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function renderExpenseUnreadBadge(unreadCount) {
+  const expenseLink = document.getElementById('expense-link');
+  if (!expenseLink) return;
+  const role = getCurrentRole();
+  if (!['Admin', 'Accounts', 'Manager'].includes(role)) return;
+  let badge = document.getElementById('expense-unread-badge');
+  if (!badge) {
+    badge = document.createElement('span');
+    badge.id = 'expense-unread-badge';
+    badge.className = 'notif-badge';
+    badge.style.marginLeft = '6px';
+    expenseLink.appendChild(badge);
+  }
+  const count = Number(unreadCount || 0);
+  if (count <= 0) {
+    badge.style.display = 'none';
+    badge.textContent = '0';
+    return;
+  }
+  badge.style.display = 'inline-block';
+  badge.textContent = String(count);
+}
+
+async function loadExpenseUnreadCount() {
+  const role = getCurrentRole();
+  if (!['Admin', 'Accounts', 'Manager'].includes(role)) return;
+  const token = await ensureExpenseTokenForRole();
+  if (!token) return;
+  try {
+    const response = await fetch('/expenses/notifications', { headers: { 'x-expense-token': token } });
+    if (!response.ok) return;
+    const rows = await response.json().catch(() => []);
+    const unread = Array.isArray(rows) ? rows.filter((r) => !r.is_read).length : 0;
+    renderExpenseUnreadBadge(unread);
+  } catch (_error) {}
 }
 
 function escapeHtml(value) {
@@ -1054,6 +1111,7 @@ function applyRoleUI() {
   const gatePanel = form?.closest('.panel');
   const dashboardLink = document.getElementById('dashboard-link');
   const customerPortalLink = document.getElementById('customer-portal-link');
+  const expenseLink = document.getElementById('expense-link');
   const canSeeTasks = !!role;
 
   if (gatePanel && !canCreate) {
@@ -1065,6 +1123,9 @@ function applyRoleUI() {
   }
   if (customerPortalLink) {
     customerPortalLink.style.display = role === 'Gate' ? 'none' : 'inline-block';
+  }
+  if (expenseLink) {
+    expenseLink.style.display = ['Admin', 'Accounts', 'Manager'].includes(role) ? 'inline-block' : 'none';
   }
   if (tasksLink) {
     tasksLink.style.display = canSeeTasks ? 'inline-block' : 'none';
@@ -1079,6 +1140,37 @@ function applyRoleUI() {
   if (roleIndicator && role) {
     roleIndicator.style.display = 'inline-block';
     roleIndicator.textContent = `Role: ${role}`;
+  }
+}
+
+async function openExpenseWithSso(event) {
+  if (event) event.preventDefault();
+  const role = getCurrentRole();
+  if (!['Admin', 'Accounts', 'Manager'].includes(role)) {
+    alert('You are not authorized for Expense access.');
+    return;
+  }
+  try {
+    const response = await fetch('/expense/sso', {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+    const rawText = await response.text();
+    let data = {};
+    try {
+      data = rawText ? JSON.parse(rawText) : {};
+    } catch (_err) {
+      data = {};
+    }
+    if (!response.ok || !data.token) {
+      const backendMessage = data.error || rawText || `HTTP ${response.status}`;
+      throw new Error(`Expense SSO failed: ${backendMessage}`);
+    }
+    localStorage.setItem('expenseToken', data.token);
+    localStorage.setItem('expenseUser', JSON.stringify(data.user || {}));
+    window.location.href = '/expense';
+  } catch (error) {
+    alert(error.message || 'You are not authorized for Expense access.');
   }
 }
 
@@ -1099,6 +1191,15 @@ function logout() {
   localStorage.removeItem('userRole');
   userRole = null;
   window.location.reload();
+}
+
+async function autoOpenTasksFromQuery() {
+  const params = new URLSearchParams(window.location.search || '');
+  if (params.get('openTasks') !== '1') return;
+  try {
+    await Promise.all([loadTasks(), loadTaskNotifications()]);
+    openTasksModal();
+  } catch (_error) {}
 }
 
 function initializeRole() {
@@ -3385,6 +3486,7 @@ document.addEventListener('DOMContentLoaded', () => {
     event.preventDefault();
     logout();
   });
+  document.getElementById('expense-link')?.addEventListener('click', openExpenseWithSso);
 
   tasksLink?.addEventListener('click', async (event) => {
     event.preventDefault();
@@ -3452,12 +3554,20 @@ document.addEventListener('DOMContentLoaded', () => {
   loadTrips();
   loadTaskAssignees();
   loadTaskNotifications();
+  autoOpenTasksFromQuery();
+  loadExpenseUnreadCount();
 
   if (tasksNotificationPoll) clearInterval(tasksNotificationPoll);
+  if (expenseNotificationPoll) clearInterval(expenseNotificationPoll);
   tasksNotificationPoll = setInterval(() => {
     const role = getCurrentRole();
     if (!role) return;
     loadTaskNotifications();
+  }, 15000);
+  expenseNotificationPoll = setInterval(() => {
+    const role = getCurrentRole();
+    if (!role) return;
+    loadExpenseUnreadCount();
   }, 15000);
 
   setInterval(updateTimeMetrics, 5000);

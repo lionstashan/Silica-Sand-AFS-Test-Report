@@ -9,13 +9,14 @@ const { initDb, pool } = require('./db');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Admin'];
+const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Manager', 'Admin'];
 const ROLE_PINS = {
   Gate: 'G8P2',
   Weighbridge: 'W3K7',
   Dispatch: 'D9M4',
   Loading: 'L5Q8',
   Accounts: 'A6R1',
+  Manager: 'M2N6',
   Admin: '2802'
 };
 
@@ -71,11 +72,27 @@ const ROLE_ALLOWED_TARGETS = {
   Loading: ['WAITING', 'LOADING_IN_PROGRESS', 'LOADING_COMPLETED'],
   Weighbridge: ['TARE_WEIGHT_DONE', 'LOAD_FIX_REQUIRED', 'GROSS_WEIGHT_DONE'],
   Accounts: ['BILLING_COMPLETED'],
+  Manager: [],
   Admin: STATUS_FLOW
 };
 
 const FINAL_STATUSES = new Set(['COMPLETED', 'CANCELLED', 'EXITED']);
 const EXPECTED_TRUCK_STATUSES = ['SUBMITTED', 'REVIEW_PENDING', 'APPROVED', 'CANCELLED', 'EXPIRED', 'GATE_IN_DONE'];
+const EXPENSE_ROLES = ['Employee', 'Accounts', 'Manager', 'Admin'];
+const EXPENSE_STATUSES = [
+  'DRAFT',
+  'SUBMITTED',
+  'ACCOUNTS_REVIEW',
+  'MANAGER_REVIEW',
+  'ADMIN_REVIEW',
+  'NEED_MORE_INFO',
+  'PAYMENT_PENDING',
+  'PAYMENT_INITIATED',
+  'PAYMENT_COMPLETED',
+  'REJECTED'
+];
+const EXPENSE_FINAL_STATUSES = new Set(['PAYMENT_COMPLETED', 'REJECTED']);
+const EXPENSE_DOC_TYPES = new Set(['BILL', 'PAYMENT_PROOF', 'SUPPORTING']);
 const DOC_UPLOAD_ROLES = new Set(['Dispatch', 'Weighbridge', 'Accounts', 'Admin']);
 const DOC_VIEW_ROLES = new Set(['Dispatch', 'Weighbridge', 'Accounts', 'Admin']);
 const DOC_ALLOWED_EXTENSIONS = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.xlsx', '.xls']);
@@ -87,11 +104,23 @@ const DOC_ALLOWED_MIME_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 ]);
 const DOC_MAX_SIZE_BYTES = 10 * 1024 * 1024;
+const EXPENSE_DOC_ALLOWED_EXTENSIONS = new Set(['.pdf', '.png', '.jpg', '.jpeg']);
+const EXPENSE_DOC_ALLOWED_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/png',
+  'image/jpeg'
+]);
+const EXPENSE_DOC_MAX_SIZE_BYTES = 5 * 1024 * 1024;
 const DOC_UPLOAD_DIR = path.resolve(process.env.DOC_UPLOAD_DIR || path.join(__dirname, 'uploads', 'docs'));
 const TASK_STATUSES = ['OPEN', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED'];
 const TASK_TEAMS = VALID_ROLES;
 const CUSTOMER_TOKEN_SECRET = String(process.env.CUSTOMER_TOKEN_SECRET || 'change-me-customer-token-secret');
 const CUSTOMER_TOKEN_TTL_SECONDS = Number.parseInt(process.env.CUSTOMER_TOKEN_TTL_SECONDS || '604800', 10); // 7 days
+const EXPENSE_TOKEN_SECRET = String(process.env.EXPENSE_TOKEN_SECRET || 'change-me-expense-token-secret');
+const EXPENSE_TOKEN_TTL_SECONDS = Number.parseInt(process.env.EXPENSE_TOKEN_TTL_SECONDS || '604800', 10); // 7 days
+const EXPENSE_LOGIN_MAX_ATTEMPTS = 5;
+const EXPENSE_LOGIN_WINDOW_MINUTES = 15;
+const EXPENSE_LOGIN_LOCK_MINUTES = 15;
 const BCRYPT_COST = Number.parseInt(process.env.BCRYPT_COST || '10', 10);
 fs.mkdirSync(DOC_UPLOAD_DIR, { recursive: true });
 
@@ -136,7 +165,28 @@ const uploadTaskCommentAttachment = multer({
   }
 });
 
+const uploadExpenseDocument = multer({
+  storage: documentStorage,
+  limits: { fileSize: EXPENSE_DOC_MAX_SIZE_BYTES },
+  fileFilter: (_req, file, cb) => {
+    const ext = String(path.extname(file.originalname || '')).toLowerCase();
+    const mime = String(file.mimetype || '').toLowerCase();
+    if (!EXPENSE_DOC_ALLOWED_EXTENSIONS.has(ext) || !EXPENSE_DOC_ALLOWED_MIME_TYPES.has(mime)) {
+      cb(new Error('Unsupported file type. Allowed: PDF, JPG, JPEG, PNG'));
+      return;
+    }
+    cb(null, true);
+  }
+});
+
 app.use(express.json());
+app.use((req, res, next) => {
+  if (isExpenseRoute(req.path)) {
+    req.expenseRequestId = crypto.randomUUID();
+    res.setHeader('x-request-id', req.expenseRequestId);
+  }
+  next();
+});
 app.use((req, res, next) => {
   if (req.path.endsWith('.js') || req.path.endsWith('.css') || req.path.endsWith('.html')) {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -449,6 +499,7 @@ async function getActiveCustomerUserByIdAndUsername(id, username) {
 
 async function authenticateCustomerWithPassword(username, password) {
   try {
+    const { page, limit } = getPagination(req);
     const result = await pool.query(
       `SELECT id, customer_name, username, display_name, is_active, password
        FROM customer_users
@@ -520,6 +571,356 @@ async function readCustomerFromRequest(req) {
     return { error: 'Missing customer credentials', status: 401 };
   }
   return authenticateCustomerWithPassword(username, password);
+}
+
+function normalizeExpenseStatus(status) {
+  const normalized = String(status || '').toUpperCase();
+  return EXPENSE_STATUSES.includes(normalized) ? normalized : null;
+}
+
+const EXPENSE_TRANSITIONS = {
+  DRAFT: ['ACCOUNTS_REVIEW'],
+  SUBMITTED: ['ACCOUNTS_REVIEW'],
+  ACCOUNTS_REVIEW: ['MANAGER_REVIEW', 'NEED_MORE_INFO', 'REJECTED'],
+  MANAGER_REVIEW: ['ADMIN_REVIEW', 'NEED_MORE_INFO', 'REJECTED'],
+  ADMIN_REVIEW: ['PAYMENT_PENDING', 'NEED_MORE_INFO', 'REJECTED'],
+  NEED_MORE_INFO: ['ACCOUNTS_REVIEW', 'MANAGER_REVIEW', 'ADMIN_REVIEW'],
+  PAYMENT_PENDING: ['PAYMENT_INITIATED'],
+  PAYMENT_INITIATED: ['PAYMENT_COMPLETED'],
+  PAYMENT_COMPLETED: [],
+  REJECTED: []
+};
+
+function isValidExpenseTransition(fromStatus, toStatus) {
+  const allowed = EXPENSE_TRANSITIONS[fromStatus] || [];
+  return allowed.includes(toStatus);
+}
+
+function parseExpectedVersion(req) {
+  const raw = req.body?.version;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+function assertExpenseVersion(expectedVersion, currentVersion) {
+  return expectedVersion !== null && Number(expectedVersion) === Number(currentVersion);
+}
+
+function canEditExpenseClaimByStatus(status) {
+  return status === 'DRAFT' || status === 'NEED_MORE_INFO';
+}
+
+function getExpenseReviewStageFromStatus(status) {
+  if (status === 'ACCOUNTS_REVIEW') return 'ACCOUNTS';
+  if (status === 'MANAGER_REVIEW') return 'MANAGER';
+  if (status === 'ADMIN_REVIEW') return 'ADMIN';
+  return null;
+}
+
+function createExpenseToken(user) {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    sub: user.id,
+    role: user.role,
+    username: user.username,
+    iat: now,
+    exp: now + EXPENSE_TOKEN_TTL_SECONDS
+  };
+  const headerPart = toBase64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const payloadPart = toBase64Url(JSON.stringify(payload));
+  const signaturePart = toBase64Url(
+    crypto
+      .createHmac('sha256', EXPENSE_TOKEN_SECRET)
+      .update(`${headerPart}.${payloadPart}`)
+      .digest()
+  );
+  return `${headerPart}.${payloadPart}.${signaturePart}`;
+}
+
+function verifyExpenseToken(token) {
+  const parts = String(token || '').split('.');
+  if (parts.length !== 3) return { error: 'Invalid expense token format', status: 401 };
+  const [headerPart, payloadPart, signaturePart] = parts;
+  const expectedSignature = toBase64Url(
+    crypto
+      .createHmac('sha256', EXPENSE_TOKEN_SECRET)
+      .update(`${headerPart}.${payloadPart}`)
+      .digest()
+  );
+  if (signaturePart !== expectedSignature) {
+    return { error: 'Invalid expense token signature', status: 401 };
+  }
+  try {
+    const payload = JSON.parse(fromBase64Url(payloadPart).toString('utf8'));
+    const now = Math.floor(Date.now() / 1000);
+    if (!payload || !payload.sub || !payload.username || !payload.role) {
+      return { error: 'Invalid expense token payload', status: 401 };
+    }
+    if (!payload.exp || payload.exp <= now) {
+      return { error: 'Expense token expired', status: 401 };
+    }
+    return { payload };
+  } catch (_err) {
+    return { error: 'Invalid expense token payload', status: 401 };
+  }
+}
+
+async function getActiveExpenseUserById(id) {
+  const result = await pool.query(
+    `SELECT id, employee_code, full_name, username, role, is_active
+     FROM expense_users
+     WHERE id = $1
+     LIMIT 1`,
+    [id]
+  );
+  if (!result.rows.length) {
+    return { error: 'Expense user not found', status: 403 };
+  }
+  const user = result.rows[0];
+  if (!user.is_active) {
+    return { error: 'Expense user inactive', status: 403 };
+  }
+  return { user };
+}
+
+async function authenticateExpenseWithPassword(username, password) {
+  const result = await pool.query(
+    `SELECT id, employee_code, full_name, username, role, is_active, password
+     FROM expense_users
+     WHERE username = $1
+     LIMIT 1`,
+    [username]
+  );
+  if (!result.rows.length) {
+    return { error: 'Invalid expense credentials', status: 403 };
+  }
+  const user = result.rows[0];
+  if (!user.is_active) {
+    return { error: 'Expense user inactive', status: 403 };
+  }
+  const storedPassword = String(user.password || '');
+  const isHashed = /^\$2[abxy]\$\d{2}\$/.test(storedPassword);
+  const matches = isHashed ? await bcrypt.compare(password, storedPassword) : storedPassword === password;
+  if (!matches) {
+    return { error: 'Invalid expense credentials', status: 403 };
+  }
+  if (!isHashed) {
+    const hash = await bcrypt.hash(password, BCRYPT_COST);
+    await pool.query(`UPDATE expense_users SET password = $1, updated_at = NOW() WHERE id = $2`, [hash, user.id]);
+  }
+  return {
+    user: {
+      id: user.id,
+      employee_code: user.employee_code,
+      full_name: user.full_name,
+      username: user.username,
+      role: user.role
+    }
+  };
+}
+
+async function readExpenseUserFromRequest(req) {
+  const bearer = String(req.header('authorization') || '').trim();
+  const tokenHeader = String(req.header('x-expense-token') || '').trim();
+  const token = tokenHeader || (bearer.toLowerCase().startsWith('bearer ') ? bearer.slice(7).trim() : '');
+  if (token) {
+    const verified = verifyExpenseToken(token);
+    if (verified.error) return verified;
+    const tokenHash = hashExpenseToken(token);
+    const revoked = await pool.query(
+      `SELECT id
+       FROM expense_token_revocations
+       WHERE token_hash = $1
+         AND expires_at > NOW()
+       LIMIT 1`,
+      [tokenHash]
+    );
+    if (revoked.rows.length) {
+      return { error: 'Expense token revoked. Please login again.', status: 401 };
+    }
+    const fromDb = await getActiveExpenseUserById(verified.payload.sub);
+    if (fromDb.error) return fromDb;
+    if (fromDb.user.username !== verified.payload.username || fromDb.user.role !== verified.payload.role) {
+      return { error: 'Expense user token mismatch', status: 401 };
+    }
+    return fromDb;
+  }
+  const username = String(req.header('x-expense-username') || '').trim();
+  const password = String(req.header('x-expense-password') || '').trim();
+  if (!username || !password) return { error: 'Missing expense credentials', status: 401 };
+  return authenticateExpenseWithPassword(username, password);
+}
+
+function canExpenseRoleReview(role, status) {
+  if (role === 'Accounts' && status === 'ACCOUNTS_REVIEW') return true;
+  if (role === 'Manager' && status === 'MANAGER_REVIEW') return true;
+  if (role === 'Admin' && status === 'ADMIN_REVIEW') return true;
+  return false;
+}
+
+async function addExpenseHistory(client, {
+  claimId, actionType, fromStatus = null, toStatus = null, actorUserId, actorRole, remarks = null, fieldChanges = {}
+}) {
+  const changes = fieldChanges && typeof fieldChanges === 'object' ? { ...fieldChanges } : {};
+  await client.query(
+    `INSERT INTO expense_claim_history (
+      claim_id, action_type, from_status, to_status, actor_user_id, actor_role, remarks, field_changes_json
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [claimId, actionType, fromStatus, toStatus, actorUserId, actorRole, remarks, JSON.stringify(changes)]
+  );
+}
+
+async function addExpenseNotification(client, {
+  targetRole, targetUserId = null, eventType, claimId, title = null, message
+}) {
+  await client.query(
+    `INSERT INTO expense_notifications(target_role, target_user_id, event_type, title, entity_id, message)
+     VALUES ($1,$2,$3,$4,$5,$6)`,
+    [targetRole, targetUserId, eventType, title, claimId, message]
+  );
+}
+
+function canExpenseUserAccessClaim(user, claim) {
+  if (!user || !claim) return false;
+  if (user.role === 'Admin') return true;
+  if (user.role === 'Employee') return claim.employee_id === user.id;
+  if (user.role === 'Accounts') {
+    if (['ACCOUNTS_REVIEW', 'PAYMENT_PENDING', 'PAYMENT_INITIATED', 'PAYMENT_COMPLETED'].includes(claim.status)) return true;
+    if (Number(claim.accounts_reviewed_by) === Number(user.id) || Number(claim.payment_initiated_by) === Number(user.id) || Number(claim.payment_completed_by) === Number(user.id)) return true;
+    return false;
+  }
+  if (user.role === 'Manager') {
+    if (['MANAGER_REVIEW', 'ADMIN_REVIEW', 'PAYMENT_PENDING', 'PAYMENT_INITIATED', 'PAYMENT_COMPLETED', 'REJECTED'].includes(claim.status)) return true;
+    if (Number(claim.manager_reviewed_by) === Number(user.id)) return true;
+    return false;
+  }
+  return false;
+}
+
+function getRequestIp(req) {
+  const forwarded = String(req.header('x-forwarded-for') || '').trim();
+  if (forwarded) return forwarded.split(',')[0].trim();
+  return req.socket?.remoteAddress || req.ip || 'unknown';
+}
+
+function isExpenseRoute(pathname) {
+  return pathname.startsWith('/expense') || pathname.startsWith('/expenses');
+}
+
+function getPagination(req, defaults = { page: 1, limit: 25 }, maxLimit = 100) {
+  const rawPage = Number.parseInt(String(req.query.page || defaults.page), 10);
+  const rawLimit = Number.parseInt(String(req.query.limit || defaults.limit), 10);
+  const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : defaults.page;
+  const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, maxLimit) : defaults.limit;
+  const offset = (page - 1) * limit;
+  return { page, limit, offset };
+}
+
+function getPaginationMeta({ page, limit, total }) {
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  return {
+    page,
+    limit,
+    total,
+    totalPages,
+    hasNextPage: page < totalPages,
+    hasPrevPage: page > 1
+  };
+}
+
+function hashExpenseToken(token) {
+  return crypto.createHash('sha256').update(String(token || ''), 'utf8').digest('hex');
+}
+
+function safeCsvValue(value) {
+  if (value === null || value === undefined) return '';
+  let raw = String(value);
+  if (/^[=+\-@]/.test(raw)) raw = `'${raw}`;
+  if (/[",\n]/.test(raw)) return `"${raw.replace(/"/g, '""')}"`;
+  return raw;
+}
+
+async function recordExpenseLoginAttempt({ username, ipAddress, success, failureReason = null, userAgent = null }) {
+  try {
+    await pool.query(
+      `INSERT INTO expense_login_attempts(username, ip_address, success, failure_reason, user_agent)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [normalizeEmpty(username), normalizeEmpty(ipAddress), success, normalizeEmpty(failureReason), normalizeEmpty(userAgent)]
+    );
+  } catch (error) {
+    console.error('Failed to log expense login attempt', error);
+  }
+}
+
+async function checkExpenseLoginLock(username, ipAddress) {
+  const result = await pool.query(
+    `SELECT created_at
+     FROM expense_login_attempts
+     WHERE username = $1
+       AND ip_address = $2
+       AND success = false
+       AND created_at >= NOW() - ($3::text || ' minutes')::interval
+     ORDER BY created_at DESC`,
+    [username, ipAddress, String(EXPENSE_LOGIN_WINDOW_MINUTES)]
+  );
+  if (result.rows.length < EXPENSE_LOGIN_MAX_ATTEMPTS) return { locked: false };
+  const latest = new Date(result.rows[0].created_at);
+  const lockUntil = new Date(latest.getTime() + (EXPENSE_LOGIN_LOCK_MINUTES * 60 * 1000));
+  if (Date.now() >= lockUntil.getTime()) return { locked: false };
+  return { locked: true, lockUntil };
+}
+
+async function migratePlainExpensePasswords() {
+  const rows = await pool.query(`SELECT id, password FROM expense_users`);
+  for (const row of rows.rows) {
+    const stored = String(row.password || '');
+    const isHashed = /^\$2[abxy]\$\d{2}\$/.test(stored);
+    if (isHashed) continue;
+    const hash = await bcrypt.hash(stored, BCRYPT_COST);
+    await pool.query(`UPDATE expense_users SET password = $1, updated_at = NOW() WHERE id = $2`, [hash, row.id]);
+  }
+}
+
+function escapeCsv(value) {
+  if (value === null || value === undefined) return '';
+  const raw = String(value);
+  if (/[",\n]/.test(raw)) return `"${raw.replace(/"/g, '""')}"`;
+  return raw;
+}
+
+function getExpenseAccessWhereSql(user, alias = 'ec', startIndex = 1) {
+  const params = [];
+  if (user.role === 'Admin') return { where: '1=1', params, nextIndex: startIndex };
+  if (user.role === 'Employee') {
+    params.push(user.id);
+    return { where: `${alias}.employee_id = $${startIndex}`, params, nextIndex: startIndex + 1 };
+  }
+  if (user.role === 'Accounts') {
+    params.push(user.id);
+    return {
+      where: `(
+        ${alias}.status IN ('ACCOUNTS_REVIEW', 'PAYMENT_PENDING', 'PAYMENT_INITIATED', 'PAYMENT_COMPLETED')
+        OR ${alias}.accounts_reviewed_by = $${startIndex}
+        OR ${alias}.payment_initiated_by = $${startIndex}
+        OR ${alias}.payment_completed_by = $${startIndex}
+      )`,
+      params,
+      nextIndex: startIndex + 1
+    };
+  }
+  if (user.role === 'Manager') {
+    params.push(user.id);
+    return {
+      where: `(
+        ${alias}.status IN ('MANAGER_REVIEW', 'ADMIN_REVIEW', 'PAYMENT_PENDING', 'PAYMENT_INITIATED', 'PAYMENT_COMPLETED', 'REJECTED')
+        OR ${alias}.manager_reviewed_by = $${startIndex}
+      )`,
+      params,
+      nextIndex: startIndex + 1
+    };
+  }
+  return { where: '1=0', params, nextIndex: startIndex };
 }
 
 async function canCustomerAccessTripDocuments(customerUserId, tripId) {
@@ -885,6 +1286,14 @@ app.get('/expected-trucks-page', (req, res) => {
 
 app.get('/customer', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'customer.html'));
+});
+
+app.get('/expense', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'expense.html'));
+});
+
+app.get('/expense-dashboard', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'expense-dashboard.html'));
 });
 
 app.post('/trip', async (req, res) => {
@@ -1576,7 +1985,7 @@ app.post('/trip/:id/documents', (req, res) => {
     return res.status(400).json({ error: 'Invalid trip id' });
   }
 
-  uploadDocument.single('file')(req, res, async (uploadError) => {
+  uploadExpenseDocument.single('file')(req, res, async (uploadError) => {
     if (uploadError) {
       const message = uploadError.message || 'Failed to upload file';
       return res.status(400).json({ error: message });
@@ -2936,14 +3345,1347 @@ async function runExpectedTruckAutomation() {
   }
 }
 
+async function runExpenseSecurityCleanup() {
+  try {
+    await pool.query(`DELETE FROM expense_token_revocations WHERE expires_at <= NOW()`);
+    await pool.query(`DELETE FROM expense_login_attempts WHERE created_at < NOW() - INTERVAL '90 days'`);
+  } catch (error) {
+    console.error('Expense security cleanup failed', error);
+  }
+}
+
+function mapTransportRoleToExpenseRole(transportRole) {
+  if (transportRole === 'Admin') return 'Admin';
+  if (transportRole === 'Accounts') return 'Accounts';
+  if (transportRole === 'Manager') return 'Manager';
+  return null;
+}
+
+async function ensureExpenseSsoUser(client, transportRole) {
+  const expenseRole = mapTransportRoleToExpenseRole(transportRole);
+  if (!expenseRole) return null;
+  const username = `sso_${expenseRole.toLowerCase()}`;
+  const fullName = `Transport ${expenseRole} SSO`;
+  const employeeCode = `SSO-${expenseRole.toUpperCase()}`;
+  const existing = await client.query(
+    `SELECT id, employee_code, full_name, username, role, is_active
+     FROM expense_users
+     WHERE username = $1 OR employee_code = $2
+     ORDER BY CASE WHEN username = $1 THEN 0 ELSE 1 END, id ASC
+     LIMIT 1`,
+    [username, employeeCode]
+  );
+  if (existing.rows.length) {
+    const user = existing.rows[0];
+    if (
+      !user.is_active ||
+      user.role !== expenseRole ||
+      user.username !== username ||
+      user.employee_code !== employeeCode ||
+      user.full_name !== fullName
+    ) {
+      await client.query(
+        `UPDATE expense_users
+         SET role = $1, is_active = true, full_name = $2, employee_code = $3, username = $4, updated_at = NOW()
+         WHERE id = $5`,
+        [expenseRole, fullName, employeeCode, username, user.id]
+      );
+    }
+    const refreshed = await client.query(
+      `SELECT id, employee_code, full_name, username, role, is_active
+       FROM expense_users WHERE id = $1`,
+      [user.id]
+    );
+    return refreshed.rows[0];
+  }
+
+  const randomPassword = crypto.randomBytes(24).toString('hex');
+  const hash = await bcrypt.hash(randomPassword, BCRYPT_COST);
+  const inserted = await client.query(
+    `INSERT INTO expense_users(employee_code, full_name, username, password, role, is_active)
+     VALUES ($1,$2,$3,$4,$5,true)
+     RETURNING id, employee_code, full_name, username, role, is_active`,
+    [employeeCode, fullName, username, hash, expenseRole]
+  );
+  return inserted.rows[0];
+}
+
+function makeClaimNumber(id) {
+  return `EXP-${String(id).padStart(6, '0')}`;
+}
+
+app.post('/expense/login', async (req, res) => {
+  const username = String(req.body.username || '').trim();
+  const password = String(req.body.password || '').trim();
+  const ipAddress = getRequestIp(req);
+  const userAgent = String(req.header('user-agent') || '').slice(0, 500);
+  if (!username || !password) {
+    await recordExpenseLoginAttempt({ username, ipAddress, success: false, failureReason: 'missing_credentials', userAgent });
+    return res.status(400).json({ error: 'username and password are required' });
+  }
+  try {
+    const lockState = await checkExpenseLoginLock(username, ipAddress);
+    if (lockState.locked) {
+      await recordExpenseLoginAttempt({ username, ipAddress, success: false, failureReason: 'locked', userAgent });
+      return res.status(429).json({ error: 'Too many failed attempts. Try again later.' });
+    }
+    const auth = await authenticateExpenseWithPassword(username, password);
+    if (auth.error) {
+      await recordExpenseLoginAttempt({ username, ipAddress, success: false, failureReason: auth.error, userAgent });
+      return res.status(auth.status).json({ error: auth.error });
+    }
+    if (['Accounts', 'Manager', 'Admin'].includes(auth.user.role)) {
+      await recordExpenseLoginAttempt({
+        username,
+        ipAddress,
+        success: false,
+        failureReason: 'use_transport_sso_for_privileged_roles',
+        userAgent
+      });
+      return res.status(403).json({ error: 'Use Transport login and open Expense via SSO for this role.' });
+    }
+    await recordExpenseLoginAttempt({ username, ipAddress, success: true, failureReason: null, userAgent });
+    const token = createExpenseToken(auth.user);
+    console.log(`[expense][${req.expenseRequestId}] login success username=${username}`);
+    return res.json({ ok: true, token, user: auth.user, request_id: req.expenseRequestId });
+  } catch (error) {
+    console.error('Expense login failed', error);
+    await recordExpenseLoginAttempt({ username, ipAddress, success: false, failureReason: 'internal_error', userAgent });
+    return res.status(500).json({ error: 'Expense login failed' });
+  }
+});
+
+app.post('/expense/logout', async (req, res) => {
+  const rawTokenHeader = String(req.header('x-expense-token') || '').trim();
+  const rawBearer = String(req.header('authorization') || '').trim();
+  const token = rawTokenHeader || (rawBearer.toLowerCase().startsWith('bearer ') ? rawBearer.slice(7).trim() : '');
+  const auth = await readExpenseUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  const verified = verifyExpenseToken(token);
+  if (verified.error) return res.status(401).json({ error: 'Invalid expense token for logout' });
+  const tokenHash = hashExpenseToken(token);
+  const exp = new Date(Number(verified.payload.exp) * 1000);
+  await pool.query(
+    `INSERT INTO expense_token_revocations(token_hash, user_id, expires_at)
+     VALUES ($1,$2,$3)
+     ON CONFLICT (token_hash) DO NOTHING`,
+    [tokenHash, auth.user.id, exp]
+  );
+  console.log(`[expense][${req.expenseRequestId}] logout user=${auth.user.username}`);
+  return res.json({ ok: true, request_id: req.expenseRequestId });
+});
+
+app.post('/expense/sso', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  const ipAddress = getRequestIp(req);
+  const userAgent = String(req.header('user-agent') || '').slice(0, 500);
+  const transportRole = auth.error ? null : auth.role;
+  const expenseRole = mapTransportRoleToExpenseRole(transportRole);
+
+  if (auth.error || !expenseRole) {
+    await recordExpenseLoginAttempt({
+      username: transportRole || 'unknown',
+      ipAddress,
+      success: false,
+      failureReason: auth.error || 'transport_role_not_allowed_for_expense_sso',
+      userAgent
+    });
+    return res.status(403).json({ error: 'You are not authorized for Expense access.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const expenseUser = await ensureExpenseSsoUser(client, transportRole);
+    if (!expenseUser) {
+      await client.query('ROLLBACK');
+      await recordExpenseLoginAttempt({
+        username: `transport_${transportRole}`,
+        ipAddress,
+        success: false,
+        failureReason: 'failed_to_resolve_expense_sso_user',
+        userAgent
+      });
+      return res.status(500).json({ error: 'Failed to create expense session' });
+    }
+    await client.query(
+      `INSERT INTO transport_expense_user_map(transport_username, transport_role, expense_user_id)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (transport_role, expense_user_id) DO NOTHING`,
+      [transportRole.toLowerCase(), transportRole, expenseUser.id]
+    );
+    await client.query('COMMIT');
+
+    await recordExpenseLoginAttempt({
+      username: expenseUser.username,
+      ipAddress,
+      success: true,
+      failureReason: 'transport_sso',
+      userAgent
+    });
+
+    const token = createExpenseToken(expenseUser);
+    console.log(`[expense][${req.expenseRequestId}] transport sso success role=${transportRole} expense_user=${expenseUser.username}`);
+    return res.json({
+      ok: true,
+      token,
+      user: expenseUser,
+      request_id: req.expenseRequestId
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Expense SSO failed', error);
+    await recordExpenseLoginAttempt({
+      username: `transport_${transportRole || 'unknown'}`,
+      ipAddress,
+      success: false,
+      failureReason: 'expense_sso_internal_error',
+      userAgent
+    });
+    return res.status(500).json({ error: 'Failed to create expense session' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/expense/me', async (req, res) => {
+  const auth = await readExpenseUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  return res.json(auth.user);
+});
+
+app.get('/expense-categories', async (req, res) => {
+  const auth = await readExpenseUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  try {
+    const result = await pool.query(
+      `SELECT id, name, is_active
+       FROM expense_categories
+       WHERE is_active = true
+       ORDER BY name ASC`
+    );
+    return res.json(result.rows);
+  } catch (error) {
+    console.error('Failed to load expense categories', error);
+    return res.status(500).json({ error: 'Failed to load expense categories' });
+  }
+});
+
+app.post('/expenses', async (req, res) => {
+  const auth = await readExpenseUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.user.role !== 'Employee') {
+    return res.status(403).json({ error: 'Only Employee can create expense claims' });
+  }
+
+  const claimDate = normalizeEmpty(req.body.claim_date);
+  const amount = toFiniteNumberOrNull(req.body.amount);
+  const categoryId = parsePositiveId(req.body.category_id);
+  const payload = {
+    pay_to: normalizeEmpty(req.body.pay_to),
+    voucher_no: normalizeEmpty(req.body.voucher_no),
+    claim_date: claimDate,
+    amount,
+    category_id: categoryId,
+    purpose: normalizeEmpty(req.body.purpose)
+  };
+
+  if (!payload.pay_to || !payload.voucher_no || !payload.claim_date || payload.amount === null || payload.amount <= 0 || !payload.category_id || !payload.purpose) {
+    return res.status(400).json({ error: 'pay_to, voucher_no, claim_date, amount, category_id and purpose are required' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const duplicateVoucher = await client.query(
+      `SELECT id
+       FROM expense_claims
+       WHERE employee_id = $1
+         AND lower(trim(voucher_no)) = lower(trim($2))
+         AND deleted_at IS NULL
+       LIMIT 1`,
+      [auth.user.id, payload.voucher_no]
+    );
+    if (duplicateVoucher.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Duplicate voucher number for this employee' });
+    }
+    const insert = await client.query(
+      `INSERT INTO expense_claims(
+        claim_number, employee_id, pay_to, voucher_no, claim_date, amount, category_id, purpose, status, current_assigned_role, version
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'DRAFT','Employee',1)
+      RETURNING *`,
+      ['TEMP', auth.user.id, payload.pay_to, payload.voucher_no, payload.claim_date, payload.amount, payload.category_id, payload.purpose]
+    );
+    const claim = insert.rows[0];
+    const claimNumber = makeClaimNumber(claim.id);
+    const updated = await client.query(
+      `UPDATE expense_claims SET claim_number = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+      [claimNumber, claim.id]
+    );
+    await addExpenseHistory(client, {
+      claimId: claim.id,
+      actionType: 'CREATE',
+      fromStatus: null,
+      toStatus: 'DRAFT',
+      actorUserId: auth.user.id,
+      actorRole: auth.user.role,
+      remarks: 'Claim created',
+      fieldChanges: { ...payload, request_id: req.expenseRequestId }
+    });
+    await client.query('COMMIT');
+    console.log(`[expense][${req.expenseRequestId}] claim created id=${updated.rows[0].id}`);
+    return res.status(201).json({ ...updated.rows[0], request_id: req.expenseRequestId });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    if (String(error.code) === '23505') {
+      return res.status(409).json({ error: 'Voucher No already exists' });
+    }
+    console.error('Failed to create expense claim', error);
+    return res.status(500).json({ error: 'Failed to create expense claim' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/expenses/my', async (req, res) => {
+  const auth = await readExpenseUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.user.role !== 'Employee') return res.status(403).json({ error: 'Only Employee can access my claims' });
+  try {
+    const result = await pool.query(
+      `SELECT ec.*, cat.name AS category_name
+       FROM expense_claims ec
+       LEFT JOIN expense_categories cat ON cat.id = ec.category_id
+       WHERE ec.employee_id = $1 AND ec.deleted_at IS NULL
+       ORDER BY ec.updated_at DESC, ec.id DESC`,
+      [auth.user.id]
+    );
+    return res.json(result.rows);
+  } catch (error) {
+    console.error('Failed to load my expense claims', error);
+    return res.status(500).json({ error: 'Failed to load my expense claims' });
+  }
+});
+
+app.get('/expenses/pending', async (req, res) => {
+  const auth = await readExpenseUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!['Accounts', 'Manager', 'Admin'].includes(auth.user.role)) {
+    return res.status(403).json({ error: 'Only reviewers can access pending queue' });
+  }
+
+  const queueForRole = auth.user.role === 'Accounts'
+    ? `ec.status IN ('ACCOUNTS_REVIEW', 'PAYMENT_PENDING', 'PAYMENT_INITIATED')`
+    : auth.user.role === 'Manager'
+      ? `ec.status = 'MANAGER_REVIEW'`
+      : `ec.status = 'ADMIN_REVIEW'`;
+
+  try {
+    const result = await pool.query(
+      `SELECT
+        ec.id, ec.claim_number, ec.employee_id, eu.full_name AS employee_name, eu.employee_code,
+        ec.pay_to, ec.voucher_no, ec.claim_date, ec.amount, ec.status, ec.version, ec.current_assigned_role,
+        ec.purpose, ec.updated_at, cat.name AS category_name
+       FROM expense_claims ec
+       JOIN expense_users eu ON eu.id = ec.employee_id
+       LEFT JOIN expense_categories cat ON cat.id = ec.category_id
+       WHERE ec.deleted_at IS NULL
+         AND ${queueForRole}
+       ORDER BY ec.updated_at DESC, ec.id DESC`
+    );
+    const ids = result.rows.map((row) => row.id);
+    return res.json({ rows: result.rows, claim_ids: ids });
+  } catch (error) {
+    console.error('Failed to load expense pending queue', error);
+    return res.status(500).json({ error: 'Failed to load expense pending queue' });
+  }
+});
+
+app.get('/expenses/:id(\\d+)', async (req, res) => {
+  const auth = await readExpenseUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  const claimId = parsePositiveId(req.params.id);
+  if (!claimId) return res.status(400).json({ error: 'Invalid claim id' });
+
+  try {
+    const result = await pool.query(
+      `SELECT ec.*, cat.name AS category_name, eu.full_name AS employee_name, eu.employee_code
+       FROM expense_claims ec
+       JOIN expense_users eu ON eu.id = ec.employee_id
+       LEFT JOIN expense_categories cat ON cat.id = ec.category_id
+       WHERE ec.id = $1 AND ec.deleted_at IS NULL
+       LIMIT 1`,
+      [claimId]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Claim not found' });
+    const claim = result.rows[0];
+    if (!canExpenseUserAccessClaim(auth.user, claim)) {
+      return res.status(403).json({ error: 'Not allowed to access this claim' });
+    }
+    const [docs, history] = await Promise.all([
+      pool.query(
+        `SELECT id, claim_id, doc_type, file_name, mime_type, file_size, uploaded_by_user_id, uploaded_by_role, created_at
+         FROM expense_claim_documents WHERE claim_id = $1 ORDER BY created_at DESC, id DESC`,
+        [claimId]
+      ),
+      pool.query(
+        `SELECT h.*, u.full_name AS actor_name
+         FROM expense_claim_history h
+         LEFT JOIN expense_users u ON u.id = h.actor_user_id
+         WHERE h.claim_id = $1
+         ORDER BY h.created_at ASC, h.id ASC`,
+        [claimId]
+      )
+    ]);
+    return res.json({ claim, documents: docs.rows, history: history.rows });
+  } catch (error) {
+    console.error('Failed to load expense claim detail', error);
+    return res.status(500).json({ error: 'Failed to load expense claim detail' });
+  }
+});
+
+app.put('/expenses/:id(\\d+)', async (req, res) => {
+  const auth = await readExpenseUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  const claimId = parsePositiveId(req.params.id);
+  if (!claimId) return res.status(400).json({ error: 'Invalid claim id' });
+
+  const client = await pool.connect();
+  try {
+    const expectedVersion = parseExpectedVersion(req);
+    if (expectedVersion === null) {
+      return res.status(400).json({ error: 'version is required for update' });
+    }
+    await client.query('BEGIN');
+    const existingRes = await client.query(`SELECT * FROM expense_claims WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, [claimId]);
+    if (!existingRes.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Claim not found' });
+    }
+    const existing = existingRes.rows[0];
+    if (!assertExpenseVersion(expectedVersion, existing.version)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'This expense claim was updated by another user. Please refresh.' });
+    }
+    if (auth.user.role === 'Employee') {
+      if (existing.employee_id !== auth.user.id || !canEditExpenseClaimByStatus(existing.status)) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'Claim cannot be edited in current state' });
+      }
+    } else if (!['Accounts', 'Admin'].includes(auth.user.role)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Role cannot edit claim' });
+    }
+
+    const next = {
+      pay_to: normalizeEmpty(req.body.pay_to ?? existing.pay_to),
+      voucher_no: normalizeEmpty(req.body.voucher_no ?? existing.voucher_no),
+      claim_date: normalizeEmpty(req.body.claim_date ?? existing.claim_date),
+      amount: toFiniteNumberOrNull(req.body.amount ?? existing.amount),
+      category_id: parsePositiveId(req.body.category_id ?? existing.category_id),
+      purpose: normalizeEmpty(req.body.purpose ?? existing.purpose)
+    };
+    if (!next.pay_to || !next.voucher_no || !next.claim_date || next.amount === null || next.amount <= 0 || !next.category_id || !next.purpose) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Required claim fields are missing' });
+    }
+    const duplicateVoucher = await client.query(
+      `SELECT id FROM expense_claims
+       WHERE employee_id = $1
+         AND lower(trim(voucher_no)) = lower(trim($2))
+         AND id <> $3
+         AND deleted_at IS NULL
+       LIMIT 1`,
+      [existing.employee_id, next.voucher_no, claimId]
+    );
+    if (duplicateVoucher.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Duplicate voucher number for this employee' });
+    }
+
+    const fieldChanges = {};
+    ['pay_to', 'voucher_no', 'claim_date', 'amount', 'category_id', 'purpose'].forEach((key) => {
+      if (String(existing[key]) !== String(next[key])) {
+        fieldChanges[key] = { old: existing[key], new: next[key] };
+      }
+    });
+
+    const updated = await client.query(
+      `UPDATE expense_claims
+       SET pay_to = $1, voucher_no = $2, claim_date = $3, amount = $4, category_id = $5, purpose = $6, updated_at = NOW()
+       , version = version + 1
+       WHERE id = $7
+       RETURNING *`,
+      [next.pay_to, next.voucher_no, next.claim_date, next.amount, next.category_id, next.purpose, claimId]
+    );
+    if (Object.keys(fieldChanges).length) {
+      await addExpenseHistory(client, {
+        claimId,
+        actionType: 'EDIT',
+        fromStatus: existing.status,
+        toStatus: existing.status,
+        actorUserId: auth.user.id,
+        actorRole: auth.user.role,
+        remarks: normalizeEmpty(req.body.remarks) || 'Claim edited',
+        fieldChanges: { ...fieldChanges, request_id: req.expenseRequestId }
+      });
+    }
+    await client.query('COMMIT');
+    console.log(`[expense][${req.expenseRequestId}] claim edited id=${claimId}`);
+    return res.json({ ...updated.rows[0], request_id: req.expenseRequestId });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    if (String(error.code) === '23505') {
+      return res.status(409).json({ error: 'Voucher No already exists' });
+    }
+    console.error('Failed to update expense claim', error);
+    return res.status(500).json({ error: 'Failed to update expense claim' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/expenses/:id(\\d+)/submit', async (req, res) => {
+  const auth = await readExpenseUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.user.role !== 'Employee') return res.status(403).json({ error: 'Only Employee can submit claim' });
+  const claimId = parsePositiveId(req.params.id);
+  if (!claimId) return res.status(400).json({ error: 'Invalid claim id' });
+
+  const client = await pool.connect();
+  try {
+    const expectedVersion = parseExpectedVersion(req);
+    if (expectedVersion === null) {
+      return res.status(400).json({ error: 'version is required for submit' });
+    }
+    await client.query('BEGIN');
+    const claimRes = await client.query(`SELECT * FROM expense_claims WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, [claimId]);
+    if (!claimRes.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Claim not found' });
+    }
+    const claim = claimRes.rows[0];
+    if (!assertExpenseVersion(expectedVersion, claim.version)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'This expense claim was updated by another user. Please refresh.' });
+    }
+    if (claim.employee_id !== auth.user.id || !canEditExpenseClaimByStatus(claim.status)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Claim cannot be submitted in current state' });
+    }
+
+    const toStatus = claim.status === 'DRAFT'
+      ? 'ACCOUNTS_REVIEW'
+      : claim.previous_review_stage === 'MANAGER'
+        ? 'MANAGER_REVIEW'
+        : claim.previous_review_stage === 'ADMIN'
+          ? 'ADMIN_REVIEW'
+          : 'ACCOUNTS_REVIEW';
+    const assignedRole = toStatus === 'ACCOUNTS_REVIEW'
+      ? 'Accounts'
+      : toStatus === 'MANAGER_REVIEW'
+        ? 'Manager'
+        : 'Admin';
+    if (!isValidExpenseTransition(claim.status, toStatus)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Invalid transition: ${claim.status} -> ${toStatus}` });
+    }
+
+    const updated = await client.query(
+      `UPDATE expense_claims
+       SET status = $1,
+           current_assigned_role = $2,
+           submitted_at = COALESCE(submitted_at, NOW()),
+           more_info_reason = NULL,
+           previous_status = NULL,
+           more_info_requested_by_user_id = NULL,
+           more_info_requested_by_role = NULL,
+           version = version + 1,
+           updated_at = NOW()
+       WHERE id = $3
+       RETURNING *`,
+      [toStatus, assignedRole, claimId]
+    );
+    await addExpenseHistory(client, {
+      claimId,
+      actionType: claim.status === 'DRAFT' ? 'SUBMIT' : 'RESUBMIT',
+      fromStatus: claim.status,
+      toStatus,
+      actorUserId: auth.user.id,
+      actorRole: auth.user.role,
+      remarks: normalizeEmpty(req.body.remarks) || null,
+      fieldChanges: { request_id: req.expenseRequestId }
+    });
+    await addExpenseNotification(client, {
+      targetRole: toStatus === 'ACCOUNTS_REVIEW' ? 'Accounts' : toStatus === 'MANAGER_REVIEW' ? 'Manager' : 'Admin',
+      eventType: 'CLAIM_SUBMITTED',
+      claimId,
+      title: 'Claim Submitted',
+      message: `Claim ${claim.claim_number} submitted for ${toStatus.replace('_', ' ')}`
+    });
+    await client.query('COMMIT');
+    console.log(`[expense][${req.expenseRequestId}] claim submitted id=${claimId} to=${toStatus}`);
+    return res.json({ ...updated.rows[0], request_id: req.expenseRequestId });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Failed to submit expense claim', error);
+    return res.status(500).json({ error: 'Failed to submit expense claim' });
+  } finally {
+    client.release();
+  }
+});
+
+async function handleExpenseReviewAction(req, res, reviewerRole) {
+  const auth = await readExpenseUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.user.role !== reviewerRole && auth.user.role !== 'Admin') {
+    return res.status(403).json({ error: `Only ${reviewerRole}/Admin can perform this action` });
+  }
+  const claimId = parsePositiveId(req.params.id);
+  if (!claimId) return res.status(400).json({ error: 'Invalid claim id' });
+  const action = String(req.body.action || '').toLowerCase();
+  const remarks = normalizeEmpty(req.body.remarks);
+  const expectedVersion = parseExpectedVersion(req);
+  if (expectedVersion === null) return res.status(400).json({ error: 'version is required for review action' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const claimRes = await client.query(`SELECT * FROM expense_claims WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, [claimId]);
+    if (!claimRes.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Claim not found' });
+    }
+    const claim = claimRes.rows[0];
+    if (!assertExpenseVersion(expectedVersion, claim.version)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'This expense claim was updated by another user. Please refresh.' });
+    }
+    if (!canExpenseRoleReview(reviewerRole, claim.status) && !(auth.user.role === 'Admin' && claim.status === `${reviewerRole.toUpperCase()}_REVIEW`)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Claim is not in ${reviewerRole} review stage` });
+    }
+
+    let nextStatus;
+    let nextAssignedRole = null;
+    let actionType;
+    const patch = {};
+    if (action === 'approve') {
+      actionType = 'APPROVE';
+      if (claim.status === 'ACCOUNTS_REVIEW') {
+        nextStatus = 'MANAGER_REVIEW';
+        nextAssignedRole = 'Manager';
+        patch.accounts_reviewed_by = auth.user.id;
+      } else if (claim.status === 'MANAGER_REVIEW') {
+        nextStatus = 'ADMIN_REVIEW';
+        nextAssignedRole = 'Admin';
+        patch.manager_reviewed_by = auth.user.id;
+      } else {
+        nextStatus = 'PAYMENT_PENDING';
+        nextAssignedRole = 'Accounts';
+        patch.admin_reviewed_by = auth.user.id;
+      }
+      patch.rejection_reason = null;
+      patch.more_info_reason = null;
+    } else if (action === 'reject') {
+      actionType = 'REJECT';
+      nextStatus = 'REJECTED';
+      nextAssignedRole = null;
+      patch.rejection_reason = remarks || 'Rejected';
+      patch.more_info_reason = null;
+      if (claim.status === 'ACCOUNTS_REVIEW') patch.accounts_reviewed_by = auth.user.id;
+      if (claim.status === 'MANAGER_REVIEW') patch.manager_reviewed_by = auth.user.id;
+      if (claim.status === 'ADMIN_REVIEW') patch.admin_reviewed_by = auth.user.id;
+    } else if (action === 'need_info') {
+      actionType = 'NEED_INFO';
+      nextStatus = 'NEED_MORE_INFO';
+      nextAssignedRole = 'Employee';
+      patch.more_info_reason = remarks || 'Need more details';
+      patch.previous_review_stage = getExpenseReviewStageFromStatus(claim.status);
+      patch.previous_status = claim.status;
+      patch.more_info_requested_by_user_id = auth.user.id;
+      patch.more_info_requested_by_role = auth.user.role;
+    } else {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'action must be approve/reject/need_info' });
+    }
+    if (!isValidExpenseTransition(claim.status, nextStatus)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Invalid transition: ${claim.status} -> ${nextStatus}` });
+    }
+
+    const updatedRes = await client.query(
+      `UPDATE expense_claims
+       SET status = $1,
+           current_assigned_role = $2,
+           accounts_reviewed_by = COALESCE($3, accounts_reviewed_by),
+           manager_reviewed_by = COALESCE($4, manager_reviewed_by),
+           admin_reviewed_by = COALESCE($5, admin_reviewed_by),
+           rejection_reason = $6,
+           more_info_reason = $7,
+           previous_review_stage = COALESCE($8, previous_review_stage),
+           previous_status = COALESCE($9, previous_status),
+           more_info_requested_by_user_id = COALESCE($10, more_info_requested_by_user_id),
+           more_info_requested_by_role = COALESCE($11, more_info_requested_by_role),
+           version = version + 1,
+           updated_at = NOW()
+       WHERE id = $12
+       RETURNING *`,
+      [
+        nextStatus,
+        nextAssignedRole,
+        patch.accounts_reviewed_by || null,
+        patch.manager_reviewed_by || null,
+        patch.admin_reviewed_by || null,
+        patch.rejection_reason || null,
+        patch.more_info_reason || null,
+        patch.previous_review_stage || null,
+        patch.previous_status || null,
+        patch.more_info_requested_by_user_id || null,
+        patch.more_info_requested_by_role || null,
+        claimId
+      ]
+    );
+
+    await addExpenseHistory(client, {
+      claimId,
+      actionType,
+      fromStatus: claim.status,
+      toStatus: nextStatus,
+      actorUserId: auth.user.id,
+      actorRole: auth.user.role,
+      remarks,
+      fieldChanges: { request_id: req.expenseRequestId }
+    });
+
+    const targetRole = nextStatus === 'NEED_MORE_INFO' ? 'Employee' : nextAssignedRole;
+    if (targetRole) {
+      const targetUserId = targetRole === 'Employee' ? claim.employee_id : null;
+      await addExpenseNotification(client, {
+        targetRole,
+        targetUserId,
+        eventType: actionType,
+        claimId,
+        title: `Expense ${nextStatus.replaceAll('_', ' ')}`,
+        message: `Claim ${claim.claim_number} moved to ${nextStatus}`
+      });
+    }
+    await client.query('COMMIT');
+    console.log(`[expense][${req.expenseRequestId}] review action=${actionType} claim=${claimId} to=${nextStatus}`);
+    return res.json({ ...updatedRes.rows[0], request_id: req.expenseRequestId });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Failed expense review action', error);
+    return res.status(500).json({ error: 'Failed to process review action' });
+  } finally {
+    client.release();
+  }
+}
+
+app.post('/expenses/:id(\\d+)/accounts-review', async (req, res) => handleExpenseReviewAction(req, res, 'Accounts'));
+app.post('/expenses/:id(\\d+)/manager-review', async (req, res) => handleExpenseReviewAction(req, res, 'Manager'));
+app.post('/expenses/:id(\\d+)/admin-review', async (req, res) => handleExpenseReviewAction(req, res, 'Admin'));
+
+app.post('/expenses/:id(\\d+)/payment-initiated', async (req, res) => {
+  const auth = await readExpenseUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.user.role !== 'Accounts') return res.status(403).json({ error: 'Only Accounts can mark payment initiated' });
+  const claimId = parsePositiveId(req.params.id);
+  if (!claimId) return res.status(400).json({ error: 'Invalid claim id' });
+  const expectedVersion = parseExpectedVersion(req);
+  if (expectedVersion === null) return res.status(400).json({ error: 'version is required for payment action' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const claimRes = await client.query(`SELECT * FROM expense_claims WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, [claimId]);
+    if (!claimRes.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Claim not found' });
+    }
+    const claim = claimRes.rows[0];
+    if (!assertExpenseVersion(expectedVersion, claim.version)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'This expense claim was updated by another user. Please refresh.' });
+    }
+    if (claim.status !== 'PAYMENT_PENDING') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Claim is not in PAYMENT_PENDING status' });
+    }
+    if (!isValidExpenseTransition(claim.status, 'PAYMENT_INITIATED')) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Invalid transition: ${claim.status} -> PAYMENT_INITIATED` });
+    }
+    const updated = await client.query(
+      `UPDATE expense_claims
+       SET status = 'PAYMENT_INITIATED',
+           payment_initiated_by = $1,
+           payment_initiated_at = NOW(),
+           current_assigned_role = 'Accounts',
+           version = version + 1,
+           updated_at = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [auth.user.id, claimId]
+    );
+    await addExpenseHistory(client, {
+      claimId,
+      actionType: 'PAYMENT_INITIATED',
+      fromStatus: claim.status,
+      toStatus: 'PAYMENT_INITIATED',
+      actorUserId: auth.user.id,
+      actorRole: auth.user.role,
+      remarks: normalizeEmpty(req.body.remarks) || null,
+      fieldChanges: { request_id: req.expenseRequestId }
+    });
+    await addExpenseNotification(client, {
+      targetRole: 'Employee',
+      targetUserId: claim.employee_id,
+      eventType: 'PAYMENT_INITIATED',
+      claimId,
+      title: 'Payment Initiated',
+      message: `Payment initiated for claim ${claim.claim_number}`
+    });
+    await client.query('COMMIT');
+    console.log(`[expense][${req.expenseRequestId}] payment initiated claim=${claimId}`);
+    return res.json({ ...updated.rows[0], request_id: req.expenseRequestId });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Failed to mark payment initiated', error);
+    return res.status(500).json({ error: 'Failed to mark payment initiated' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/expenses/:id(\\d+)/payment-completed', async (req, res) => {
+  const auth = await readExpenseUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.user.role !== 'Accounts') return res.status(403).json({ error: 'Only Accounts can mark payment completed' });
+  const claimId = parsePositiveId(req.params.id);
+  if (!claimId) return res.status(400).json({ error: 'Invalid claim id' });
+  const expectedVersion = parseExpectedVersion(req);
+  if (expectedVersion === null) return res.status(400).json({ error: 'version is required for payment action' });
+  const remarks = normalizeEmpty(req.body.remarks);
+  if (!remarks) return res.status(400).json({ error: 'remarks is required before payment completion' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const claimRes = await client.query(`SELECT * FROM expense_claims WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, [claimId]);
+    if (!claimRes.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Claim not found' });
+    }
+    const claim = claimRes.rows[0];
+    if (!assertExpenseVersion(expectedVersion, claim.version)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'This expense claim was updated by another user. Please refresh.' });
+    }
+    if (claim.status !== 'PAYMENT_INITIATED') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Claim is not in PAYMENT_INITIATED status' });
+    }
+    if (!isValidExpenseTransition(claim.status, 'PAYMENT_COMPLETED')) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Invalid transition: ${claim.status} -> PAYMENT_COMPLETED` });
+    }
+    const proofRes = await client.query(
+      `SELECT id FROM expense_claim_documents WHERE claim_id = $1 AND doc_type = 'PAYMENT_PROOF' LIMIT 1`,
+      [claimId]
+    );
+    if (!proofRes.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Payment proof document is required before payment completion' });
+    }
+    const updated = await client.query(
+      `UPDATE expense_claims
+       SET status = 'PAYMENT_COMPLETED',
+           payment_completed_by = $1,
+           payment_completed_at = NOW(),
+           current_assigned_role = NULL,
+           version = version + 1,
+           updated_at = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [auth.user.id, claimId]
+    );
+    await addExpenseHistory(client, {
+      claimId,
+      actionType: 'PAYMENT_COMPLETED',
+      fromStatus: claim.status,
+      toStatus: 'PAYMENT_COMPLETED',
+      actorUserId: auth.user.id,
+      actorRole: auth.user.role,
+      remarks,
+      fieldChanges: { request_id: req.expenseRequestId }
+    });
+    await addExpenseNotification(client, {
+      targetRole: 'Employee',
+      targetUserId: claim.employee_id,
+      eventType: 'PAYMENT_COMPLETED',
+      claimId,
+      title: 'Payment Completed',
+      message: `Payment completed for claim ${claim.claim_number}`
+    });
+    await client.query('COMMIT');
+    console.log(`[expense][${req.expenseRequestId}] payment completed claim=${claimId}`);
+    return res.json({ ...updated.rows[0], request_id: req.expenseRequestId });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Failed to mark payment completed', error);
+    return res.status(500).json({ error: 'Failed to mark payment completed' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/expenses/:id(\\d+)/documents', async (req, res) => {
+  const auth = await readExpenseUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  const claimId = parsePositiveId(req.params.id);
+  if (!claimId) return res.status(400).json({ error: 'Invalid claim id' });
+
+  uploadDocument.single('file')(req, res, async (uploadError) => {
+    if (uploadError) return res.status(400).json({ error: uploadError.message || 'Upload failed' });
+    if (!req.file) return res.status(400).json({ error: 'File is required' });
+    const docType = String(req.body.doc_type || '').toUpperCase();
+    if (!EXPENSE_DOC_TYPES.has(docType)) {
+      try { fs.unlinkSync(req.file.path); } catch (_err) {}
+      return res.status(400).json({ error: 'Invalid doc_type' });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const claimRes = await client.query(`SELECT * FROM expense_claims WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, [claimId]);
+      if (!claimRes.rows.length) {
+        await client.query('ROLLBACK');
+        try { fs.unlinkSync(req.file.path); } catch (_err) {}
+        return res.status(404).json({ error: 'Claim not found' });
+      }
+      const claim = claimRes.rows[0];
+      if (!canExpenseUserAccessClaim(auth.user, claim)) {
+        await client.query('ROLLBACK');
+        try { fs.unlinkSync(req.file.path); } catch (_err) {}
+        return res.status(403).json({ error: 'Role cannot upload expense documents for this claim' });
+      }
+      if (auth.user.role === 'Employee' && !canEditExpenseClaimByStatus(claim.status)) {
+        await client.query('ROLLBACK');
+        try { fs.unlinkSync(req.file.path); } catch (_err) {}
+        return res.status(403).json({ error: 'Claim does not allow employee upload now' });
+      }
+
+      const storagePath = path.relative(__dirname, req.file.path);
+      const insert = await client.query(
+        `INSERT INTO expense_claim_documents(
+          claim_id, doc_type, file_name, mime_type, file_size, storage_path, uploaded_by_user_id, uploaded_by_role
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        RETURNING id, claim_id, doc_type, file_name, mime_type, file_size, uploaded_by_user_id, uploaded_by_role, created_at`,
+        [claimId, docType, req.file.originalname, req.file.mimetype, req.file.size, storagePath, auth.user.id, auth.user.role]
+      );
+      await addExpenseHistory(client, {
+        claimId,
+        actionType: 'DOC_UPLOADED',
+        fromStatus: claim.status,
+        toStatus: claim.status,
+        actorUserId: auth.user.id,
+        actorRole: auth.user.role,
+        remarks: `${docType} uploaded`,
+        fieldChanges: { request_id: req.expenseRequestId, doc_type: docType }
+      });
+      await client.query('COMMIT');
+      console.log(`[expense][${req.expenseRequestId}] document uploaded claim=${claimId} doc=${insert.rows[0].id}`);
+      return res.status(201).json({ ...insert.rows[0], request_id: req.expenseRequestId });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      try { fs.unlinkSync(req.file.path); } catch (_err) {}
+      console.error('Failed expense document upload', error);
+      return res.status(500).json({ error: 'Failed to upload document' });
+    } finally {
+      client.release();
+    }
+  });
+});
+
+app.get('/expenses/documents/:id/download', async (req, res) => {
+  const auth = await readExpenseUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  const docId = parsePositiveId(req.params.id);
+  if (!docId) return res.status(400).json({ error: 'Invalid document id' });
+  try {
+    const docRes = await pool.query(
+      `SELECT d.*, c.*
+       FROM expense_claim_documents d
+       JOIN expense_claims c ON c.id = d.claim_id
+       WHERE d.id = $1 AND c.deleted_at IS NULL
+       LIMIT 1`,
+      [docId]
+    );
+    if (!docRes.rows.length) return res.status(404).json({ error: 'Document not found' });
+    const doc = docRes.rows[0];
+    if (!canExpenseUserAccessClaim(auth.user, doc)) {
+      return res.status(403).json({ error: 'Not allowed to view this document' });
+    }
+    const absolutePath = path.resolve(__dirname, doc.storage_path);
+    if (!absolutePath.startsWith(path.resolve(DOC_UPLOAD_DIR))) return res.status(403).json({ error: 'Invalid document path' });
+    if (!fs.existsSync(absolutePath)) return res.status(404).json({ error: 'File missing' });
+    return res.download(absolutePath, doc.file_name);
+  } catch (error) {
+    console.error('Failed to download expense document', error);
+    return res.status(500).json({ error: 'Failed to download expense document' });
+  }
+});
+
+app.get('/expenses/notifications', async (req, res) => {
+  const auth = await readExpenseUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  try {
+    const result = await pool.query(
+      `SELECT id, target_role, target_user_id, event_type, entity_type, entity_id, message, is_read, created_at, read_at
+      , title
+       FROM expense_notifications
+       WHERE target_role = $1
+         AND (target_user_id IS NULL OR target_user_id = $2)
+       ORDER BY created_at DESC, id DESC
+       LIMIT 200`,
+      [auth.user.role, auth.user.id]
+    );
+    return res.json(result.rows);
+  } catch (error) {
+    console.error('Failed to load expense notifications', error);
+    return res.status(500).json({ error: 'Failed to load notifications' });
+  }
+});
+
+app.post('/expenses/notifications/mark-read', async (req, res) => {
+  const auth = await readExpenseUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  const ids = Array.isArray(req.body.ids) ? req.body.ids.map(parsePositiveId).filter(Boolean) : [];
+  try {
+    if (ids.length) {
+      await pool.query(
+        `UPDATE expense_notifications
+         SET is_read = true, read_at = NOW()
+         WHERE id = ANY($1::int[])
+           AND target_role = $2
+           AND (target_user_id IS NULL OR target_user_id = $3)`,
+        [ids, auth.user.role, auth.user.id]
+      );
+    } else {
+      await pool.query(
+        `UPDATE expense_notifications
+         SET is_read = true, read_at = NOW()
+         WHERE target_role = $1
+           AND (target_user_id IS NULL OR target_user_id = $2)
+           AND is_read = false`,
+        [auth.user.role, auth.user.id]
+      );
+    }
+    return res.json({ ok: true, request_id: req.expenseRequestId });
+  } catch (error) {
+    console.error('Failed to mark expense notifications as read', error);
+    return res.status(500).json({ error: 'Failed to mark notifications as read' });
+  }
+});
+
+app.get('/expenses/dashboard', async (req, res) => {
+  const auth = await readExpenseUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!['Employee', 'Accounts', 'Manager', 'Admin'].includes(auth.user.role)) {
+    return res.status(403).json({ error: 'Role cannot view dashboard' });
+  }
+  const { page, limit } = getPagination(req, { page: 1, limit: 25 }, 100);
+  const fromDate = normalizeEmpty(req.query.from_date);
+  const toDate = normalizeEmpty(req.query.to_date);
+  const employeeId = parsePositiveId(req.query.employee_id);
+  const categoryId = parsePositiveId(req.query.category_id);
+  const statusFilter = normalizeExpenseStatus(req.query.status);
+  const minAmount = toFiniteNumberOrNull(req.query.min_amount);
+  const maxAmount = toFiniteNumberOrNull(req.query.max_amount);
+  const values = [];
+  const access = getExpenseAccessWhereSql(auth.user, 'ec', 1);
+  values.push(...access.params);
+  const filters = ['ec.deleted_at IS NULL', access.where];
+  if (fromDate) {
+    values.push(fromDate);
+    filters.push(`ec.claim_date >= $${values.length}::date`);
+  }
+  if (toDate) {
+    values.push(toDate);
+    filters.push(`ec.claim_date <= $${values.length}::date`);
+  }
+  if (employeeId) {
+    values.push(employeeId);
+    filters.push(`ec.employee_id = $${values.length}`);
+  }
+  if (categoryId) {
+    values.push(categoryId);
+    filters.push(`ec.category_id = $${values.length}`);
+  }
+  if (statusFilter) {
+    values.push(statusFilter);
+    filters.push(`ec.status = $${values.length}`);
+  }
+  if (minAmount !== null) {
+    values.push(minAmount);
+    filters.push(`ec.amount >= $${values.length}`);
+  }
+  if (maxAmount !== null) {
+    values.push(maxAmount);
+    filters.push(`ec.amount <= $${values.length}`);
+  }
+  const where = filters.join(' AND ');
+  try {
+    const result = await pool.query(
+      `SELECT ec.*, cat.name AS category_name, eu.full_name AS employee_name
+       FROM expense_claims ec
+       JOIN expense_users eu ON eu.id = ec.employee_id
+       LEFT JOIN expense_categories cat ON cat.id = ec.category_id
+       WHERE ${where}`,
+      values
+    );
+    const rows = result.rows;
+    const summary = {
+      total_claims: rows.length,
+      total_submitted: rows.filter((r) => ['SUBMITTED', 'ACCOUNTS_REVIEW', 'MANAGER_REVIEW', 'ADMIN_REVIEW', 'PAYMENT_PENDING', 'PAYMENT_INITIATED', 'PAYMENT_COMPLETED', 'REJECTED', 'NEED_MORE_INFO'].includes(r.status)).length,
+      total_approved: rows.filter((r) => ['PAYMENT_PENDING', 'PAYMENT_INITIATED', 'PAYMENT_COMPLETED'].includes(r.status)).length,
+      total_paid: rows.filter((r) => r.status === 'PAYMENT_COMPLETED').length,
+      total_amount_claimed: rows.reduce((s, r) => s + (Number(r.amount) || 0), 0),
+      total_amount_paid: rows.filter((r) => r.status === 'PAYMENT_COMPLETED').reduce((s, r) => s + (Number(r.amount) || 0), 0),
+      pending_accounts: rows.filter((r) => r.status === 'ACCOUNTS_REVIEW').length,
+      pending_manager: rows.filter((r) => r.status === 'MANAGER_REVIEW').length,
+      pending_admin: rows.filter((r) => r.status === 'ADMIN_REVIEW').length,
+      payment_pending: rows.filter((r) => r.status === 'PAYMENT_PENDING').length,
+      payment_initiated: rows.filter((r) => r.status === 'PAYMENT_INITIATED').length,
+      payment_completed: rows.filter((r) => r.status === 'PAYMENT_COMPLETED').length,
+      rejected: rows.filter((r) => r.status === 'REJECTED').length
+    };
+
+    const categoryTotals = Object.values(rows.reduce((acc, row) => {
+      const key = row.category_name || 'Uncategorized';
+      if (!acc[key]) acc[key] = { category: key, count: 0, amount: 0 };
+      acc[key].count += 1;
+      acc[key].amount += Number(row.amount) || 0;
+      return acc;
+    }, {}));
+    const employeeTotals = Object.values(rows.reduce((acc, row) => {
+      const key = row.employee_name || `Employee-${row.employee_id}`;
+      if (!acc[key]) acc[key] = { employee: key, count: 0, amount: 0 };
+      acc[key].count += 1;
+      acc[key].amount += Number(row.amount) || 0;
+      return acc;
+    }, {}));
+
+    const pendingQueue = rows.filter((r) => ['ACCOUNTS_REVIEW', 'MANAGER_REVIEW', 'ADMIN_REVIEW', 'NEED_MORE_INFO'].includes(r.status));
+    const paymentQueue = rows.filter((r) => ['PAYMENT_PENDING', 'PAYMENT_INITIATED'].includes(r.status));
+    const sortedRecent = [...rows].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+    const totalRecent = sortedRecent.length;
+    const start = (page - 1) * limit;
+    const recentClaims = sortedRecent.slice(start, start + limit);
+    const recentClaimsMeta = getPaginationMeta({ page, limit, total: totalRecent });
+
+    return res.json({ summary, pendingQueue, paymentQueue, recentClaims, recentClaimsMeta, categoryTotals, employeeTotals, rows });
+  } catch (error) {
+    console.error('Failed to load expense dashboard', error);
+    return res.status(500).json({ error: 'Failed to load expense dashboard' });
+  }
+});
+
+app.post('/admin/expense-users/seed', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can seed expense users' });
+  const users = [
+    ['EMP001', 'Employee 1', 'emp1', 'emp#4Pq1', 'Employee'],
+    ['EMP002', 'Employee 2', 'emp2', 'emp#5Kr2', 'Employee'],
+    ['EMP003', 'Employee 3', 'emp3', 'emp#6La3', 'Employee'],
+    ['EMP004', 'Employee 4', 'emp4', 'emp#7Mx4', 'Employee'],
+    ['EMP005', 'Employee 5', 'emp5', 'emp#8Ny5', 'Employee'],
+    ['EMP006', 'Employee 6', 'emp6', 'emp#9Oz6', 'Employee'],
+    ['EMP007', 'Employee 7', 'emp7', 'emp#1Pa7', 'Employee'],
+    ['EMP008', 'Employee 8', 'emp8', 'emp#2Qb8', 'Employee'],
+    ['EMP009', 'Employee 9', 'emp9', 'emp#3Rc9', 'Employee'],
+    ['EMP010', 'Employee 10', 'emp10', 'emp#4Sd0', 'Employee'],
+    ['MGR001', 'Expense Manager', 'exp_manager', 'mgr#9Tk2', 'Manager'],
+    ['ACC001', 'Expense Accounts', 'exp_accounts', 'acc#8Vm3', 'Accounts'],
+    ['ADM001', 'Expense Admin', 'exp_admin', 'adm#7Wn4', 'Admin']
+  ];
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const [code, name, username, password, role] of users) {
+      const hash = await bcrypt.hash(password, BCRYPT_COST);
+      await client.query(
+        `INSERT INTO expense_users(employee_code, full_name, username, password, role, is_active)
+         VALUES($1,$2,$3,$4,$5,true)
+         ON CONFLICT (username) DO UPDATE SET
+           employee_code = EXCLUDED.employee_code,
+           full_name = EXCLUDED.full_name,
+           role = EXCLUDED.role,
+           is_active = true,
+           updated_at = NOW()`,
+        [code, name, username, hash, role]
+      );
+    }
+    await client.query('COMMIT');
+    return res.json({ ok: true, seeded: users.length, request_id: req.expenseRequestId });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Failed to seed expense users', error);
+    return res.status(500).json({ error: 'Failed to seed expense users' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/expenses/export', async (req, res) => {
+  const auth = await readExpenseUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!['Employee', 'Accounts', 'Manager', 'Admin'].includes(auth.user.role)) {
+    return res.status(403).json({ error: 'Role cannot export expenses' });
+  }
+  const MAX_EXPORT_ROWS = 10000;
+  try {
+    const access = getExpenseAccessWhereSql(auth.user, 'ec', 1);
+    const fromDate = normalizeEmpty(req.query.from_date);
+    const toDate = normalizeEmpty(req.query.to_date);
+    const employeeId = parsePositiveId(req.query.employee_id);
+    const categoryId = parsePositiveId(req.query.category_id);
+    const statusFilter = normalizeExpenseStatus(req.query.status);
+    const minAmount = toFiniteNumberOrNull(req.query.min_amount);
+    const maxAmount = toFiniteNumberOrNull(req.query.max_amount);
+    const values = [...access.params];
+    const filters = ['ec.deleted_at IS NULL', access.where];
+    if (fromDate) {
+      values.push(fromDate);
+      filters.push(`ec.claim_date >= $${values.length}::date`);
+    }
+    if (toDate) {
+      values.push(toDate);
+      filters.push(`ec.claim_date <= $${values.length}::date`);
+    }
+    if (employeeId) {
+      values.push(employeeId);
+      filters.push(`ec.employee_id = $${values.length}`);
+    }
+    if (categoryId) {
+      values.push(categoryId);
+      filters.push(`ec.category_id = $${values.length}`);
+    }
+    if (statusFilter) {
+      values.push(statusFilter);
+      filters.push(`ec.status = $${values.length}`);
+    }
+    if (minAmount !== null) {
+      values.push(minAmount);
+      filters.push(`ec.amount >= $${values.length}`);
+    }
+    if (maxAmount !== null) {
+      values.push(maxAmount);
+      filters.push(`ec.amount <= $${values.length}`);
+    }
+    const countRes = await pool.query(
+      `SELECT COUNT(*)::int AS total
+       FROM expense_claims ec
+       WHERE ${filters.join(' AND ')}`,
+      values
+    );
+    const total = countRes.rows[0]?.total || 0;
+    if (total > MAX_EXPORT_ROWS) {
+      return res.status(400).json({ error: `Export limit exceeded. Please narrow filters (max ${MAX_EXPORT_ROWS} rows).` });
+    }
+    const result = await pool.query(
+      `SELECT
+        ec.id, ec.claim_number, eu.full_name AS employee_name, ec.pay_to, ec.voucher_no, ec.claim_date, ec.amount,
+        cat.name AS category_name, ec.status, ec.purpose, ec.submitted_at, ec.current_assigned_role,
+        ec.payment_initiated_at, ec.payment_completed_at
+       FROM expense_claims ec
+       JOIN expense_users eu ON eu.id = ec.employee_id
+       LEFT JOIN expense_categories cat ON cat.id = ec.category_id
+       WHERE ${filters.join(' AND ')}
+       ORDER BY ec.updated_at DESC, ec.id DESC`,
+      values
+    );
+    const headers = [
+      'Claim ID',
+      'Claim Number',
+      'Employee',
+      'Pay To',
+      'Voucher No',
+      'Date',
+      'Amount',
+      'Category',
+      'Status',
+      'Purpose',
+      'Submitted At',
+      'Current Assigned Role',
+      'Payment Initiated At',
+      'Payment Completed At'
+    ];
+    const lines = [headers.join(',')];
+    result.rows.forEach((row) => {
+      lines.push([
+        safeCsvValue(row.id),
+        safeCsvValue(row.claim_number),
+        safeCsvValue(row.employee_name),
+        safeCsvValue(row.pay_to),
+        safeCsvValue(row.voucher_no),
+        safeCsvValue(row.claim_date),
+        safeCsvValue(row.amount),
+        safeCsvValue(row.category_name),
+        safeCsvValue(row.status),
+        safeCsvValue(row.purpose),
+        safeCsvValue(row.submitted_at),
+        safeCsvValue(row.current_assigned_role),
+        safeCsvValue(row.payment_initiated_at),
+        safeCsvValue(row.payment_completed_at)
+      ].join(','));
+    });
+    const fileName = `expense_claims_${new Date().toISOString().slice(0, 10)}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    return res.send(lines.join('\n'));
+  } catch (error) {
+    console.error('Failed to export expenses', error);
+    return res.status(500).json({ error: 'Failed to export expenses' });
+  }
+});
+
+app.get('/expenses', async (req, res) => {
+  const auth = await readExpenseUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.user.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can view all claims' });
+  try {
+    const { page, limit, offset } = getPagination(req);
+    const countRes = await pool.query(`SELECT COUNT(*)::int AS total FROM expense_claims WHERE deleted_at IS NULL`);
+    const total = countRes.rows[0]?.total || 0;
+    const result = await pool.query(
+      `SELECT ec.*, eu.full_name AS employee_name, cat.name AS category_name
+       FROM expense_claims ec
+       JOIN expense_users eu ON eu.id = ec.employee_id
+       LEFT JOIN expense_categories cat ON cat.id = ec.category_id
+       WHERE ec.deleted_at IS NULL
+       ORDER BY ec.updated_at DESC, ec.id DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+    return res.json({ rows: result.rows, meta: getPaginationMeta({ page, limit, total }) });
+  } catch (error) {
+    console.error('Failed to load all expense claims', error);
+    return res.status(500).json({ error: 'Failed to load all expense claims' });
+  }
+});
+
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
 initDb()
-  .then(() => {
+  .then(async () => {
+    await migratePlainExpensePasswords();
     runExpectedTruckAutomation();
+    runExpenseSecurityCleanup();
     setInterval(runExpectedTruckAutomation, 5 * 60 * 1000);
+    setInterval(runExpenseSecurityCleanup, 60 * 60 * 1000);
     app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
     });

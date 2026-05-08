@@ -17,7 +17,15 @@
         <button class="role-btn" data-role="Dispatch">Dispatch</button>
         <button class="role-btn" data-role="Loading">Loading</button>
         <button class="role-btn" data-role="Accounts">Accounts</button>
+        <button class="role-btn" data-role="Manager">Manager</button>
         <button class="role-btn" data-role="Admin">Admin</button>
+      </div>
+      <div class="public-portal-links">
+        <p>Portal Access</p>
+        <div class="public-portal-links-row">
+          <a href="/expense" class="public-portal-link">Expense Portal</a>
+          <a href="/customer" class="public-portal-link">Customer Portal</a>
+        </div>
       </div>
     </div>
   </div>
@@ -46,6 +54,7 @@
     </div>
     <nav>
       <a href="/dashboard" id="dashboard-link" class="nav-link">Dashboard →</a>
+      <a href="/expense" id="expense-link" class="nav-link" style="display:none;">Expense Portal</a>
       <a href="/expected-trucks-page" id="expected-trucks-link" class="nav-link">Expected Trucks</a>
       <a href="/customer" id="customer-portal-link" class="nav-link">Customer Portal</a>
       <a href="#" id="tasks-link" class="nav-link" style="display:none;">Tasks</a>
@@ -250,6 +259,6 @@
   <datalist id="task-assignee-options"></datalist>
   <footer class="footer-watermark">© Indus Silica Sand</footer>
 
-  <script src="app.js?v=20260425-1"></script>
+  <script src="app.js?v=20260508-2"></script>
 </body>
 </html>

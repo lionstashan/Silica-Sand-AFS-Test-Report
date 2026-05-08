@@ -2,13 +2,14 @@
 let userRole = null;
 let refreshInterval;
 let taskNotificationPoll = null;
+let expenseNotificationPoll = null;
 const timelineModal = document.getElementById('timeline-modal');
 const timelineModalTitle = document.getElementById('timeline-modal-title');
 const timelineModalBody = document.getElementById('timeline-modal-body');
 const taskNotificationsBtn = document.getElementById('task-notifications-btn');
 const taskNotificationBadge = document.getElementById('task-notification-badge');
 const IST_TIMEZONE = 'Asia/Kolkata';
-const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Admin'];
+const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Manager', 'Admin'];
 const DISPATCH_ZONE_STATUSES = [
   'AT_DISPATCH',
   'WAITING'
@@ -47,6 +48,7 @@ const rolePINs = {
   'Dispatch': 'D9M4',
   'Loading': 'L5Q8',
   'Accounts': 'A6R1',
+  'Manager': 'M2N6',
   'Admin': '2802'
 };
 
@@ -63,6 +65,70 @@ function getCurrentRole() {
     userRole = role;
   }
   return userRole;
+}
+
+function getAuthHeaders() {
+  const role = getCurrentRole();
+  const pin = role ? rolePINs[role] : null;
+  if (!role || !pin) return {};
+  return {
+    'x-user-role': role,
+    'x-user-pin': pin
+  };
+}
+
+async function ensureExpenseTokenForRole() {
+  const role = getCurrentRole();
+  if (!['Admin', 'Accounts', 'Manager'].includes(role)) return null;
+  const existing = localStorage.getItem('expenseToken');
+  if (existing) return existing;
+  try {
+    const response = await fetch('/expense/sso', { method: 'POST', headers: getAuthHeaders() });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.token) return null;
+    localStorage.setItem('expenseToken', data.token);
+    localStorage.setItem('expenseUser', JSON.stringify(data.user || {}));
+    return data.token;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function renderExpenseUnreadBadge(unreadCount) {
+  const expenseLink = document.getElementById('expense-link');
+  if (!expenseLink) return;
+  const role = getCurrentRole();
+  if (!['Admin', 'Accounts', 'Manager'].includes(role)) return;
+  let badge = document.getElementById('expense-unread-badge');
+  if (!badge) {
+    badge = document.createElement('span');
+    badge.id = 'expense-unread-badge';
+    badge.className = 'notif-badge';
+    badge.style.marginLeft = '6px';
+    expenseLink.appendChild(badge);
+  }
+  const count = Number(unreadCount || 0);
+  if (count <= 0) {
+    badge.style.display = 'none';
+    badge.textContent = '0';
+    return;
+  }
+  badge.style.display = 'inline-block';
+  badge.textContent = String(count);
+}
+
+async function loadExpenseUnreadCount() {
+  const role = getCurrentRole();
+  if (!['Admin', 'Accounts', 'Manager'].includes(role)) return;
+  const token = await ensureExpenseTokenForRole();
+  if (!token) return;
+  try {
+    const response = await fetch('/expenses/notifications', { headers: { 'x-expense-token': token } });
+    if (!response.ok) return;
+    const rows = await response.json().catch(() => []);
+    const unread = Array.isArray(rows) ? rows.filter((r) => !r.is_read).length : 0;
+    renderExpenseUnreadBadge(unread);
+  } catch (_error) {}
 }
 
 // Initialize role from localStorage
@@ -116,6 +182,41 @@ function showAppContent() {
   }
   if (taskNotificationsBtn) {
     taskNotificationsBtn.style.display = 'inline-block';
+  }
+  const expenseLink = document.getElementById('expense-link');
+  if (expenseLink) {
+    expenseLink.style.display = ['Admin', 'Accounts', 'Manager'].includes(userRole) ? 'inline-block' : 'none';
+  }
+}
+
+async function openExpenseWithSso(event) {
+  if (event) event.preventDefault();
+  const role = getCurrentRole();
+  if (!['Admin', 'Accounts', 'Manager'].includes(role)) {
+    alert('You are not authorized for Expense access.');
+    return;
+  }
+  try {
+    const response = await fetch('/expense/sso', {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+    const rawText = await response.text();
+    let data = {};
+    try {
+      data = rawText ? JSON.parse(rawText) : {};
+    } catch (_err) {
+      data = {};
+    }
+    if (!response.ok || !data.token) {
+      const backendMessage = data.error || rawText || `HTTP ${response.status}`;
+      throw new Error(`Expense SSO failed: ${backendMessage}`);
+    }
+    localStorage.setItem('expenseToken', data.token);
+    localStorage.setItem('expenseUser', JSON.stringify(data.user || {}));
+    window.location.href = '/expense';
+  } catch (error) {
+    alert(error.message || 'You are not authorized for Expense access.');
   }
 }
 
@@ -201,17 +302,24 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     logout();
   });
+  document.getElementById('expense-link')?.addEventListener('click', openExpenseWithSso);
   taskNotificationsBtn?.addEventListener('click', () => {
-    window.location.href = '/';
+    window.location.href = '/?openTasks=1';
   });
 
   // Initialize role on page load
   initializeRole();
   loadTaskNotifications();
+  loadExpenseUnreadCount();
   if (taskNotificationPoll) clearInterval(taskNotificationPoll);
+  if (expenseNotificationPoll) clearInterval(expenseNotificationPoll);
   taskNotificationPoll = setInterval(() => {
     if (!getCurrentRole()) return;
     loadTaskNotifications();
+  }, 15000);
+  expenseNotificationPoll = setInterval(() => {
+    if (!getCurrentRole()) return;
+    loadExpenseUnreadCount();
   }, 15000);
 });
 

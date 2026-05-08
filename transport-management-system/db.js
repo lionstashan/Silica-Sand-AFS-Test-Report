@@ -1,13 +1,28 @@
 require('dotenv').config();
 const { Pool } = require('pg');
 
-if (!process.env.DATABASE_URL) {
-  console.error('DATABASE_URL is required in environment variables');
+function resolveDatabaseUrl() {
+  // Priority:
+  // 1) Explicit DATABASE_URL
+  // 2) Railway private URL (no egress, intra-network)
+  // 3) Railway public URL fallback (local/dev)
+  return (
+    process.env.DATABASE_URL ||
+    process.env.DATABASE_PRIVATE_URL ||
+    process.env.DATABASE_PUBLIC_URL ||
+    null
+  );
+}
+
+const resolvedDatabaseUrl = resolveDatabaseUrl();
+
+if (!resolvedDatabaseUrl) {
+  console.error('One of DATABASE_URL / DATABASE_PRIVATE_URL / DATABASE_PUBLIC_URL is required');
   process.exit(1);
 }
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: resolvedDatabaseUrl,
   ssl: {
     rejectUnauthorized: false
   }
@@ -289,6 +304,193 @@ async function initDb() {
   `);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_task_notifications_created_at ON task_notifications(created_at DESC)
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expense_users (
+      id SERIAL PRIMARY KEY,
+      employee_code TEXT UNIQUE,
+      full_name TEXT NOT NULL,
+      username TEXT NOT NULL UNIQUE,
+      password TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('Employee', 'Accounts', 'Manager', 'Admin')),
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_expense_users_role ON expense_users(role)
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expense_categories (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expense_claims (
+      id SERIAL PRIMARY KEY,
+      claim_number TEXT UNIQUE NOT NULL,
+      employee_id INTEGER NOT NULL REFERENCES expense_users(id) ON DELETE RESTRICT,
+      pay_to TEXT NOT NULL,
+      voucher_no TEXT NOT NULL,
+      claim_date DATE NOT NULL,
+      amount NUMERIC(12,2) NOT NULL CHECK (amount > 0),
+      category_id INTEGER REFERENCES expense_categories(id) ON DELETE SET NULL,
+      purpose TEXT NOT NULL,
+      status TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      previous_review_stage TEXT,
+      previous_status TEXT,
+      more_info_requested_by_user_id INTEGER REFERENCES expense_users(id) ON DELETE SET NULL,
+      more_info_requested_by_role TEXT,
+      current_assigned_role TEXT,
+      current_assigned_user_id INTEGER REFERENCES expense_users(id) ON DELETE SET NULL,
+      submitted_at TIMESTAMPTZ,
+      accounts_reviewed_by INTEGER REFERENCES expense_users(id) ON DELETE SET NULL,
+      manager_reviewed_by INTEGER REFERENCES expense_users(id) ON DELETE SET NULL,
+      admin_reviewed_by INTEGER REFERENCES expense_users(id) ON DELETE SET NULL,
+      payment_initiated_by INTEGER REFERENCES expense_users(id) ON DELETE SET NULL,
+      payment_completed_by INTEGER REFERENCES expense_users(id) ON DELETE SET NULL,
+      payment_initiated_at TIMESTAMPTZ,
+      payment_completed_at TIMESTAMPTZ,
+      rejection_reason TEXT,
+      more_info_reason TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      deleted_at TIMESTAMPTZ
+    )
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_expense_claims_voucher_no_unique ON expense_claims(voucher_no) WHERE deleted_at IS NULL
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_expense_claims_status ON expense_claims(status)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_expense_claims_employee_created ON expense_claims(employee_id, created_at DESC)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_expense_claims_assigned_role ON expense_claims(current_assigned_role, status)
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expense_claim_documents (
+      id SERIAL PRIMARY KEY,
+      claim_id INTEGER NOT NULL REFERENCES expense_claims(id) ON DELETE CASCADE,
+      doc_type TEXT NOT NULL CHECK (doc_type IN ('BILL', 'PAYMENT_PROOF', 'SUPPORTING')),
+      file_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      file_size INTEGER NOT NULL,
+      storage_path TEXT NOT NULL,
+      uploaded_by_user_id INTEGER REFERENCES expense_users(id) ON DELETE SET NULL,
+      uploaded_by_role TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_expense_claim_documents_claim ON expense_claim_documents(claim_id, created_at DESC)
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expense_claim_history (
+      id SERIAL PRIMARY KEY,
+      claim_id INTEGER NOT NULL REFERENCES expense_claims(id) ON DELETE CASCADE,
+      action_type TEXT NOT NULL,
+      from_status TEXT,
+      to_status TEXT,
+      actor_user_id INTEGER REFERENCES expense_users(id) ON DELETE SET NULL,
+      actor_role TEXT NOT NULL,
+      remarks TEXT,
+      field_changes_json JSONB DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_expense_claim_history_claim ON expense_claim_history(claim_id, created_at ASC)
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expense_notifications (
+      id SERIAL PRIMARY KEY,
+      target_role TEXT NOT NULL,
+      target_user_id INTEGER REFERENCES expense_users(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL,
+      title TEXT,
+      entity_type TEXT NOT NULL DEFAULT 'EXPENSE_CLAIM',
+      entity_id INTEGER REFERENCES expense_claims(id) ON DELETE CASCADE,
+      message TEXT NOT NULL,
+      is_read BOOLEAN DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      read_at TIMESTAMPTZ
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_expense_notifications_target ON expense_notifications(target_role, is_read, created_at DESC)
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expense_login_attempts (
+      id SERIAL PRIMARY KEY,
+      username TEXT,
+      ip_address TEXT,
+      success BOOLEAN NOT NULL,
+      failure_reason TEXT,
+      user_agent TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_expense_login_attempts_user_ip_time
+    ON expense_login_attempts(username, ip_address, created_at DESC)
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expense_token_revocations (
+      id SERIAL PRIMARY KEY,
+      token_hash TEXT NOT NULL UNIQUE,
+      user_id INTEGER REFERENCES expense_users(id) ON DELETE CASCADE,
+      revoked_at TIMESTAMPTZ DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_expense_token_revocations_expires_at
+    ON expense_token_revocations(expires_at)
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS transport_expense_user_map (
+      id SERIAL PRIMARY KEY,
+      transport_username TEXT,
+      transport_role TEXT NOT NULL,
+      expense_user_id INTEGER NOT NULL REFERENCES expense_users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(transport_role, expense_user_id)
+    )
+  `);
+  await pool.query(`
+    ALTER TABLE expense_claims
+    ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS previous_status TEXT,
+    ADD COLUMN IF NOT EXISTS more_info_requested_by_user_id INTEGER REFERENCES expense_users(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS more_info_requested_by_role TEXT
+  `);
+  await pool.query(`
+    ALTER TABLE expense_notifications
+    ADD COLUMN IF NOT EXISTS title TEXT
+  `);
+  await pool.query(`
+    INSERT INTO expense_categories(name)
+    VALUES
+      ('Diesel / Fuel'),
+      ('Vehicle Maintenance'),
+      ('Labour Payment'),
+      ('Loading / Unloading'),
+      ('Office Expense'),
+      ('Travel Expense'),
+      ('Food / Refreshment'),
+      ('Repair & Maintenance'),
+      ('Utility Bills'),
+      ('Miscellaneous')
+    ON CONFLICT (name) DO NOTHING
   `);
   console.log('Connected to database');
 }

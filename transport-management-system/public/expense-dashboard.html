@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Indus Silica Sand - Expense Dashboard</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .expense-wrap { max-width: 1200px; margin: 0 auto; padding: 16px; }
+    .expense-panel { background:#fff; border:1px solid #dbe4f0; border-radius:10px; padding:12px; margin-bottom:12px; }
+    .row { display:flex; flex-wrap:wrap; gap:10px; align-items:end; }
+    .row label { display:flex; flex-direction:column; font-size:12px; color:#334155; min-width:130px; }
+    .cards { display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap:8px; margin-top:8px; }
+    .card { border:1px solid #e5e7eb; border-radius:8px; padding:8px; background:#f8fafc; }
+    .card .k { font-size:12px; color:#64748b; }
+    .card .v { font-size:18px; font-weight:700; color:#0f172a; }
+    .table-scroll { width:100%; overflow-x:auto; }
+    table { width:100%; min-width:820px; border-collapse:collapse; }
+    th, td { border:1px solid #e5e7eb; padding:7px 8px; text-align:left; white-space:nowrap; font-size:12px; color:#1f2937; }
+    th { background:#f8fafc; color:#0f172a; font-weight:600; }
+    .mini { font-size:12px; color:#64748b; }
+    .expense-primary { background: #0f4c81; color: #fff; border: 1px solid #0f4c81; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+    .expense-secondary { background: #fff; color: #1f2937; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Indus Silica Sand - Expense Dashboard</h1>
+    <p>Summary analytics for open and completed expense claims.</p>
+    <div class="header-actions">
+      <span id="me-label" class="role-indicator"></span>
+      <button id="expense-notifications-btn" class="nav-link nav-btn header-bell-btn" aria-label="Expense notifications" title="Expense notifications">
+        <span class="bell-icon">🔔</span><span id="expense-notification-badge" class="notif-badge" style="display:none;">0</span>
+      </button>
+      <button id="logout-btn" class="nav-link nav-btn">Logout</button>
+    </div>
+    <nav>
+      <a href="/expense" class="nav-link">Expense Workspace</a>
+      <a href="/dashboard" id="transport-link" class="nav-link" style="display:none;">Transport Dashboard</a>
+    </nav>
+  </header>
+
+  <div class="expense-wrap">
+    <div class="expense-panel">
+      <div class="row">
+        <label>From<input id="f-from" type="date"></label>
+        <label>To<input id="f-to" type="date"></label>
+        <label>Status<input id="f-status" type="text" placeholder="Optional"></label>
+        <label>Category ID<input id="f-category" type="number"></label>
+        <label>Min Amount<input id="f-min" type="number" step="0.01"></label>
+        <label>Max Amount<input id="f-max" type="number" step="0.01"></label>
+        <button id="load-btn" class="expense-primary" type="button">Load</button>
+        <button id="export-btn" class="expense-secondary" type="button">Export CSV</button>
+      </div>
+      <div id="msg" class="mini" style="margin-top:8px;"></div>
+      <div id="cards" class="cards"></div>
+    </div>
+
+    <div class="expense-panel">
+      <h3 style="margin:0 0 8px;color:#0f4c81;">Open Expenses</h3>
+      <div id="open-table" class="table-scroll mini"></div>
+    </div>
+
+    <div class="expense-panel">
+      <h3 style="margin:0 0 8px;color:#0f4c81;">Completed Expenses</h3>
+      <div id="completed-table" class="table-scroll mini"></div>
+    </div>
+  </div>
+  <div id="expense-notification-modal" class="timeline-modal" style="display:none;">
+    <div class="timeline-modal-content" style="max-width:640px;">
+      <div class="timeline-modal-header">
+        <h3>Expense Notifications</h3>
+        <div>
+          <button type="button" id="expense-mark-read-btn" class="expense-secondary">Mark All Read</button>
+          <button type="button" id="expense-notification-close-btn" class="timeline-close-btn">Close</button>
+        </div>
+      </div>
+      <div id="expense-notification-list" class="mini"></div>
+    </div>
+  </div>
+  <script src="/expense-dashboard.js?v=20260508-6"></script>
+</body>
+</html>
