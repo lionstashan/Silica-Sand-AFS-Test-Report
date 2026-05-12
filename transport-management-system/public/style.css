@@ -353,9 +353,15 @@ button.is-busy::after {
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px dashed #cbd5e1;
-  display: grid;
-  gap: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
   font-size: 0.9rem;
+}
+
+.rv-footer-note {
+  color: #64748b;
 }
 
 @media (max-width: 900px) {
@@ -401,12 +407,34 @@ button.is-busy::after {
   }
 
   .rv-chart-wrap {
-    margin-top: 8px;
-    padding: 8px;
+    margin-top: 6px;
+    padding: 6px;
   }
 
   #rv-meta {
+    margin-bottom: 4px;
+    gap: 4px;
+  }
+
+  .rv-summary-strip {
     margin-bottom: 6px;
+    padding: 6px 8px;
+    font-size: 0.82rem;
+  }
+
+  .rv-contact-footer {
+    margin-top: 8px;
+    padding-top: 6px;
+    font-size: 0.82rem;
+    gap: 10px;
+  }
+
+  .rv-axis-label {
+    font-size: 10px;
+  }
+
+  .rv-axis-text {
+    font-size: 9px;
   }
 }
 

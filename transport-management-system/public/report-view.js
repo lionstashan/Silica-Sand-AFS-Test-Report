@@ -179,7 +179,7 @@ async function init() {
     footer_text: 'Quality report generated for internal QA reference.'
   };
   const mergedBranding = { ...fallbackBranding, ...(branding || {}) };
-  document.getElementById('rv-title').textContent = `${report.report_number} (${report.status})`;
+  document.getElementById('rv-title').textContent = `Lab Report (${report.status})`;
   document.getElementById('rv-branding').innerHTML = `
     <div class="rv-brand-head">
       <div class="rv-brand-left">
@@ -197,10 +197,11 @@ async function init() {
     </div>
   `;
   document.getElementById('rv-meta').innerHTML = `
+    <div><strong>Report No:</strong> ${escapeHtml(report.report_number || '-')}</div>
     <div><strong>Truck:</strong> ${escapeHtml(report.truck_number || '-')}</div>
     <div><strong>Customer:</strong> ${escapeHtml(report.customer_name || '-')}</div>
     <div><strong>Loading Point:</strong> ${escapeHtml(report.loading_point || '-')}</div>
-    <div><strong>Sieve Size:</strong> ${escapeHtml(report.sieve_size || '-')}</div>
+    <div><strong>Trip ID:</strong> ${escapeHtml(report.trip_id || '-')}</div>
   `;
   document.getElementById('rv-date').textContent = escapeHtml(report.report_date || '-');
   document.getElementById('rv-material').textContent = escapeHtml(report.material_type || '-');
@@ -222,10 +223,9 @@ async function init() {
   document.getElementById('rv-total-afs').textContent = Number(report.total_afs || 0).toFixed(2);
   renderSieveChart(items);
   document.getElementById('rv-contact-footer').innerHTML = `
-    <div>${hasBrandingValue(mergedBranding.contact_phones) ? `📞 ${escapeHtml(mergedBranding.contact_phones)}` : ''}</div>
-    <div>${hasBrandingValue(mergedBranding.email) ? `✉️ ${escapeHtml(mergedBranding.email)}` : ''}</div>
-    <div>${hasBrandingValue(mergedBranding.address) ? `📍 ${escapeHtml(mergedBranding.address)}` : ''}</div>
-    <div class="rv-mini">${escapeHtml(mergedBranding.footer_text || '')}</div>
+    ${hasBrandingValue(mergedBranding.contact_phones) ? `<span>📞 ${escapeHtml(mergedBranding.contact_phones)}</span>` : ''}
+    ${hasBrandingValue(mergedBranding.email) ? `<span>✉️ ${escapeHtml(mergedBranding.email)}</span>` : ''}
+    ${hasBrandingValue(mergedBranding.address) ? `<span>📍 ${escapeHtml(mergedBranding.address)}</span>` : ''}
   `;
 }
 
