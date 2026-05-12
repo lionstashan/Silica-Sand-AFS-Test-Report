@@ -1387,6 +1387,13 @@ async function loginEmployee() {
     const current = getStoredRole();
     const defaultRole = current && roles.includes(current) ? current : roles[0];
     localStorage.setItem('userRole', defaultRole);
+    const params = new URLSearchParams(window.location.search || '');
+    const requestedNext = String(params.get('next') || '').trim();
+    const safeNext = requestedNext.startsWith('/') && !requestedNext.startsWith('//') ? requestedNext : '';
+    if (safeNext) {
+      window.location.href = safeNext;
+      return;
+    }
     window.location.reload();
   } catch (error) {
     showEmployeeLoginMessage(error.message || 'Login failed');
@@ -1414,6 +1421,13 @@ function initializeRole() {
   }
   const activeRole = getStoredRole();
   if (activeRole) {
+    const params = new URLSearchParams(window.location.search || '');
+    const requestedNext = String(params.get('next') || '').trim();
+    const safeNext = requestedNext.startsWith('/') && !requestedNext.startsWith('//') ? requestedNext : '';
+    if (safeNext && safeNext !== window.location.pathname) {
+      window.location.replace(safeNext);
+      return;
+    }
     userRole = activeRole;
     hideModals();
     showAppContent();

@@ -3757,15 +3757,33 @@ function mapTransportRoleToExpenseRole(transportRole) {
   if (transportRole === 'Admin') return 'Admin';
   if (transportRole === 'Accounts') return 'Accounts';
   if (transportRole === 'Manager') return 'Manager';
+  if (['Gate', 'Dispatch', 'Loading', 'Weighbridge'].includes(transportRole)) return 'Employee';
   return null;
 }
 
-async function ensureExpenseSsoUser(client, transportRole) {
+function normalizeExpenseSsoUsername(raw) {
+  return String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 60) || 'employee';
+}
+
+async function ensureExpenseSsoUser(client, transportRole, transportUser = null) {
   const expenseRole = mapTransportRoleToExpenseRole(transportRole);
   if (!expenseRole) return null;
-  const username = `sso_${expenseRole.toLowerCase()}`;
-  const fullName = `Transport ${expenseRole} SSO`;
-  const employeeCode = `SSO-${expenseRole.toUpperCase()}`;
+  const isNamedEmployeeSso = expenseRole === 'Employee' && transportUser && transportUser.username;
+  const username = isNamedEmployeeSso
+    ? normalizeExpenseSsoUsername(transportUser.username)
+    : `sso_${expenseRole.toLowerCase()}`;
+  const fullName = isNamedEmployeeSso
+    ? String(transportUser.full_name || transportUser.username || `Transport ${transportRole}`).trim()
+    : `Transport ${expenseRole} SSO`;
+  const employeeCode = isNamedEmployeeSso
+    ? `EMP-${String(transportUser.id || username).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40)}`
+    : `SSO-${expenseRole.toUpperCase()}`;
   const existing = await client.query(
     `SELECT id, employee_code, full_name, username, role, is_active
      FROM expense_users
@@ -3941,7 +3959,7 @@ app.post('/expense/sso', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const expenseUser = await ensureExpenseSsoUser(client, transportRole);
+    const expenseUser = await ensureExpenseSsoUser(client, transportRole, auth.user || null);
     if (!expenseUser) {
       await client.query('ROLLBACK');
       await recordExpenseLoginAttempt({
@@ -3957,7 +3975,7 @@ app.post('/expense/sso', async (req, res) => {
       `INSERT INTO transport_expense_user_map(transport_username, transport_role, expense_user_id)
        VALUES ($1,$2,$3)
        ON CONFLICT (transport_role, expense_user_id) DO NOTHING`,
-      [transportRole.toLowerCase(), transportRole, expenseUser.id]
+      [String(auth.user?.username || transportRole || '').toLowerCase(), transportRole, expenseUser.id]
     );
     await client.query('COMMIT');
 

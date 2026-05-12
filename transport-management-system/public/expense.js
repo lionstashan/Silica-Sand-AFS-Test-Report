@@ -1,5 +1,6 @@
 const TOKEN_KEY = 'expenseToken';
 const USER_KEY = 'expenseUser';
+const TRANSPORT_TOKEN_KEY = 'employeeTransportToken';
 
 let me = null;
 let queue = [];
@@ -63,6 +64,15 @@ function clearRemarksError() {
 
 function getToken() {
   return localStorage.getItem(TOKEN_KEY) || '';
+}
+
+function getTransportRole() {
+  const role = String(localStorage.getItem('userRole') || '').trim();
+  return role || null;
+}
+
+function getTransportToken() {
+  return String(localStorage.getItem(TRANSPORT_TOKEN_KEY) || '').trim();
 }
 
 function getHeaders(extra = {}) {
@@ -176,38 +186,52 @@ async function api(path, options = {}) {
   return data;
 }
 
-async function login() {
-  const username = $('login-username').value.trim();
-  const password = $('login-password').value.trim();
-  if (!username || !password) {
-    $('login-msg').textContent = 'Username and password are required';
-    return;
+function redirectToMainLogin() {
+  const next = encodeURIComponent('/expense');
+  window.location.replace(`/?next=${next}`);
+}
+
+async function ensureExpenseSessionFromTransport() {
+  const transportRole = getTransportRole();
+  const transportToken = getTransportToken();
+  if (!transportRole || !transportToken) {
+    redirectToMainLogin();
+    return false;
   }
-  const loginBtn = $('login-btn');
+
+  const existingToken = getToken();
+  if (existingToken) {
+    try {
+      const user = await api('/expense/me', { headers: getHeaders() });
+      if (user?.id) {
+        me = user;
+        localStorage.setItem(USER_KEY, JSON.stringify(user));
+        return true;
+      }
+    } catch (_error) {
+      clearSession();
+    }
+  }
+
   try {
-    setButtonBusy(loginBtn, true, 'Logging in...');
-    const data = await api('/expense/login', {
+    const response = await fetch('/expense/sso', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
+      headers: {
+        'x-user-role': transportRole,
+        'x-user-token': transportToken
+      }
     });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data?.token || !data?.user) {
+      throw new Error(data.error || 'Expense SSO failed');
+    }
     saveSession(data.token, data.user);
     me = data.user;
-    $('login-panel').style.display = 'none';
-    $('app-panel').style.display = '';
-    if ($('logout-btn')) $('logout-btn').style.display = 'inline-block';
-    if ($('me-label')) $('me-label').style.display = 'inline-block';
-    initApp();
-    if (expenseNotifPoll) clearInterval(expenseNotifPoll);
-    loadExpenseNotifications();
-    expenseNotifPoll = setInterval(() => {
-      if (!me || !getToken()) return;
-      loadExpenseNotifications();
-    }, 15000);
+    return true;
   } catch (error) {
-    $('login-msg').textContent = error.message;
-  } finally {
-    setButtonBusy(loginBtn, false);
+    $('login-msg').textContent = error.message || 'Expense SSO failed';
+    redirectToMainLogin();
+    return false;
   }
 }
 
@@ -747,10 +771,9 @@ async function initApp() {
 }
 
 function setup() {
-  $('login-btn').addEventListener('click', login);
   $('logout-btn').addEventListener('click', () => {
     clearSession();
-    window.location.reload();
+    redirectToMainLogin();
   });
   $('create-claim-btn').addEventListener('click', createAndSubmitClaim);
   const loadDashboardBtn = $('load-dashboard-btn');
@@ -769,29 +792,35 @@ function setup() {
   $('expense-mark-read-btn')?.addEventListener('click', markExpenseNotificationsRead);
 
   loadSession();
-  if (me && getToken()) {
-    $('login-panel').style.display = 'none';
-    $('app-panel').style.display = '';
-    if ($('logout-btn')) $('logout-btn').style.display = 'inline-block';
-    if ($('me-label')) $('me-label').style.display = 'inline-block';
-    initApp().catch((error) => {
+  $('login-panel').style.display = 'none';
+  $('app-panel').style.display = 'none';
+  if ($('logout-btn')) $('logout-btn').style.display = 'none';
+  if ($('me-label')) $('me-label').style.display = 'none';
+
+  ensureExpenseSessionFromTransport()
+    .then((ok) => {
+      if (!ok) return;
+      $('login-panel').style.display = 'none';
+      $('app-panel').style.display = '';
+      if ($('logout-btn')) $('logout-btn').style.display = 'inline-block';
+      if ($('me-label')) $('me-label').style.display = 'inline-block';
+      return initApp();
+    })
+    .then(() => {
+      if (!me) return;
+      if (expenseNotifPoll) clearInterval(expenseNotifPoll);
+      loadExpenseNotifications();
+      expenseNotifPoll = setInterval(() => {
+        if (!me || !getToken()) return;
+        loadExpenseNotifications();
+      }, 15000);
+    })
+    .catch((error) => {
       clearSession();
       $('app-panel').style.display = 'none';
       $('login-panel').style.display = '';
-      if ($('logout-btn')) $('logout-btn').style.display = 'none';
-      if ($('me-label')) $('me-label').style.display = 'none';
-      $('login-msg').textContent = error.message;
+      $('login-msg').textContent = error.message || 'Expense login failed';
     });
-    if (expenseNotifPoll) clearInterval(expenseNotifPoll);
-    loadExpenseNotifications();
-    expenseNotifPoll = setInterval(() => {
-      if (!me || !getToken()) return;
-      loadExpenseNotifications();
-    }, 15000);
-  } else {
-    if ($('logout-btn')) $('logout-btn').style.display = 'none';
-    if ($('me-label')) $('me-label').style.display = 'none';
-  }
 }
 
 document.addEventListener('DOMContentLoaded', setup);
