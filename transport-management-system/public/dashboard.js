@@ -10,7 +10,7 @@ const timelineModalBody = document.getElementById('timeline-modal-body');
 const taskNotificationsBtn = document.getElementById('task-notifications-btn');
 const taskNotificationBadge = document.getElementById('task-notification-badge');
 const IST_TIMEZONE = 'Asia/Kolkata';
-const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Manager', 'Admin'];
+const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Accounts', 'Manager', 'Admin'];
 const DISPATCH_ZONE_STATUSES = [
   'AT_DISPATCH',
   'WAITING'
@@ -48,6 +48,7 @@ const rolePINs = {
   'Weighbridge': 'W3K7',
   'Dispatch': 'D9M4',
   'Loading': 'L5Q8',
+  'LAB': 'L4B9',
   'Accounts': 'A6R1',
   'Manager': 'M2N6',
   'Admin': '2802'
@@ -210,8 +211,10 @@ function showAppContent() {
   const expectedTrucksLink = document.getElementById('expected-trucks-link');
   const customerPortalLink = document.getElementById('customer-portal-link');
   const adminControlLink = document.getElementById('admin-control-link');
+  const reportsLink = document.getElementById('reports-link');
   const canSeeExpense = ['Admin', 'Accounts', 'Manager'].includes(userRole);
   const canSeeAnalytics = ['Admin', 'Accounts', 'Manager'].includes(userRole);
+  const canSeeReports = ['LAB', 'Dispatch', 'Weighbridge', 'Accounts', 'Manager', 'Admin'].includes(userRole);
   const canSeeExpectedTrucks = ['Gate', 'Admin', 'Manager', 'Dispatch'].includes(userRole);
   const canSeeCustomerPortal = ['Admin', 'Manager', 'Dispatch', 'Accounts'].includes(userRole);
   const canSeeAdminControl = userRole === 'Admin';
@@ -229,6 +232,9 @@ function showAppContent() {
   }
   if (adminControlLink) {
     adminControlLink.style.display = canSeeAdminControl ? 'inline-block' : 'none';
+  }
+  if (reportsLink) {
+    reportsLink.style.display = canSeeReports ? 'inline-block' : 'none';
   }
   const roleSwitcher = document.getElementById('role-switcher');
   if (roleSwitcher) {
@@ -303,9 +309,17 @@ function validatePIN(role, pin) {
 
 function logout() {
   localStorage.removeItem('userRole');
+  localStorage.removeItem('employeeAuth');
+  localStorage.removeItem('employeeTransportToken');
+  localStorage.removeItem('expenseToken');
+  localStorage.removeItem('expenseUser');
+  localStorage.removeItem('customerUsername');
+  localStorage.removeItem('customerPassword');
+  localStorage.removeItem('customerToken');
+  localStorage.removeItem('adminSelectedCustomerUserId');
   userRole = null;
   if (taskNotificationPoll) clearInterval(taskNotificationPoll);
-  window.location.reload();
+  window.location.href = '/';
 }
 
 // Setup event listeners for role selection

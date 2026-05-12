@@ -50,64 +50,149 @@
         <button id="sales-load-btn" type="button">Load Analytics</button>
       </div>
     </div>
-    <div id="sales-kpi-cards" class="summary-cards"></div>
-    <div class="sales-chart-grid">
-      <div class="sales-chart-card">
-        <h3>Trend (Date-wise Total ₹)</h3>
+    <div class="analytics-toolbar">
+      <div id="analytics-tabs" class="workflow-row">
+        <button type="button" class="workflow-btn analytics-tab active" data-tab="overview">Overview</button>
+        <button type="button" class="workflow-btn analytics-tab" data-tab="sales">Sales</button>
+        <button type="button" class="workflow-btn analytics-tab" data-tab="customer">Customer</button>
+        <button type="button" class="workflow-btn analytics-tab" data-tab="operations">Operations</button>
+      </div>
+      <div class="workflow-row">
+        <button type="button" id="analytics-layout-reset" class="workflow-btn">Reset Layout</button>
+      </div>
+    </div>
+    <div id="analytics-module-controls" class="analytics-module-controls"></div>
+
+    <div id="analytics-modules" class="analytics-modules">
+      <article class="analytics-module" data-module="kpi" data-tab="overview">
+        <div class="analytics-module-header">
+          <h3>Executive Summary</h3>
+          <div class="analytics-module-actions">
+            <button type="button" class="workflow-btn analytics-move-up">↑</button>
+            <button type="button" class="workflow-btn analytics-move-down">↓</button>
+          </div>
+        </div>
+        <div id="sales-kpi-cards" class="summary-cards"></div>
+      </article>
+
+      <article class="analytics-module" data-module="trend-chart" data-tab="overview">
+        <div class="analytics-module-header">
+          <h3>Trend (Date-wise Total ₹)</h3>
+          <div class="analytics-module-actions">
+            <button type="button" class="workflow-btn analytics-move-up">↑</button>
+            <button type="button" class="workflow-btn analytics-move-down">↓</button>
+          </div>
+        </div>
         <div id="sales-trend-chart" class="sales-bar-chart"></div>
-      </div>
-      <div class="sales-chart-card">
-        <h3>Grade-wise Total ₹</h3>
+      </article>
+
+      <article class="analytics-module" data-module="trend-table" data-tab="overview">
+        <div class="analytics-module-header">
+          <h3>Trend Table</h3>
+          <div class="analytics-module-actions">
+            <button type="button" class="workflow-btn analytics-move-up">↑</button>
+            <button type="button" class="workflow-btn analytics-move-down">↓</button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr><th>Date</th><th>Trips</th><th>Qty (MT)</th><th>Amount (₹)</th></tr>
+            </thead>
+            <tbody id="sales-trend-table"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="analytics-module" data-module="grade-chart" data-tab="sales">
+        <div class="analytics-module-header">
+          <h3>Grade-wise Total ₹</h3>
+          <div class="analytics-module-actions">
+            <button type="button" class="workflow-btn analytics-move-up">↑</button>
+            <button type="button" class="workflow-btn analytics-move-down">↓</button>
+          </div>
+        </div>
         <div id="sales-grade-chart" class="sales-bar-chart"></div>
-      </div>
-      <div class="sales-chart-card">
-        <h3>Customer-wise Total ₹</h3>
+      </article>
+
+      <article class="analytics-module" data-module="grade-table" data-tab="sales">
+        <div class="analytics-module-header">
+          <h3>Grade-wise Sales</h3>
+          <div class="analytics-module-actions">
+            <button type="button" class="workflow-btn analytics-move-up">↑</button>
+            <button type="button" class="workflow-btn analytics-move-down">↓</button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr><th>Grade</th><th>Trips</th><th>Qty (MT)</th><th>Amount (₹)</th><th>Avg ₹/MT</th></tr>
+            </thead>
+            <tbody id="sales-grade-table"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="analytics-module" data-module="customer-chart" data-tab="customer">
+        <div class="analytics-module-header">
+          <h3>Customer-wise Total ₹</h3>
+          <div class="analytics-module-actions">
+            <button type="button" class="workflow-btn analytics-move-up">↑</button>
+            <button type="button" class="workflow-btn analytics-move-down">↓</button>
+          </div>
+        </div>
         <div id="sales-customer-chart" class="sales-bar-chart"></div>
-      </div>
-      <div class="sales-chart-card">
-        <h3>Material-wise Total ₹</h3>
+      </article>
+
+      <article class="analytics-module" data-module="customer-table" data-tab="customer">
+        <div class="analytics-module-header">
+          <h3>Customer-wise Sales</h3>
+          <div class="analytics-module-actions">
+            <button type="button" class="workflow-btn analytics-move-up">↑</button>
+            <button type="button" class="workflow-btn analytics-move-down">↓</button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr><th>Customer</th><th>Trips</th><th>Qty (MT)</th><th>Amount (₹)</th><th>Avg ₹/MT</th></tr>
+            </thead>
+            <tbody id="sales-customer-table"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="analytics-module" data-module="material-chart" data-tab="operations">
+        <div class="analytics-module-header">
+          <h3>Material-wise Total ₹</h3>
+          <div class="analytics-module-actions">
+            <button type="button" class="workflow-btn analytics-move-up">↑</button>
+            <button type="button" class="workflow-btn analytics-move-down">↓</button>
+          </div>
+        </div>
         <div id="sales-material-chart" class="sales-bar-chart"></div>
-      </div>
-    </div>
-    <div class="table-container">
-      <h3>Trend (Date-wise)</h3>
-      <table>
-        <thead>
-          <tr><th>Date</th><th>Trips</th><th>Qty (MT)</th><th>Amount (₹)</th></tr>
-        </thead>
-        <tbody id="sales-trend-table"></tbody>
-      </table>
-    </div>
-    <div class="table-container">
-      <h3>Grade-wise Sales</h3>
-      <table>
-        <thead>
-          <tr><th>Grade</th><th>Trips</th><th>Qty (MT)</th><th>Amount (₹)</th><th>Avg ₹/MT</th></tr>
-        </thead>
-        <tbody id="sales-grade-table"></tbody>
-      </table>
-    </div>
-    <div class="table-container">
-      <h3>Customer-wise Sales</h3>
-      <table>
-        <thead>
-          <tr><th>Customer</th><th>Trips</th><th>Qty (MT)</th><th>Amount (₹)</th><th>Avg ₹/MT</th></tr>
-        </thead>
-        <tbody id="sales-customer-table"></tbody>
-      </table>
-    </div>
-    <div class="table-container">
-      <h3>Material-wise Sales</h3>
-      <table>
-        <thead>
-          <tr><th>Material</th><th>Trips</th><th>Qty (MT)</th><th>Amount (₹)</th><th>Avg ₹/MT</th></tr>
-        </thead>
-        <tbody id="sales-material-table"></tbody>
-      </table>
+      </article>
+
+      <article class="analytics-module" data-module="material-table" data-tab="operations">
+        <div class="analytics-module-header">
+          <h3>Material-wise Sales</h3>
+          <div class="analytics-module-actions">
+            <button type="button" class="workflow-btn analytics-move-up">↑</button>
+            <button type="button" class="workflow-btn analytics-move-down">↓</button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr><th>Material</th><th>Trips</th><th>Qty (MT)</th><th>Amount (₹)</th><th>Avg ₹/MT</th></tr>
+            </thead>
+            <tbody id="sales-material-table"></tbody>
+          </table>
+        </div>
+      </article>
     </div>
   </section>
 
-  <script src="accounts-analytics.js?v=20260512-1"></script>
+  <script src="accounts-analytics.js?v=20260513-2"></script>
 </body>
 </html>
-

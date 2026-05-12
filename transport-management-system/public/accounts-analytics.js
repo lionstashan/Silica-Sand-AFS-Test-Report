@@ -1,15 +1,19 @@
 let userRole = null;
-const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Manager', 'Admin'];
+const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Accounts', 'Manager', 'Admin'];
 const rolePINs = {
   Gate: 'G8P2',
   Weighbridge: 'W3K7',
   Dispatch: 'D9M4',
   Loading: 'L5Q8',
+  LAB: 'L4B9',
   Accounts: 'A6R1',
   Manager: 'M2N6',
   Admin: '2802'
 };
 const EMPLOYEE_TRANSPORT_TOKEN_KEY = 'employeeTransportToken';
+const ANALYTICS_LAYOUT_KEY = 'accountsAnalyticsLayoutV1';
+let activeAnalyticsTab = 'overview';
+let analyticsLayout = { hidden: {}, order: {} };
 
 function escapeHtml(value) {
   return String(value || '')
@@ -59,6 +63,12 @@ function logout() {
   localStorage.removeItem('userRole');
   localStorage.removeItem('employeeAuth');
   localStorage.removeItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
+  localStorage.removeItem('expenseToken');
+  localStorage.removeItem('expenseUser');
+  localStorage.removeItem('customerUsername');
+  localStorage.removeItem('customerPassword');
+  localStorage.removeItem('customerToken');
+  localStorage.removeItem('adminSelectedCustomerUserId');
   window.location.href = '/';
 }
 
@@ -70,6 +80,148 @@ function formatWeightMT(value) {
 function formatCurrencyINR(value) {
   const amount = Number(value || 0);
   return amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function loadAnalyticsLayout() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ANALYTICS_LAYOUT_KEY) || '{}');
+    analyticsLayout = {
+      hidden: parsed && parsed.hidden && typeof parsed.hidden === 'object' ? parsed.hidden : {},
+      order: parsed && parsed.order && typeof parsed.order === 'object' ? parsed.order : {}
+    };
+  } catch (_e) {
+    analyticsLayout = { hidden: {}, order: {} };
+  }
+}
+
+function saveAnalyticsLayout() {
+  localStorage.setItem(ANALYTICS_LAYOUT_KEY, JSON.stringify(analyticsLayout));
+}
+
+function getAnalyticsModules() {
+  return Array.from(document.querySelectorAll('#analytics-modules .analytics-module'));
+}
+
+function getModuleMeta(moduleEl) {
+  return {
+    id: moduleEl.getAttribute('data-module') || '',
+    tab: moduleEl.getAttribute('data-tab') || 'overview',
+    title: moduleEl.querySelector('h3')?.textContent?.trim() || 'Module'
+  };
+}
+
+function applyAnalyticsModuleOrder() {
+  const container = document.getElementById('analytics-modules');
+  if (!container) return;
+  const modules = getAnalyticsModules();
+  const byTab = modules.reduce((acc, moduleEl) => {
+    const meta = getModuleMeta(moduleEl);
+    if (!acc[meta.tab]) acc[meta.tab] = [];
+    acc[meta.tab].push({ meta, moduleEl });
+    return acc;
+  }, {});
+  Object.entries(byTab).forEach(([tab, entries]) => {
+    const preferred = Array.isArray(analyticsLayout.order[tab]) ? analyticsLayout.order[tab] : [];
+    entries.sort((a, b) => {
+      const ai = preferred.indexOf(a.meta.id);
+      const bi = preferred.indexOf(b.meta.id);
+      if (ai === -1 && bi === -1) return 0;
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+    entries.forEach(({ moduleEl }) => container.appendChild(moduleEl));
+    analyticsLayout.order[tab] = entries.map((entry) => entry.meta.id);
+  });
+  saveAnalyticsLayout();
+}
+
+function renderAnalyticsModuleControls() {
+  const controlsWrap = document.getElementById('analytics-module-controls');
+  if (!controlsWrap) return;
+  const modules = getAnalyticsModules().filter((moduleEl) => getModuleMeta(moduleEl).tab === activeAnalyticsTab);
+  if (!modules.length) {
+    controlsWrap.innerHTML = '';
+    return;
+  }
+  controlsWrap.innerHTML = modules.map((moduleEl) => {
+    const meta = getModuleMeta(moduleEl);
+    const checked = analyticsLayout.hidden[meta.id] ? '' : 'checked';
+    return `<label class="analytics-module-toggle">
+      <input type="checkbox" data-module-toggle="${escapeHtml(meta.id)}" ${checked} />
+      ${escapeHtml(meta.title)}
+    </label>`;
+  }).join('');
+
+  controlsWrap.querySelectorAll('input[data-module-toggle]').forEach((inputEl) => {
+    inputEl.addEventListener('change', (event) => {
+      const moduleId = event.target.getAttribute('data-module-toggle');
+      analyticsLayout.hidden[moduleId] = !event.target.checked;
+      saveAnalyticsLayout();
+      applyAnalyticsTabVisibility();
+    });
+  });
+}
+
+function applyAnalyticsTabVisibility() {
+  const modules = getAnalyticsModules();
+  modules.forEach((moduleEl) => {
+    const meta = getModuleMeta(moduleEl);
+    const isTabActive = meta.tab === activeAnalyticsTab;
+    const isHidden = !!analyticsLayout.hidden[meta.id];
+    moduleEl.style.display = isTabActive && !isHidden ? '' : 'none';
+  });
+  renderAnalyticsModuleControls();
+}
+
+function moveAnalyticsModule(moduleEl, direction) {
+  const meta = getModuleMeta(moduleEl);
+  const tab = meta.tab;
+  const currentOrder = Array.isArray(analyticsLayout.order[tab]) ? [...analyticsLayout.order[tab]] : [];
+  if (!currentOrder.length) return;
+  const index = currentOrder.indexOf(meta.id);
+  if (index === -1) return;
+  const nextIndex = direction === 'up' ? index - 1 : index + 1;
+  if (nextIndex < 0 || nextIndex >= currentOrder.length) return;
+  const swap = currentOrder[nextIndex];
+  currentOrder[nextIndex] = currentOrder[index];
+  currentOrder[index] = swap;
+  analyticsLayout.order[tab] = currentOrder;
+  saveAnalyticsLayout();
+  applyAnalyticsModuleOrder();
+  applyAnalyticsTabVisibility();
+}
+
+function bindAnalyticsModuleActions() {
+  getAnalyticsModules().forEach((moduleEl) => {
+    const upBtn = moduleEl.querySelector('.analytics-move-up');
+    const downBtn = moduleEl.querySelector('.analytics-move-down');
+    upBtn?.addEventListener('click', () => moveAnalyticsModule(moduleEl, 'up'));
+    downBtn?.addEventListener('click', () => moveAnalyticsModule(moduleEl, 'down'));
+  });
+}
+
+function activateAnalyticsTab(tab) {
+  activeAnalyticsTab = tab;
+  document.querySelectorAll('.analytics-tab').forEach((tabEl) => {
+    tabEl.classList.toggle('active', tabEl.getAttribute('data-tab') === tab);
+  });
+  applyAnalyticsTabVisibility();
+}
+
+function bindAnalyticsTabs() {
+  document.querySelectorAll('.analytics-tab').forEach((tabEl) => {
+    tabEl.addEventListener('click', () => {
+      const tab = tabEl.getAttribute('data-tab') || 'overview';
+      activateAnalyticsTab(tab);
+    });
+  });
+  document.getElementById('analytics-layout-reset')?.addEventListener('click', () => {
+    analyticsLayout = { hidden: {}, order: {} };
+    saveAnalyticsLayout();
+    applyAnalyticsModuleOrder();
+    applyAnalyticsTabVisibility();
+  });
 }
 
 function renderSalesKpis(summary = {}) {
@@ -228,6 +380,11 @@ function initializeAccess() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   if (!initializeAccess()) return;
+  loadAnalyticsLayout();
+  bindAnalyticsTabs();
+  bindAnalyticsModuleActions();
+  applyAnalyticsModuleOrder();
+  activateAnalyticsTab('overview');
   document.getElementById('logout-link')?.addEventListener('click', (event) => {
     event.preventDefault();
     logout();
@@ -247,4 +404,3 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('sales-load-btn')?.addEventListener('click', loadSalesAnalytics);
   await loadSalesAnalytics();
 });
-

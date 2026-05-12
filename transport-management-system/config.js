@@ -11,6 +11,7 @@ const DEFAULT_ROLE_PINS = {
   Weighbridge: 'W3K7',
   Dispatch: 'D9M4',
   Loading: 'L5Q8',
+  LAB: 'L4B9',
   Accounts: 'A6R1',
   Manager: 'M2N6',
   Admin: '2802'
@@ -27,6 +28,7 @@ function getRolePins() {
     Weighbridge: process.env.ROLE_PIN_WEIGHBRIDGE || DEFAULT_ROLE_PINS.Weighbridge,
     Dispatch: process.env.ROLE_PIN_DISPATCH || DEFAULT_ROLE_PINS.Dispatch,
     Loading: process.env.ROLE_PIN_LOADING || DEFAULT_ROLE_PINS.Loading,
+    LAB: process.env.ROLE_PIN_LAB || DEFAULT_ROLE_PINS.LAB,
     Accounts: process.env.ROLE_PIN_ACCOUNTS || DEFAULT_ROLE_PINS.Accounts,
     Manager: process.env.ROLE_PIN_MANAGER || DEFAULT_ROLE_PINS.Manager,
     Admin: process.env.ROLE_PIN_ADMIN || DEFAULT_ROLE_PINS.Admin

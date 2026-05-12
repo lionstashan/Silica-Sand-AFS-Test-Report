@@ -165,6 +165,73 @@ button.is-busy::after {
   to { transform: rotate(360deg); }
 }
 
+.report-graph-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.report-graph-card {
+  border: 1px solid #dbe5f0;
+  border-radius: 10px;
+  background: #fbfdff;
+  padding: 10px;
+}
+
+.report-graph-card h3 {
+  margin: 0 0 8px;
+  font-size: 0.96rem;
+  color: #0f4c81;
+}
+
+.report-chart {
+  min-height: 220px;
+}
+
+.mini-bars {
+  display: grid;
+  gap: 8px;
+}
+
+.mini-bar-row {
+  display: grid;
+  grid-template-columns: 120px 1fr 64px;
+  gap: 8px;
+  align-items: center;
+}
+
+.mini-bar-label {
+  font-size: 0.82rem;
+  color: #1e293b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-bar-track {
+  background: #e6eef8;
+  border-radius: 999px;
+  overflow: hidden;
+  height: 10px;
+}
+
+.mini-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2f80ed, #34c6ff);
+}
+
+.mini-bar-value {
+  text-align: right;
+  font-size: 0.8rem;
+  color: #334155;
+}
+
+@media (max-width: 900px) {
+  .report-graph-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .notif-badge {
   display: inline-block;
   margin-left: 6px;
@@ -1285,6 +1352,67 @@ tr:nth-child(even) {
   color: #64748b;
   font-size: 0.85rem;
   padding: 8px 4px;
+}
+
+.analytics-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+.analytics-tab.active {
+  background: #0f4c81;
+  color: #fff;
+}
+
+.analytics-module-controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.analytics-module-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.analytics-modules {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.analytics-module {
+  border: 1px solid #dbe4f0;
+  border-radius: 10px;
+  padding: 10px;
+  background: #fff;
+}
+
+.analytics-module-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.analytics-module-header h3 {
+  margin: 0;
+}
+
+.analytics-module-actions {
+  display: flex;
+  gap: 6px;
 }
 
 .card-blue {

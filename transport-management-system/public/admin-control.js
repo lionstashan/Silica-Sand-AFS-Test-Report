@@ -3,11 +3,12 @@ const ROLE_PINS = {
   Weighbridge: 'W3K7',
   Dispatch: 'D9M4',
   Loading: 'L5Q8',
+  LAB: 'L4B9',
   Accounts: 'A6R1',
   Manager: 'M2N6',
   Admin: '2802'
 };
-const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Manager', 'Admin'];
+const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Accounts', 'Manager', 'Admin'];
 let globalToastTimer = null;
 
 function getAuthHeaders() {
@@ -73,6 +74,14 @@ function showEmployeeModalMessage(msg, ok = true) {
 
 function showSettingsMessage(msg, ok = true) {
   const el = document.getElementById('settings-message');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.color = ok ? '#047857' : '#b91c1c';
+  showGlobalToast(msg, ok);
+}
+
+function showReportBrandingMessage(msg, ok = true) {
+  const el = document.getElementById('report-branding-message');
   if (!el) return;
   el.textContent = msg || '';
   el.style.color = ok ? '#047857' : '#b91c1c';
@@ -309,7 +318,8 @@ async function refreshAll() {
     loadEmployees(),
     loadCustomerUsers(),
     loadMasterValues(),
-    loadSettings()
+    loadSettings(),
+    loadReportBranding()
   ]);
 }
 
@@ -320,6 +330,25 @@ async function loadSettings() {
     showSettingsMessage('');
   } catch (error) {
     showSettingsMessage(error.message, false);
+  }
+}
+
+async function loadReportBranding() {
+  try {
+    const data = await api('/admin/control/report-branding');
+    document.getElementById('rb-company-name').value = data.company_name || '';
+    document.getElementById('rb-address').value = data.address || '';
+    document.getElementById('rb-phones').value = data.contact_phones || '';
+    document.getElementById('rb-email').value = data.email || '';
+    document.getElementById('rb-website').value = data.website || '';
+    document.getElementById('rb-gst').value = data.gst_no || '';
+    document.getElementById('rb-cin').value = data.cin || '';
+    document.getElementById('rb-footer').value = data.footer_text || '';
+    document.getElementById('rb-sign-lab').value = data.signature_lab || '';
+    document.getElementById('rb-sign-qa').value = data.signature_qa || '';
+    showReportBrandingMessage('');
+  } catch (error) {
+    showReportBrandingMessage(error.message || 'Failed to load report branding', false);
   }
 }
 
@@ -543,6 +572,32 @@ async function init() {
       showMessage('Settings saved');
     } catch (error) {
       showSettingsMessage(error.message, false);
+      showMessage(error.message, false);
+    }
+  });
+
+  document.getElementById('report-branding-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('/admin/control/report-branding', {
+        method: 'POST',
+        body: JSON.stringify({
+          company_name: document.getElementById('rb-company-name').value.trim(),
+          address: document.getElementById('rb-address').value.trim(),
+          contact_phones: document.getElementById('rb-phones').value.trim(),
+          email: document.getElementById('rb-email').value.trim(),
+          website: document.getElementById('rb-website').value.trim(),
+          gst_no: document.getElementById('rb-gst').value.trim(),
+          cin: document.getElementById('rb-cin').value.trim(),
+          footer_text: document.getElementById('rb-footer').value.trim(),
+          signature_lab: document.getElementById('rb-sign-lab').value.trim(),
+          signature_qa: document.getElementById('rb-sign-qa').value.trim()
+        })
+      });
+      showReportBrandingMessage('Report branding saved');
+      showMessage('Report branding saved');
+    } catch (error) {
+      showReportBrandingMessage(error.message, false);
       showMessage(error.message, false);
     }
   });

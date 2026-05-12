@@ -187,9 +187,17 @@ function initializeRole() {
 
 function logout() {
   localStorage.removeItem('userRole');
+  localStorage.removeItem('employeeAuth');
+  localStorage.removeItem('employeeTransportToken');
+  localStorage.removeItem('expenseToken');
+  localStorage.removeItem('expenseUser');
+  localStorage.removeItem('customerUsername');
+  localStorage.removeItem('customerPassword');
+  localStorage.removeItem('customerToken');
+  localStorage.removeItem('adminSelectedCustomerUserId');
   userRole = null;
   if (taskNotificationPoll) clearInterval(taskNotificationPoll);
-  window.location.reload();
+  window.location.href = '/';
 }
 
 function applyFilters() {

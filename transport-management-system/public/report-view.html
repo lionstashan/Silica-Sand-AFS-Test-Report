@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Report Viewer</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <section class="panel wide-panel">
+    <div class="workflow-row" style="justify-content:space-between;">
+      <h2 id="rv-title">Report</h2>
+      <div class="workflow-row">
+        <button type="button" id="rv-print-btn">Print</button>
+        <a href="/reports" class="nav-link">Back</a>
+      </div>
+    </div>
+    <div id="rv-branding" class="mini"></div>
+    <div id="rv-meta" class="form-grid"></div>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr><th>Sr</th><th>Sieve</th><th>Aperture</th><th>Weight</th><th>Factor</th><th>Product</th></tr>
+        </thead>
+        <tbody id="rv-lines"></tbody>
+      </table>
+    </div>
+    <div class="workflow-row" style="margin-top:10px;">
+      <span><strong>Total Qty:</strong> <span id="rv-total-qty">0.00</span></span>
+      <span><strong>Total Product:</strong> <span id="rv-total-product">0.00</span></span>
+      <span><strong>Total AFS:</strong> <span id="rv-total-afs">0.00</span></span>
+    </div>
+    <div id="rv-history" class="mini" style="margin-top:10px;"></div>
+  </section>
+  <script src="/report-view.js?v=20260513-2"></script>
+</body>
+</html>

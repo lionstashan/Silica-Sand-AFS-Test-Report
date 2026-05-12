@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Indus Silica Sand - Reports Portal</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <h1>Indus Silica Sand - Reports Portal</h1>
+    <p>Create and review lab reports with auto calculations.</p>
+    <div class="header-actions">
+      <span id="role-indicator" class="role-indicator" style="display:none;"></span>
+      <a href="#" id="logout-link" class="nav-link" style="display:none;">Logout</a>
+    </div>
+    <nav>
+      <a href="/" class="nav-link">← Back to Main</a>
+      <a href="/dashboard" class="nav-link">Transport Dashboard</a>
+    </nav>
+  </header>
+
+  <section class="panel wide-panel">
+    <h2>Report Form</h2>
+    <form id="report-form" class="form-grid">
+      <label>Report Date
+        <input type="date" id="r-date" required />
+      </label>
+      <label>Truck Number
+        <input type="text" id="r-truck" list="truck-options" required />
+        <datalist id="truck-options"></datalist>
+      </label>
+      <label>Linked Trip ID
+        <input type="number" id="r-trip-id" readonly />
+      </label>
+      <label>Generic (Not linked)
+        <select id="r-generic">
+          <option value="false">No (Linked)</option>
+          <option value="true">Yes (Generic)</option>
+        </select>
+      </label>
+      <label>Customer
+        <input type="text" id="r-customer" />
+      </label>
+      <label>Loading Point
+        <select id="r-loading-point"></select>
+      </label>
+      <label>Material Type
+        <input type="text" id="r-material" />
+      </label>
+      <label>Grade
+        <input type="text" id="r-grade" />
+      </label>
+      <label>Sieve Size
+        <input type="text" id="r-sieve-size" placeholder="e.g. 40-50 AFS" />
+      </label>
+      <label>AFS Reference
+        <input type="text" id="r-afs-ref" placeholder="e.g. 55-60" />
+      </label>
+      <label>AFS Multiplier
+        <input type="number" id="r-afs-mult" step="0.01" value="1" />
+      </label>
+      <label>Lab User
+        <select id="r-lab-user"></select>
+      </label>
+      <label>Notes
+        <input type="text" id="r-notes" />
+      </label>
+    </form>
+
+    <div class="table-container" style="margin-top:12px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Sr</th><th>Sieve</th><th>Aperture</th><th>Weight</th><th>Factor</th><th>Product</th>
+          </tr>
+        </thead>
+        <tbody id="line-items-body"></tbody>
+      </table>
+    </div>
+    <div class="workflow-row" style="margin-top:10px;">
+      <span><strong>Total Qty:</strong> <span id="total-qty">0.00</span></span>
+      <span><strong>Total Product:</strong> <span id="total-product">0.00</span></span>
+      <span><strong>Total AFS:</strong> <span id="total-afs">0.00</span></span>
+    </div>
+    <div class="actions" style="margin-top:10px;">
+      <button type="button" id="save-report-btn">Save Draft</button>
+    </div>
+  </section>
+
+  <section class="panel wide-panel">
+    <h2>Reports</h2>
+    <div class="filters">
+      <div class="filter-group">
+        <label>From
+          <input type="date" id="f-from" />
+        </label>
+        <label>To
+          <input type="date" id="f-to" />
+        </label>
+        <label>Truck
+          <input type="text" id="f-truck" />
+        </label>
+        <label>Status
+          <select id="f-status">
+            <option value="">All</option>
+            <option value="DRAFT">DRAFT</option>
+            <option value="FINALIZED">FINALIZED</option>
+          </select>
+        </label>
+        <button type="button" id="load-reports-btn">Load Reports</button>
+      </div>
+    </div>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th><th>Date</th><th>Truck</th><th>Customer</th><th>Loading Point</th><th>Sieve Size</th><th>AFS</th><th>Status</th><th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="reports-table"></tbody>
+      </table>
+    </div>
+    <div class="workflow-row" style="margin-top:10px;">
+      <button type="button" id="prev-page-btn">Previous</button>
+      <span id="reports-pagination">Page 1 / 1</span>
+      <button type="button" id="next-page-btn">Next</button>
+    </div>
+  </section>
+
+  <section class="panel wide-panel">
+    <h2>Report Trends</h2>
+    <div class="report-graph-grid">
+      <div class="report-graph-card">
+        <h3>AFS Trend (by date)</h3>
+        <div id="afs-trend-chart" class="report-chart"></div>
+      </div>
+      <div class="report-graph-card">
+        <h3>Sieve Size Distribution</h3>
+        <div id="sieve-size-chart" class="report-chart"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel wide-panel">
+    <p id="reports-message"></p>
+  </section>
+
+  <script src="/reports.js?v=20260513-2"></script>
+</body>
+</html>

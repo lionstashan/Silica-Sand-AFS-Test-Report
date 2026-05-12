@@ -658,6 +658,16 @@ function clearAuthCredentials() {
   localStorage.removeItem(STORAGE_TOKEN_KEY);
 }
 
+function clearAllPortalSessions() {
+  clearAuthCredentials();
+  localStorage.removeItem('userRole');
+  localStorage.removeItem('employeeAuth');
+  localStorage.removeItem('employeeTransportToken');
+  localStorage.removeItem('expenseToken');
+  localStorage.removeItem('expenseUser');
+  localStorage.removeItem(STORAGE_ADMIN_SELECTED_CUSTOMER_ID_KEY);
+}
+
 function applyAuthedUI() {
   loginPanel.style.display = 'none';
   appPanel.style.display = adminViewMode ? 'none' : 'block';
@@ -1042,16 +1052,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('logout-link').addEventListener('click', (event) => {
     event.preventDefault();
-    if (adminViewMode) {
-      localStorage.removeItem('userRole');
-      localStorage.removeItem(STORAGE_ADMIN_SELECTED_CUSTOMER_ID_KEY);
-      window.location.reload();
-      return;
-    }
-    clearAuthCredentials();
+    clearAllPortalSessions();
     customerUser = null;
-    applyLoggedOutUI();
-    showMessage('Logged out');
+    window.location.href = '/';
   });
 
   adminCustomerRefreshBtn?.addEventListener('click', async () => {

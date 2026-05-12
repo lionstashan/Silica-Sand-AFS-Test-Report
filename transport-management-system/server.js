@@ -10,7 +10,7 @@ const { appConfig, validateProductionConfig } = require('./config');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Manager', 'Admin'];
+const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Accounts', 'Manager', 'Admin'];
 const ROLE_PINS = appConfig.rolePins;
 
 const STATUS_FLOW = [
@@ -64,6 +64,7 @@ const ROLE_ALLOWED_TARGETS = {
   Dispatch: ['AT_DISPATCH', 'WAITING', 'READY_FOR_LOADING', 'CANCELLED'],
   Loading: ['WAITING', 'LOADING_IN_PROGRESS', 'LOADING_COMPLETED'],
   Weighbridge: ['TARE_WEIGHT_DONE', 'LOAD_FIX_REQUIRED', 'GROSS_WEIGHT_DONE'],
+  LAB: [],
   Accounts: ['BILLING_COMPLETED'],
   Manager: [],
   Admin: STATUS_FLOW
@@ -1429,6 +1430,12 @@ app.get('/dashboard', (req, res) => {
 app.get('/accounts-analytics', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'accounts-analytics.html'));
 });
+app.get('/reports', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'reports.html'));
+});
+app.get('/reports/:id/view', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'report-view.html'));
+});
 
 app.get('/expected-trucks-page', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'expected-trucks.html'));
@@ -2683,13 +2690,14 @@ app.get('/assignees/by-role', async (req, res) => {
          AND u.full_name IS NOT NULL
          AND length(trim(u.full_name)) > 0
        ORDER BY ur.role_name, u.full_name`,
-      [['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Manager', 'Admin']]
+      [['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Accounts', 'Manager', 'Admin']]
     );
     const byRole = {
       Gate: [],
       Dispatch: [],
       Loading: [],
       Weighbridge: [],
+      LAB: [],
       Accounts: [],
       Manager: [],
       Admin: []
@@ -6025,6 +6033,420 @@ app.post('/admin/control/settings', async (req, res) => {
     console.error('Failed to update admin settings', error);
     return res.status(500).json({ error: 'Failed to update settings' });
   }
+});
+
+function canViewReports(role) {
+  return ['LAB', 'Dispatch', 'Weighbridge', 'Accounts', 'Manager', 'Admin'].includes(role);
+}
+
+function canEditReports(role) {
+  return ['LAB', 'Admin'].includes(role);
+}
+
+function normalizeLabLineItems(value) {
+  const source = Array.isArray(value) ? value : [];
+  return source
+    .map((row) => ({
+      mesh_size: normalizeEmpty(row.mesh_size),
+      aperture: normalizeEmpty(row.aperture),
+      weight: toFiniteNumberOrNull(row.weight) || 0,
+      multiplying_factor: toFiniteNumberOrNull(row.multiplying_factor) || 0
+    }))
+    .filter((row) => hasValue(row.mesh_size));
+}
+
+function isValidIsoDate(value) {
+  const s = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime());
+}
+
+function computeLabTotals(lineItems, multiplier) {
+  const m = toFiniteNumberOrNull(multiplier) || 1;
+  let totalQuantity = 0;
+  let totalProduct = 0;
+  const normalized = lineItems.map((row) => {
+    const weight = toFiniteNumberOrNull(row.weight) || 0;
+    const factor = toFiniteNumberOrNull(row.multiplying_factor) || 0;
+    const product = weight * factor;
+    totalQuantity += weight;
+    totalProduct += product;
+    return { ...row, weight, multiplying_factor: factor, product };
+  });
+  const totalAfs = totalQuantity > 0 ? (totalProduct / totalQuantity) * m : 0;
+  return {
+    lineItems: normalized,
+    totalQuantity,
+    totalProduct,
+    totalAfs
+  };
+}
+
+function validateReportPayload(payload, existingRow = null) {
+  const reportDate = String(payload.report_date || '').trim();
+  const truckNumber = String(payload.truck_number || '').trim();
+  const requestedTripId = toFiniteNumberOrNull(payload.trip_id);
+  const requestedIsGeneric = Boolean(payload.is_generic);
+  const loadingPoint = normalizeEmpty(payload.loading_point);
+  const sieveSize = normalizeEmpty(payload.sieve_size);
+  const lineItems = normalizeLabLineItems(payload.line_items);
+  const totals = computeLabTotals(lineItems, payload.afs_multiplier);
+  if (!reportDate || !isValidIsoDate(reportDate)) return { error: 'Valid report_date is required (YYYY-MM-DD)' };
+  if (!truckNumber) return { error: 'truck_number is required' };
+  if (!lineItems.length) return { error: 'At least one sieve line item is required' };
+  if (totals.totalQuantity <= 0) return { error: 'At least one line weight must be greater than zero' };
+  let tripId = requestedTripId;
+  let isGeneric = requestedIsGeneric;
+  if (!isGeneric && !tripId) return { error: 'trip_id is required when report is not generic' };
+  if (isGeneric && !loadingPoint) return { error: 'loading_point is required for generic reports' };
+  if (existingRow && existingRow.status === 'FINALIZED') {
+    return { error: 'Finalized reports cannot be edited directly' };
+  }
+  return {
+    reportDate,
+    truckNumber,
+    loadingPoint,
+    sieveSize,
+    tripId,
+    isGeneric,
+    lineItems,
+    totals
+  };
+}
+
+async function loadReportBranding() {
+  const row = await pool.query(`SELECT value_json FROM admin_settings WHERE key = 'report_branding' LIMIT 1`);
+  return row.rows[0]?.value_json || {};
+}
+
+app.get('/admin/control/report-branding', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can view report branding' });
+  try {
+    const value = await loadReportBranding();
+    return res.json(value);
+  } catch (error) {
+    console.error('Failed to load report branding', error);
+    return res.status(500).json({ error: 'Failed to load report branding' });
+  }
+});
+
+app.post('/admin/control/report-branding', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can update report branding' });
+  const payload = {
+    company_name: normalizeEmpty(req.body.company_name),
+    address: normalizeEmpty(req.body.address),
+    contact_phones: normalizeEmpty(req.body.contact_phones),
+    email: normalizeEmpty(req.body.email),
+    website: normalizeEmpty(req.body.website),
+    gst_no: normalizeEmpty(req.body.gst_no),
+    cin: normalizeEmpty(req.body.cin),
+    footer_text: normalizeEmpty(req.body.footer_text),
+    signature_lab: normalizeEmpty(req.body.signature_lab),
+    signature_qa: normalizeEmpty(req.body.signature_qa)
+  };
+  try {
+    const result = await pool.query(
+      `INSERT INTO admin_settings(key, value_json, updated_at)
+       VALUES ('report_branding', $1::jsonb, NOW())
+       ON CONFLICT (key)
+       DO UPDATE SET value_json = EXCLUDED.value_json, updated_at = NOW()
+       RETURNING value_json, updated_at`,
+      [JSON.stringify(payload)]
+    );
+    return res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Failed to update report branding', error);
+    return res.status(500).json({ error: 'Failed to update report branding' });
+  }
+});
+
+app.get('/api/reports/lab-users', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!canViewReports(auth.role)) return res.status(403).json({ error: 'Not allowed' });
+  try {
+    const result = await pool.query(
+      `SELECT DISTINCT u.full_name
+       FROM users u
+       JOIN user_roles ur ON ur.user_id = u.id
+       WHERE u.is_active = true
+         AND ur.is_active = true
+         AND ur.role_name = 'LAB'
+         AND length(trim(u.full_name)) > 0
+       ORDER BY u.full_name`
+    );
+    return res.json(result.rows.map((row) => row.full_name));
+  } catch (error) {
+    console.error('Failed to load lab users', error);
+    return res.status(500).json({ error: 'Failed to load lab users' });
+  }
+});
+
+app.get('/api/reports/loading-points', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!canViewReports(auth.role)) return res.status(403).json({ error: 'Not allowed' });
+  try {
+    const result = await pool.query(
+      `SELECT DISTINCT value FROM (
+         SELECT NULLIF(TRIM(value), '') AS value
+         FROM admin_master_values
+         WHERE master_type = 'loading_points' AND is_active = true
+         UNION
+         SELECT NULLIF(TRIM(loading_point), '') AS value
+         FROM trips
+       ) x
+       WHERE value IS NOT NULL
+       ORDER BY value`
+    );
+    return res.json(result.rows.map((row) => row.value));
+  } catch (error) {
+    console.error('Failed to load loading points', error);
+    return res.status(500).json({ error: 'Failed to load loading points' });
+  }
+});
+
+app.get('/api/reports/truck-suggestions', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!canViewReports(auth.role)) return res.status(403).json({ error: 'Not allowed' });
+  try {
+    const result = await pool.query(
+      `SELECT id, truck_number, customer_name, loading_point, material_type, grade
+       FROM trips
+       WHERE truck_number IS NOT NULL
+       ORDER BY updated_at DESC
+       LIMIT 200`
+    );
+    return res.json(result.rows);
+  } catch (error) {
+    console.error('Failed to load truck suggestions', error);
+    return res.status(500).json({ error: 'Failed to load truck suggestions' });
+  }
+});
+
+app.get('/api/reports/branding', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!canViewReports(auth.role)) return res.status(403).json({ error: 'Not allowed' });
+  try {
+    return res.json(await loadReportBranding());
+  } catch (error) {
+    console.error('Failed to load report branding', error);
+    return res.status(500).json({ error: 'Failed to load report branding' });
+  }
+});
+
+app.post('/api/reports', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!canEditReports(auth.role)) return res.status(403).json({ error: 'Only LAB/Admin can create reports' });
+  const validated = validateReportPayload(req.body);
+  if (validated.error) return res.status(400).json({ error: validated.error });
+  const branding = await loadReportBranding();
+  const nextSeq = await pool.query(`SELECT nextval(pg_get_serial_sequence('lab_reports','id')) AS id`);
+  const reportId = Number(nextSeq.rows[0].id);
+  const reportNumber = `RPT-${String(reportId).padStart(6, '0')}`;
+  const insert = await pool.query(
+    `INSERT INTO lab_reports(
+      id, report_number, trip_id, is_generic, truck_number, customer_name, loading_point, report_date,
+      material_type, grade, sieve_size, afs_reference, afs_multiplier, total_quantity, total_product, total_afs,
+      status, line_items_json, notes, created_by_role, created_by_name, branding_snapshot_json
+    ) VALUES (
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+      'DRAFT',$17::jsonb,$18,$19,$20,$21::jsonb
+    )
+    RETURNING *`,
+    [
+      reportId,
+      reportNumber,
+      validated.tripId,
+      validated.isGeneric,
+      validated.truckNumber,
+      normalizeEmpty(req.body.customer_name),
+      validated.loadingPoint,
+      validated.reportDate,
+      normalizeEmpty(req.body.material_type),
+      normalizeEmpty(req.body.grade),
+      validated.sieveSize,
+      normalizeEmpty(req.body.afs_reference),
+      toFiniteNumberOrNull(req.body.afs_multiplier) || 1,
+      validated.totals.totalQuantity,
+      validated.totals.totalProduct,
+      validated.totals.totalAfs,
+      JSON.stringify(validated.totals.lineItems),
+      normalizeEmpty(req.body.notes),
+      auth.role,
+      normalizeEmpty(req.body.lab_user_name) || auth.user?.full_name || auth.user?.username || auth.role,
+      JSON.stringify(branding || {})
+    ]
+  );
+  await pool.query(
+    `INSERT INTO lab_report_history(report_id, action_type, actor_role, actor_name, new_values_json, request_id)
+     VALUES ($1,'CREATED',$2,$3,$4::jsonb,$5)`,
+    [reportId, auth.role, auth.user?.full_name || auth.user?.username || null, JSON.stringify(insert.rows[0]), req.requestId]
+  );
+  return res.status(201).json(insert.rows[0]);
+});
+
+app.get('/api/reports', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!canViewReports(auth.role)) return res.status(403).json({ error: 'Not allowed' });
+  const page = Math.max(1, Number.parseInt(String(req.query.page || '1'), 10) || 1);
+  const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit || '25'), 10) || 25));
+  const offset = (page - 1) * limit;
+  const fromDate = normalizeEmpty(req.query.from_date);
+  const toDate = normalizeEmpty(req.query.to_date);
+  const truck = normalizeEmpty(req.query.truck_number);
+  const status = normalizeEmpty(req.query.status);
+  const params = [];
+  const where = [];
+  if (fromDate) { params.push(fromDate); where.push(`report_date >= $${params.length}`); }
+  if (toDate) { params.push(toDate); where.push(`report_date <= $${params.length}`); }
+  if (truck) { params.push(truck); where.push(`lower(truck_number) LIKE lower($${params.length})`); params[params.length - 1] = `%${truck}%`; }
+  if (status) { params.push(status); where.push(`status = $${params.length}`); }
+  const countSql = `
+    SELECT COUNT(*)::int AS total
+    FROM lab_reports
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+  `;
+  const countResult = await pool.query(countSql, params);
+  const total = Number(countResult.rows[0]?.total || 0);
+  const sql = `
+    SELECT id, report_number, trip_id, is_generic, truck_number, customer_name, loading_point, report_date,
+           material_type, grade, sieve_size, total_quantity, total_afs, status, created_by_name, created_at, updated_at
+    FROM lab_reports
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY report_date DESC, id DESC
+    LIMIT $${params.length + 1}
+    OFFSET $${params.length + 2}
+  `;
+  const rows = await pool.query(sql, [...params, limit, offset]);
+  return res.json({
+    rows: rows.rows,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+      hasNextPage: page * limit < total,
+      hasPrevPage: page > 1
+    }
+  });
+});
+
+app.get('/api/reports/:id', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!canViewReports(auth.role)) return res.status(403).json({ error: 'Not allowed' });
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Invalid report id' });
+  const report = await pool.query(`SELECT * FROM lab_reports WHERE id = $1 LIMIT 1`, [id]);
+  if (!report.rows.length) return res.status(404).json({ error: 'Report not found' });
+  const history = await pool.query(
+    `SELECT action_type, actor_role, actor_name, remarks, created_at
+     FROM lab_report_history
+     WHERE report_id = $1
+     ORDER BY created_at DESC`,
+    [id]
+  );
+  return res.json({ report: report.rows[0], history: history.rows });
+});
+
+app.put('/api/reports/:id', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!canEditReports(auth.role)) return res.status(403).json({ error: 'Only LAB/Admin can edit reports' });
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Invalid report id' });
+  const existing = await pool.query(`SELECT * FROM lab_reports WHERE id = $1 LIMIT 1`, [id]);
+  if (!existing.rows.length) return res.status(404).json({ error: 'Report not found' });
+  const row = existing.rows[0];
+  if (row.status === 'FINALIZED') return res.status(403).json({ error: 'Finalized report cannot be edited. Create a new report/revision.' });
+  const validated = validateReportPayload(req.body, row);
+  if (validated.error) return res.status(400).json({ error: validated.error });
+  const updated = await pool.query(
+    `UPDATE lab_reports
+     SET trip_id = $2,
+         is_generic = $3,
+         truck_number = $4,
+         customer_name = $5,
+         loading_point = $6,
+        report_date = $7,
+        material_type = $8,
+        grade = $9,
+        sieve_size = $10,
+        afs_reference = $11,
+        afs_multiplier = $12,
+        total_quantity = $13,
+        total_product = $14,
+        total_afs = $15,
+        line_items_json = $16::jsonb,
+        notes = $17,
+        updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [
+      id,
+      validated.tripId,
+      validated.isGeneric,
+      validated.truckNumber,
+      normalizeEmpty(req.body.customer_name),
+      validated.loadingPoint,
+      validated.reportDate,
+      normalizeEmpty(req.body.material_type),
+      normalizeEmpty(req.body.grade),
+      validated.sieveSize,
+      normalizeEmpty(req.body.afs_reference),
+      toFiniteNumberOrNull(req.body.afs_multiplier) || 1,
+      validated.totals.totalQuantity,
+      validated.totals.totalProduct,
+      validated.totals.totalAfs,
+      JSON.stringify(validated.totals.lineItems),
+      normalizeEmpty(req.body.notes)
+    ]
+  );
+  await pool.query(
+    `INSERT INTO lab_report_history(report_id, action_type, actor_role, actor_name, old_values_json, new_values_json, request_id)
+     VALUES ($1,'UPDATED',$2,$3,$4::jsonb,$5::jsonb,$6)`,
+    [id, auth.role, auth.user?.full_name || auth.user?.username || null, JSON.stringify(row), JSON.stringify(updated.rows[0]), req.requestId]
+  );
+  return res.json(updated.rows[0]);
+});
+
+app.post('/api/reports/:id/finalize', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!canEditReports(auth.role)) return res.status(403).json({ error: 'Only LAB/Admin can finalize reports' });
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Invalid report id' });
+  const existing = await pool.query(`SELECT * FROM lab_reports WHERE id = $1 LIMIT 1`, [id]);
+  if (!existing.rows.length) return res.status(404).json({ error: 'Report not found' });
+  const row = existing.rows[0];
+  if (!hasValue(row.loading_point)) return res.status(400).json({ error: 'Loading point is required before finalize' });
+  const result = await pool.query(
+    `UPDATE lab_reports
+     SET status = 'FINALIZED',
+         finalized_by_role = $2,
+         finalized_by_name = $3,
+         finalized_at = NOW(),
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [id, auth.role, auth.user?.full_name || auth.user?.username || auth.role]
+  );
+  await pool.query(
+    `INSERT INTO lab_report_history(report_id, action_type, actor_role, actor_name, old_values_json, new_values_json, request_id)
+     VALUES ($1,'FINALIZED',$2,$3,$4::jsonb,$5::jsonb,$6)`,
+    [id, auth.role, auth.user?.full_name || auth.user?.username || null, JSON.stringify(row), JSON.stringify(result.rows[0]), req.requestId]
+  );
+  return res.json(result.rows[0]);
 });
 
 app.get('/health', (req, res) => {

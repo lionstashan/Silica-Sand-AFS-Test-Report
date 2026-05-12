@@ -14,7 +14,7 @@ const TRANSPORTER_STORAGE_VERSION = '2026-05-12-master-source';
 const LOCATION_STORAGE_KEY = 'locationOptions';
 const EMPLOYEE_TRANSPORT_TOKEN_KEY = 'employeeTransportToken';
 const BASE_TRANSPORTER_OPTIONS = [];
-const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Manager', 'Admin'];
+const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Accounts', 'Manager', 'Admin'];
 const TASK_STATUSES = ['OPEN', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED'];
 
 const STATUS_FLOW = [
@@ -67,6 +67,7 @@ const ROLE_PINS = {
   Weighbridge: 'W3K7',
   Dispatch: 'D9M4',
   Loading: 'L5Q8',
+  LAB: 'L4B9',
   Accounts: 'A6R1',
   Manager: 'M2N6',
   Admin: '2802'
@@ -77,6 +78,7 @@ const ROLE_ALLOWED_TARGETS = {
   Dispatch: ['AT_DISPATCH', 'WAITING', 'READY_FOR_LOADING', 'CANCELLED'],
   Loading: ['WAITING', 'LOADING_IN_PROGRESS', 'LOADING_COMPLETED'],
   Weighbridge: ['TARE_WEIGHT_DONE', 'LOAD_FIX_REQUIRED', 'GROSS_WEIGHT_DONE'],
+  LAB: [],
   Accounts: ['BILLING_COMPLETED'],
   Manager: [],
   Admin: STATUS_FLOW
@@ -1228,6 +1230,7 @@ function applyRoleUI() {
   const expenseLink = document.getElementById('expense-link');
   const expectedTrucksLink = document.getElementById('expected-trucks-link');
   const analyticsLink = document.getElementById('accounts-analytics-link');
+  const reportsLink = document.getElementById('reports-link');
   const adminControlLink = document.getElementById('admin-control-link');
   const canSeeTasks = !!role;
   const canSeeDashboard = ['Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Manager', 'Admin'].includes(role);
@@ -1235,6 +1238,7 @@ function applyRoleUI() {
   const canSeeExpectedTrucks = ['Gate', 'Admin', 'Manager', 'Dispatch'].includes(role);
   const canSeeExpense = ['Admin', 'Accounts', 'Manager'].includes(role);
   const canSeeAnalytics = ['Admin', 'Accounts', 'Manager'].includes(role);
+  const canSeeReports = ['LAB', 'Dispatch', 'Weighbridge', 'Accounts', 'Manager', 'Admin'].includes(role);
   const canSeeAdminControl = role === 'Admin';
 
   if (gatePanel && !canCreate) {
@@ -1255,6 +1259,9 @@ function applyRoleUI() {
   }
   if (analyticsLink) {
     analyticsLink.style.display = canSeeAnalytics ? 'inline-block' : 'none';
+  }
+  if (reportsLink) {
+    reportsLink.style.display = canSeeReports ? 'inline-block' : 'none';
   }
   if (adminControlLink) {
     adminControlLink.style.display = canSeeAdminControl ? 'inline-block' : 'none';
@@ -1334,6 +1341,12 @@ function logout() {
   localStorage.removeItem('userRole');
   localStorage.removeItem('employeeAuth');
   localStorage.removeItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
+  localStorage.removeItem('expenseToken');
+  localStorage.removeItem('expenseUser');
+  localStorage.removeItem('customerUsername');
+  localStorage.removeItem('customerPassword');
+  localStorage.removeItem('customerToken');
+  localStorage.removeItem('adminSelectedCustomerUserId');
   userRole = null;
   window.location.reload();
 }

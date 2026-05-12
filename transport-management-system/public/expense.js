@@ -154,6 +154,17 @@ function clearSession() {
   localStorage.removeItem(USER_KEY);
 }
 
+function clearAllPortalSessions() {
+  localStorage.removeItem('userRole');
+  localStorage.removeItem('employeeAuth');
+  localStorage.removeItem('employeeTransportToken');
+  localStorage.removeItem('customerUsername');
+  localStorage.removeItem('customerPassword');
+  localStorage.removeItem('customerToken');
+  localStorage.removeItem('adminSelectedCustomerUserId');
+  clearSession();
+}
+
 function loadSession() {
   try {
     const raw = localStorage.getItem(USER_KEY);
@@ -772,7 +783,7 @@ async function initApp() {
 
 function setup() {
   $('logout-btn').addEventListener('click', () => {
-    clearSession();
+    clearAllPortalSessions();
     redirectToMainLogin();
   });
   $('create-claim-btn').addEventListener('click', createAndSubmitClaim);

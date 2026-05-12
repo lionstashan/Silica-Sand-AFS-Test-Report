@@ -623,6 +623,71 @@ async function initDb() {
     )
   `);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS lab_reports (
+      id SERIAL PRIMARY KEY,
+      report_number TEXT NOT NULL UNIQUE,
+      trip_id INTEGER REFERENCES trips(id) ON DELETE SET NULL,
+      is_generic BOOLEAN NOT NULL DEFAULT false,
+      truck_number TEXT NOT NULL,
+      customer_name TEXT,
+      loading_point TEXT,
+      report_date DATE NOT NULL,
+      material_type TEXT,
+      grade TEXT,
+      sieve_size TEXT,
+      afs_reference TEXT,
+      afs_multiplier NUMERIC DEFAULT 1,
+      total_quantity NUMERIC DEFAULT 0,
+      total_product NUMERIC DEFAULT 0,
+      total_afs NUMERIC DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'DRAFT',
+      line_items_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+      notes TEXT,
+      created_by_role TEXT NOT NULL,
+      created_by_name TEXT,
+      finalized_by_role TEXT,
+      finalized_by_name TEXT,
+      finalized_at TIMESTAMPTZ,
+      branding_snapshot_json JSONB DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    ALTER TABLE lab_reports
+    ADD COLUMN IF NOT EXISTS sieve_size TEXT
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_lab_reports_report_date
+    ON lab_reports(report_date DESC)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_lab_reports_trip
+    ON lab_reports(trip_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_lab_reports_truck
+    ON lab_reports(lower(truck_number))
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS lab_report_history (
+      id SERIAL PRIMARY KEY,
+      report_id INTEGER NOT NULL REFERENCES lab_reports(id) ON DELETE CASCADE,
+      action_type TEXT NOT NULL,
+      actor_role TEXT NOT NULL,
+      actor_name TEXT,
+      remarks TEXT,
+      old_values_json JSONB DEFAULT '{}'::jsonb,
+      new_values_json JSONB DEFAULT '{}'::jsonb,
+      request_id TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_lab_report_history_report
+    ON lab_report_history(report_id, created_at DESC)
+  `);
+  await pool.query(`
     ALTER TABLE expense_claims
     ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1,
     ADD COLUMN IF NOT EXISTS previous_status TEXT,

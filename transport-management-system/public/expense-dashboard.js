@@ -235,7 +235,14 @@ async function exportCsv() {
 function logout() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
-  window.location.href = '/expense';
+  localStorage.removeItem('userRole');
+  localStorage.removeItem('employeeAuth');
+  localStorage.removeItem('employeeTransportToken');
+  localStorage.removeItem('customerUsername');
+  localStorage.removeItem('customerPassword');
+  localStorage.removeItem('customerToken');
+  localStorage.removeItem('adminSelectedCustomerUserId');
+  window.location.href = '/';
 }
 
 async function init() {
