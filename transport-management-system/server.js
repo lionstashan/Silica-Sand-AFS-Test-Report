@@ -6043,6 +6043,139 @@ function canEditReports(role) {
   return ['LAB', 'Admin'].includes(role);
 }
 
+function normalizeReportDateValue(value) {
+  if (!value) return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  const raw = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (match) return match[1];
+  return raw;
+}
+
+function normalizeReportRowForApi(row) {
+  if (!row) return row;
+  return {
+    ...row,
+    report_date: normalizeReportDateValue(row.report_date)
+  };
+}
+
+function escapeHtmlText(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+async function attachFinalizedReportSnapshot(client, reportRow) {
+  if (!reportRow || !reportRow.trip_id) return null;
+  const lineItems = Array.isArray(reportRow.line_items_json) ? reportRow.line_items_json : [];
+  const now = new Date().toISOString().replace(/[:.]/g, '-');
+  const safeReportNo = String(reportRow.report_number || `report-${reportRow.id}`).replace(/[^A-Za-z0-9_-]/g, '_');
+  const fileName = `${safeReportNo}.html`;
+  const relativePath = path.join('uploads', 'docs', 'reports', `${safeReportNo}-${now}.html`);
+  const absolutePath = path.resolve(__dirname, relativePath);
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>${escapeHtmlText(reportRow.report_number)} - Lab Report Snapshot</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
+    h1 { margin: 0 0 8px; font-size: 20px; }
+    .meta { margin-bottom: 16px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #cbd5e1; padding: 6px; font-size: 12px; text-align: left; }
+    th { background: #f1f5f9; }
+    .totals { margin-top: 12px; display: flex; gap: 14px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtmlText(reportRow.report_number)} (Finalized)</h1>
+  <div class="meta">
+    <div><strong>Date:</strong> ${escapeHtmlText(reportRow.report_date)}</div>
+    <div><strong>Truck:</strong> ${escapeHtmlText(reportRow.truck_number)}</div>
+    <div><strong>Customer:</strong> ${escapeHtmlText(reportRow.customer_name || '-')}</div>
+    <div><strong>Loading Point:</strong> ${escapeHtmlText(reportRow.loading_point || '-')}</div>
+    <div><strong>Material:</strong> ${escapeHtmlText(reportRow.material_type || '-')}</div>
+    <div><strong>Grade:</strong> ${escapeHtmlText(reportRow.grade || '-')}</div>
+    <div><strong>Sieve Size:</strong> ${escapeHtmlText(reportRow.sieve_size || '-')}</div>
+    <div><strong>AFS:</strong> ${escapeHtmlText(Number(reportRow.total_afs || 0).toFixed(2))}</div>
+  </div>
+  <table>
+    <thead>
+      <tr><th>Sr</th><th>Mesh</th><th>Aperture</th><th>Weight</th><th>Factor</th><th>Product</th></tr>
+    </thead>
+    <tbody>
+      ${lineItems.map((row, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${escapeHtmlText(row.mesh_size || '')}</td>
+        <td>${escapeHtmlText(row.aperture || '')}</td>
+        <td>${escapeHtmlText(Number(row.weight || 0).toFixed(2))}</td>
+        <td>${escapeHtmlText(Number(row.multiplying_factor || 0).toFixed(2))}</td>
+        <td>${escapeHtmlText(Number(row.product || 0).toFixed(2))}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>
+  <div class="totals">
+    <div><strong>Total Qty:</strong> ${escapeHtmlText(Number(reportRow.total_quantity || 0).toFixed(2))}</div>
+    <div><strong>Total Product:</strong> ${escapeHtmlText(Number(reportRow.total_product || 0).toFixed(2))}</div>
+    <div><strong>Total AFS:</strong> ${escapeHtmlText(Number(reportRow.total_afs || 0).toFixed(2))}</div>
+  </div>
+</body>
+</html>`;
+  fs.writeFileSync(absolutePath, html, 'utf8');
+
+  const fileSize = Buffer.byteLength(html, 'utf8');
+  const existing = await client.query(
+    `SELECT id FROM trip_documents
+     WHERE trip_id = $1 AND doc_type = 'LAB_REPORT' AND file_name = $2
+     LIMIT 1`,
+    [reportRow.trip_id, fileName]
+  );
+  if (existing.rows.length) {
+    await client.query(
+      `UPDATE trip_documents
+       SET mime_type = 'text/html',
+           file_size = $3,
+           storage_path = $4,
+           uploaded_by_role = COALESCE($5, uploaded_by_role),
+           uploaded_by_name = COALESCE($6, uploaded_by_name),
+           created_at = NOW()
+       WHERE id = $1`,
+      [existing.rows[0].id, fileName, fileSize, relativePath, reportRow.finalized_by_role || 'LAB', reportRow.finalized_by_name || 'LAB']
+    );
+    return existing.rows[0].id;
+  }
+
+  const insert = await client.query(
+    `INSERT INTO trip_documents (
+      trip_id, expected_truck_id, doc_type, file_name, mime_type, file_size, storage_path, uploaded_by_role, uploaded_by_name
+    )
+    SELECT t.id, t.expected_truck_id, 'LAB_REPORT', $2, 'text/html', $3, $4, $5, $6
+    FROM trips t
+    WHERE t.id = $1
+    RETURNING id`,
+    [
+      reportRow.trip_id,
+      fileName,
+      fileSize,
+      relativePath,
+      reportRow.finalized_by_role || 'LAB',
+      reportRow.finalized_by_name || 'LAB'
+    ]
+  );
+  return insert.rows[0]?.id || null;
+}
+
 function normalizeLabLineItems(value) {
   const source = Array.isArray(value) ? value : [];
   return source
@@ -6352,7 +6485,7 @@ app.get('/api/reports', async (req, res) => {
   `;
   const rows = await pool.query(sql, [...params, limit, offset]);
   return res.json({
-    rows: rows.rows,
+    rows: rows.rows.map(normalizeReportRowForApi),
     pagination: {
       page,
       limit,
@@ -6379,7 +6512,7 @@ app.get('/api/reports/:id', async (req, res) => {
      ORDER BY created_at DESC`,
     [id]
   );
-  return res.json({ report: report.rows[0], history: history.rows });
+  return res.json({ report: normalizeReportRowForApi(report.rows[0]), history: history.rows });
 });
 
 app.put('/api/reports/:id', async (req, res) => {
@@ -6466,23 +6599,35 @@ app.post('/api/reports/:id/finalize', async (req, res) => {
     { mode: 'finalize' }
   );
   if (finalizedValidation.error) return res.status(400).json({ error: finalizedValidation.error });
-  const result = await pool.query(
-    `UPDATE lab_reports
-     SET status = 'FINALIZED',
-         finalized_by_role = $2,
-         finalized_by_name = $3,
-         finalized_at = NOW(),
-         updated_at = NOW()
-     WHERE id = $1
-     RETURNING *`,
-    [id, auth.role, auth.user?.full_name || auth.user?.username || auth.role]
-  );
-  await pool.query(
-    `INSERT INTO lab_report_history(report_id, action_type, actor_role, actor_name, old_values_json, new_values_json, request_id)
-     VALUES ($1,'FINALIZED',$2,$3,$4::jsonb,$5::jsonb,$6)`,
-    [id, auth.role, auth.user?.full_name || auth.user?.username || null, JSON.stringify(row), JSON.stringify(result.rows[0]), req.requestId]
-  );
-  return res.json(result.rows[0]);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE lab_reports
+       SET status = 'FINALIZED',
+           finalized_by_role = $2,
+           finalized_by_name = $3,
+           finalized_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id, auth.role, auth.user?.full_name || auth.user?.username || auth.role]
+    );
+    await client.query(
+      `INSERT INTO lab_report_history(report_id, action_type, actor_role, actor_name, old_values_json, new_values_json, request_id)
+       VALUES ($1,'FINALIZED',$2,$3,$4::jsonb,$5::jsonb,$6)`,
+      [id, auth.role, auth.user?.full_name || auth.user?.username || null, JSON.stringify(row), JSON.stringify(result.rows[0]), req.requestId]
+    );
+    await attachFinalizedReportSnapshot(client, result.rows[0]);
+    await client.query('COMMIT');
+    return res.json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Failed to finalize report', error);
+    return res.status(500).json({ error: 'Failed to finalize report' });
+  } finally {
+    client.release();
+  }
 });
 
 app.get('/health', (req, res) => {

@@ -33,6 +33,32 @@ async function api(path) {
   return data;
 }
 
+async function reportExists(id) {
+  try {
+    await api(`/api/reports/${id}`);
+    return true;
+  } catch (error) {
+    if (String(error.message || '').includes('404') || String(error.message || '').toLowerCase().includes('not found')) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function findNeighborReportId(currentId, direction) {
+  const step = direction === 'next' ? 1 : -1;
+  let candidate = currentId + step;
+  let attempts = 0;
+  while (candidate > 0 && attempts < 200) {
+    // eslint-disable-next-line no-await-in-loop
+    const exists = await reportExists(candidate);
+    if (exists) return candidate;
+    candidate += step;
+    attempts += 1;
+  }
+  return null;
+}
+
 function getReportId() {
   const match = window.location.pathname.match(/\/reports\/(\d+)\/view/);
   return match ? Number(match[1]) : null;
@@ -55,23 +81,44 @@ function renderSieveChart(items) {
     chartEl.innerHTML = '<p class="mini">No sieve data</p>';
     return;
   }
-  const max = Math.max(...points.map((p) => p.weight), 1);
+  const width = 760;
+  const height = 220;
+  const padding = { top: 20, right: 20, bottom: 44, left: 52 };
+  const innerW = width - padding.left - padding.right;
+  const innerH = height - padding.top - padding.bottom;
+  const maxY = Math.max(...points.map((p) => p.weight), 1);
+  const xStep = points.length > 1 ? innerW / (points.length - 1) : 0;
+
+  const linePoints = points.map((p, idx) => {
+    const x = padding.left + (xStep * idx);
+    const y = padding.top + innerH - ((p.weight / maxY) * innerH);
+    return { ...p, x, y };
+  });
+
+  const polyline = linePoints.map((p) => `${p.x},${p.y}`).join(' ');
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+    const y = padding.top + innerH - (ratio * innerH);
+    const value = (maxY * ratio).toFixed(2);
+    return { y, value };
+  });
+
   chartEl.innerHTML = `
-    <div class="rv-bars">
-      ${points.map((p) => {
-        const h = Math.max(8, Math.round((p.weight / max) * 140));
-        return `
-          <div class="rv-bar-col">
-            <div class="rv-bar-value">${p.weight.toFixed(2)}</div>
-            <div class="rv-bar-track">
-              <div class="rv-bar-fill" style="height:${h}px"></div>
-            </div>
-            <div class="rv-bar-label">${escapeHtml(p.mesh)}</div>
-          </div>
-        `;
-      }).join('')}
-    </div>
-    <div class="rv-axis-note">X-axis: Mesh Size • Y-axis: Weight</div>
+    <svg viewBox="0 0 ${width} ${height}" class="rv-line-chart" role="img" aria-label="Sieve mesh vs weight line chart">
+      <rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff"></rect>
+      ${yTicks.map((t) => `
+        <line x1="${padding.left}" y1="${t.y}" x2="${width - padding.right}" y2="${t.y}" stroke="#e2e8f0" stroke-width="1"></line>
+        <text x="${padding.left - 6}" y="${t.y + 4}" text-anchor="end" class="rv-axis-text">${t.value}</text>
+      `).join('')}
+      <line x1="${padding.left}" y1="${padding.top + innerH}" x2="${width - padding.right}" y2="${padding.top + innerH}" stroke="#94a3b8" stroke-width="1.5"></line>
+      <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + innerH}" stroke="#94a3b8" stroke-width="1.5"></line>
+      <polyline points="${polyline}" fill="none" stroke="#2563eb" stroke-width="2.5"></polyline>
+      ${linePoints.map((p) => `
+        <circle cx="${p.x}" cy="${p.y}" r="3.5" fill="#0ea5e9"></circle>
+        <text x="${p.x}" y="${padding.top + innerH + 16}" text-anchor="middle" class="rv-axis-text">${escapeHtml(p.mesh)}</text>
+      `).join('')}
+      <text x="${width / 2}" y="${height - 6}" text-anchor="middle" class="rv-axis-label">Mesh Size (X)</text>
+      <text x="14" y="${height / 2}" transform="rotate(-90 14,${height / 2})" text-anchor="middle" class="rv-axis-label">Weight (Y)</text>
+    </svg>
   `;
 }
 
@@ -79,6 +126,40 @@ async function init() {
   const id = getReportId();
   if (!id) return;
   document.getElementById('rv-print-btn').addEventListener('click', () => window.print());
+  document.getElementById('rv-prev-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('rv-prev-btn');
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Loading...';
+    try {
+      const prevId = await findNeighborReportId(id, 'prev');
+      if (!prevId) return;
+      window.location.href = `/reports/${prevId}/view`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  });
+  document.getElementById('rv-next-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('rv-next-btn');
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Loading...';
+    try {
+      const nextId = await findNeighborReportId(id, 'next');
+      if (!nextId) return;
+      window.location.href = `/reports/${nextId}/view`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  });
+  const [hasPrev, hasNext] = await Promise.all([
+    findNeighborReportId(id, 'prev').then(Boolean).catch(() => false),
+    findNeighborReportId(id, 'next').then(Boolean).catch(() => false)
+  ]);
+  document.getElementById('rv-prev-btn').disabled = !hasPrev;
+  document.getElementById('rv-next-btn').disabled = !hasNext;
   const data = await api(`/api/reports/${id}`);
   const report = data.report;
   const snapshotBranding = report?.branding_snapshot_json && typeof report.branding_snapshot_json === 'object'
@@ -140,10 +221,6 @@ async function init() {
   document.getElementById('rv-total-product').textContent = Number(report.total_product || 0).toFixed(2);
   document.getElementById('rv-total-afs').textContent = Number(report.total_afs || 0).toFixed(2);
   renderSieveChart(items);
-  const history = Array.isArray(data.history) ? data.history : [];
-  document.getElementById('rv-history').innerHTML = history.map((h) => `
-    <div>${new Date(h.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} • ${escapeHtml(h.actor_role)} • ${escapeHtml(h.action_type)} ${escapeHtml(h.remarks || '')}</div>
-  `).join('');
   document.getElementById('rv-contact-footer').innerHTML = `
     <div>${hasBrandingValue(mergedBranding.contact_phones) ? `📞 ${escapeHtml(mergedBranding.contact_phones)}` : ''}</div>
     <div>${hasBrandingValue(mergedBranding.email) ? `✉️ ${escapeHtml(mergedBranding.email)}` : ''}</div>

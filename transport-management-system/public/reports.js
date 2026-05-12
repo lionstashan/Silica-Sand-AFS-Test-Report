@@ -31,6 +31,16 @@ let currentPage = 1;
 let currentTotalPages = 1;
 let currentReportRows = [];
 
+function setButtonBusy(button, busy, busyText = 'Working...') {
+  if (!button) return;
+  if (!button.dataset.defaultText) {
+    button.dataset.defaultText = button.textContent;
+  }
+  button.disabled = busy;
+  button.classList.toggle('is-busy', busy);
+  button.textContent = busy ? busyText : button.dataset.defaultText;
+}
+
 function getAuthHeaders() {
   const role = localStorage.getItem('userRole');
   currentRole = role;
@@ -53,6 +63,14 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function normalizeDateInputValue(value) {
+  if (!value) return '';
+  const raw = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : '';
 }
 
 function groupBy(items, keyFn, valueFn) {
@@ -201,7 +219,7 @@ async function loadMeta() {
   dl.innerHTML = truckSuggestions.map((t) => `<option value="${escapeHtml(t.truck_number)}"></option>`).join('');
 }
 
-async function saveReport() {
+async function submitReport() {
   if (!EDIT_ROLES.includes(currentRole)) {
     showMessage('Only LAB/Admin can create reports', false);
     return;
@@ -222,14 +240,24 @@ async function saveReport() {
     notes: document.getElementById('r-notes').value.trim(),
     line_items: collectLineItems()
   };
-  const data = await api(editingReportId ? `/api/reports/${editingReportId}` : '/api/reports', {
-    method: editingReportId ? 'PUT' : 'POST',
-    body: JSON.stringify(payload)
-  });
-  showMessage(editingReportId ? `Updated report ${data.report_number}` : `Saved report ${data.report_number}`);
-  editingReportId = null;
-  document.getElementById('save-report-btn').textContent = 'Save Draft';
-  await loadReports();
+  const submitBtn = document.getElementById('save-report-btn');
+  setButtonBusy(submitBtn, true, 'Submitting...');
+  try {
+    const data = await api(editingReportId ? `/api/reports/${editingReportId}` : '/api/reports', {
+      method: editingReportId ? 'PUT' : 'POST',
+      body: JSON.stringify(payload)
+    });
+    await api(`/api/reports/${data.id}/finalize`, { method: 'POST' });
+    showMessage(`Submitted report ${data.report_number}`);
+    editingReportId = null;
+    if (submitBtn) {
+      submitBtn.dataset.defaultText = 'Submit Report';
+      submitBtn.textContent = 'Submit Report';
+    }
+    await loadReports();
+  } finally {
+    setButtonBusy(submitBtn, false);
+  }
 }
 
 async function finalizeReport(id) {
@@ -242,8 +270,8 @@ async function loadReportForEdit(id) {
   const data = await api(`/api/reports/${id}`);
   const r = data.report;
   editingReportId = r.id;
-  document.getElementById('save-report-btn').textContent = `Update Draft ${r.report_number}`;
-  document.getElementById('r-date').value = r.report_date || '';
+  document.getElementById('save-report-btn').textContent = `Submit ${r.report_number}`;
+  document.getElementById('r-date').value = normalizeDateInputValue(r.report_date);
   document.getElementById('r-truck').value = r.truck_number || '';
   document.getElementById('r-trip-id').value = r.trip_id || '';
   document.getElementById('r-generic').value = r.is_generic ? 'true' : 'false';
@@ -259,6 +287,10 @@ async function loadReportForEdit(id) {
 }
 
 async function loadReports() {
+  const loadBtn = document.getElementById('load-reports-btn');
+  setButtonBusy(loadBtn, true, 'Loading...');
+  showMessage('Loading reports...');
+  try {
   const q = new URLSearchParams();
   const from = document.getElementById('f-from').value;
   const to = document.getElementById('f-to').value;
@@ -318,6 +350,13 @@ async function loadReports() {
       }
     });
   });
+  showMessage('Reports loaded');
+  } catch (error) {
+    showMessage(error.message || 'Failed to load reports', false);
+    throw error;
+  } finally {
+    setButtonBusy(loadBtn, false);
+  }
 }
 
 function logout() {
@@ -350,21 +389,37 @@ async function init() {
   document.getElementById('r-date').value = new Date().toISOString().slice(0, 10);
   document.getElementById('save-report-btn').addEventListener('click', async () => {
     try {
-      await saveReport();
+      await submitReport();
     } catch (error) {
       showMessage(error.message, false);
     }
   });
-  document.getElementById('load-reports-btn').addEventListener('click', loadReports);
+  document.getElementById('load-reports-btn').addEventListener('click', async () => {
+    try {
+      await loadReports();
+    } catch {}
+  });
   document.getElementById('prev-page-btn').addEventListener('click', async () => {
     if (currentPage <= 1) return;
+    const prevBtn = document.getElementById('prev-page-btn');
+    setButtonBusy(prevBtn, true, 'Loading...');
     currentPage -= 1;
-    await loadReports();
+    try {
+      await loadReports();
+    } finally {
+      setButtonBusy(prevBtn, false);
+    }
   });
   document.getElementById('next-page-btn').addEventListener('click', async () => {
     if (currentPage >= currentTotalPages) return;
+    const nextBtn = document.getElementById('next-page-btn');
+    setButtonBusy(nextBtn, true, 'Loading...');
     currentPage += 1;
-    await loadReports();
+    try {
+      await loadReports();
+    } finally {
+      setButtonBusy(nextBtn, false);
+    }
   });
   document.getElementById('r-truck').addEventListener('change', () => {
     const truck = truckSuggestions.find((t) => String(t.truck_number).toLowerCase() === String(document.getElementById('r-truck').value).toLowerCase());

@@ -324,46 +324,23 @@ button.is-busy::after {
   min-height: 170px;
 }
 
-.rv-bars {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-}
-
-.rv-bar-col {
-  min-width: 52px;
-  text-align: center;
-}
-
-.rv-bar-value {
-  font-size: 0.76rem;
-  color: #334155;
-  margin-bottom: 4px;
-}
-
-.rv-bar-track {
-  height: 150px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  background: #f8fafc;
-  padding: 2px;
-}
-
-.rv-bar-fill {
+.rv-line-chart {
   width: 100%;
-  border-radius: 4px;
-  background: linear-gradient(180deg, #2f80ed, #34c6ff);
+  height: auto;
+  display: block;
 }
 
-.rv-bar-label {
-  font-size: 0.75rem;
-  margin-top: 4px;
-  color: #0f172a;
+.rv-axis-text {
+  font-size: 10px;
+  fill: #475569;
+  font-family: Arial, sans-serif;
+}
+
+.rv-axis-label {
+  font-size: 11px;
+  fill: #0f172a;
+  font-family: Arial, sans-serif;
+  font-weight: 600;
 }
 
 .rv-axis-note {
@@ -389,6 +366,47 @@ button.is-busy::after {
 
   .rv-brand-head {
     flex-direction: column;
+  }
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
+
+  .rv-shell {
+    margin: 0;
+    padding: 8px;
+    border: none;
+    box-shadow: none;
+  }
+
+  .rv-shell .workflow-row:first-child button,
+  .rv-shell .workflow-row:first-child a {
+    display: none !important;
+  }
+
+  #rv-branding,
+  .rv-summary-strip,
+  .rv-chart-wrap,
+  .rv-contact-footer {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .table-container table th,
+  .table-container table td {
+    font-size: 11px;
+    padding: 4px;
+  }
+
+  .rv-chart-wrap {
+    margin-top: 8px;
+    padding: 8px;
+  }
+
+  #rv-meta {
+    margin-bottom: 6px;
   }
 }
 
