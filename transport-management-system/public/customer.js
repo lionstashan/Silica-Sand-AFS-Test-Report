@@ -5,27 +5,19 @@ const STORAGE_TOKEN_KEY = 'customerToken';
 const STORAGE_ADMIN_SELECTED_CUSTOMER_ID_KEY = 'adminSelectedCustomerUserId';
 const TRANSPORTER_STORAGE_KEY = 'transporterOptions';
 const TRANSPORTER_STORAGE_VERSION_KEY = 'transporterOptionsVersion';
-const TRANSPORTER_STORAGE_VERSION = '2026-04-17-list-1';
+const TRANSPORTER_STORAGE_VERSION = '2026-05-12-master-source';
 const LOCATION_STORAGE_KEY = 'locationOptions';
 const ROLE_PINS = {
   Admin: '2802'
 };
 
-const BASE_TRANSPORTER_OPTIONS = [
-  'Shree Ram Roadlines',
-  'Kuber Roadlines',
-  'Ganesh Road Lines',
-  'Amardeep Transport',
-  'Shree Syam Transport',
-  'Jambeshwar Road Lines',
-  'Ravi Road Lines'
-];
+const BASE_TRANSPORTER_OPTIONS = [];
 
 const DEFAULT_DISPATCH_DROPDOWNS = {
-  material_type: ['Silica Sand', 'Ball Clay', 'Other'],
-  grade: ['Glass Grade', 'Foundry Grade', '30-150', '30-80', '18-30', '16-30', '14-16', '12-16', '14-12', 'Ball Clay', 'Raw', 'Other'],
-  condition: ['Dry', 'Wet', 'Other'],
-  packing: ['Loose', 'Old Bag', '3G Bag', '4G Bag', 'Other']
+  material_type: ['Other'],
+  grade: ['Other'],
+  condition: ['Other'],
+  packing: ['Other']
 };
 let DISPATCH_DROPDOWNS = { ...DEFAULT_DISPATCH_DROPDOWNS };
 

@@ -10,17 +10,10 @@ const IST_TIMEZONE = 'Asia/Kolkata';
 const IST_OFFSET = '+05:30';
 const TRANSPORTER_STORAGE_KEY = 'transporterOptions';
 const TRANSPORTER_STORAGE_VERSION_KEY = 'transporterOptionsVersion';
-const TRANSPORTER_STORAGE_VERSION = '2026-04-17-list-1';
+const TRANSPORTER_STORAGE_VERSION = '2026-05-12-master-source';
 const LOCATION_STORAGE_KEY = 'locationOptions';
-const BASE_TRANSPORTER_OPTIONS = [
-  'Shree Ram Roadlines',
-  'Kuber Roadlines',
-  'Ganesh Road Lines',
-  'Amardeep Transport',
-  'Shree Syam Transport',
-  'Jambeshwar Road Lines',
-  'Ravi Road Lines'
-];
+const EMPLOYEE_TRANSPORT_TOKEN_KEY = 'employeeTransportToken';
+const BASE_TRANSPORTER_OPTIONS = [];
 const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Manager', 'Admin'];
 const TASK_STATUSES = ['OPEN', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED'];
 
@@ -92,19 +85,19 @@ const DOC_UPLOAD_ROLES = ['Dispatch', 'Weighbridge', 'Accounts', 'Admin'];
 const DOC_VIEW_ROLES = ['Dispatch', 'Weighbridge', 'Accounts', 'Admin'];
 
 const DEFAULT_DISPATCH_DROPDOWNS = {
-  loading_point: ['Office Front', 'Warehouse', 'Old Dry Plant', 'Near Crusher Plant', 'Glass Plant', 'Other'],
-  labour_team: ['Dinesh', 'Shambhu', 'Chandan', 'JCB Loader', 'Tractor', 'Other'],
-  material_type: ['Silica Sand', 'Ball Clay', 'Other'],
-  grade: ['Glass Grade', 'Foundry Grade', '30-150', '30-80', '18-30', '16-30', '14-16', '12-16', '14-12', 'Ball Clay', 'Raw', 'Other'],
-  condition: ['Dry', 'Wet', 'Other'],
-  packing: ['Loose', 'Old Bag', '3G Bag', '4G Bag', 'Other']
+  loading_point: ['Other'],
+  labour_team: ['Other'],
+  material_type: ['Other'],
+  grade: ['Other'],
+  condition: ['Other'],
+  packing: ['Other']
 };
 let DISPATCH_DROPDOWNS = { ...DEFAULT_DISPATCH_DROPDOWNS };
 const DEFAULT_PERSON_DROPDOWNS = {
-  Gate: ['X', 'Y', 'Z', 'Other'],
-  Dispatch: ['Jitendra Yadav', 'Other'],
-  Loading: ['Rajesh Kumar', 'Jai Bhagwan', 'Other'],
-  Weighbridge: ['Anil Sharma', 'Ajay', 'Other'],
+  Gate: ['Other'],
+  Dispatch: ['Other'],
+  Loading: ['Other'],
+  Weighbridge: ['Other'],
   Accounts: ['Ashutosh', 'Other']
 };
 let PERSON_DROPDOWNS = { ...DEFAULT_PERSON_DROPDOWNS };
@@ -171,6 +164,7 @@ let currentTaskDetail = null;
 let hasUserInteractedForSound = false;
 let lastUnreadTaskCount = null;
 const taskSoundMuted = false;
+let customerOptions = [];
 
 const MAIN_TABLE_COLUMNS = [
   'Trp No.',
@@ -218,6 +212,7 @@ async function loadRoleBasedPersonDropdowns() {
   } catch (_error) {
     PERSON_DROPDOWNS = { ...DEFAULT_PERSON_DROPDOWNS };
   }
+  renderGateOperatorOptions();
 }
 
 function hasRoleAccess(allowedRoles) {
@@ -227,8 +222,16 @@ function hasRoleAccess(allowedRoles) {
 
 function getAuthHeaders() {
   const role = getCurrentRole();
-  const pin = role ? ROLE_PINS[role] : null;
-  if (!role || !pin) return {};
+  if (!role) return {};
+  const token = localStorage.getItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
+  if (token) {
+    return {
+      'x-user-role': role,
+      'x-user-token': token
+    };
+  }
+  const pin = ROLE_PINS[role];
+  if (!pin) return {};
   return {
     'x-user-role': role,
     'x-user-pin': pin
@@ -1325,6 +1328,7 @@ function validatePIN(role, pin) {
 function logout() {
   localStorage.removeItem('userRole');
   localStorage.removeItem('employeeAuth');
+  localStorage.removeItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
   userRole = null;
   window.location.reload();
 }
@@ -1370,6 +1374,11 @@ async function loginEmployee() {
       full_name: data.user.full_name,
       roles
     }));
+    if (data.token) {
+      localStorage.setItem(EMPLOYEE_TRANSPORT_TOKEN_KEY, data.token);
+    } else {
+      localStorage.removeItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
+    }
     const current = getStoredRole();
     const defaultRole = current && roles.includes(current) ? current : roles[0];
     localStorage.setItem('userRole', defaultRole);
@@ -1604,6 +1613,56 @@ async function loadMasterDropdownOptions() {
     transporterOptions = [...BASE_TRANSPORTER_OPTIONS];
     locationOptions = [];
     gradePricingMap = new Map();
+  }
+}
+
+async function loadCustomerOptions() {
+  try {
+    const response = await fetch('/customers/options', { headers: getAuthHeaders() });
+    if (!response.ok) throw new Error('Failed to load customer options');
+    const rows = await response.json();
+    customerOptions = Array.isArray(rows)
+      ? Array.from(new Set(rows.map((v) => String(v || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b))
+      : [];
+  } catch (_error) {
+    customerOptions = [];
+  }
+}
+
+function renderCustomerOptions() {
+  if (!customerSelect) return;
+  const current = String(customerSelect.value || '').trim();
+  const options = [
+    '<option value="">Select Customer</option>',
+    ...customerOptions.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`),
+    '<option value="other">Other</option>'
+  ];
+  customerSelect.innerHTML = options.join('');
+  if (current && customerOptions.includes(current)) {
+    customerSelect.value = current;
+  } else if (current === 'other') {
+    customerSelect.value = 'other';
+  } else {
+    customerSelect.value = '';
+  }
+}
+
+function renderGateOperatorOptions() {
+  if (!gatePersonSelect) return;
+  const current = String(gatePersonSelect.value || '').trim();
+  const gateOptions = normalizeAssigneeOptions(PERSON_DROPDOWNS.Gate, ['Other']).filter((value) => value && value !== 'Other');
+  const options = [
+    '<option value="">Select Gate Operator</option>',
+    ...gateOptions.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`),
+    '<option value="other">Other</option>'
+  ];
+  gatePersonSelect.innerHTML = options.join('');
+  if (current && gateOptions.includes(current)) {
+    gatePersonSelect.value = current;
+  } else if (current === 'other') {
+    gatePersonSelect.value = 'other';
+  } else {
+    gatePersonSelect.value = '';
   }
 }
 
@@ -3868,6 +3927,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (validatePIN(selectedRole, pin)) {
+      localStorage.removeItem('employeeAuth');
+      localStorage.removeItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
       userRole = selectedRole;
       localStorage.setItem('userRole', userRole);
       window.location.reload();
@@ -3974,7 +4035,9 @@ document.addEventListener('DOMContentLoaded', () => {
   initializeRole();
   syncTripsTableHeader();
   refreshStatusFilterOptions();
-  Promise.all([loadMasterDropdownOptions(), loadRoleBasedPersonDropdowns(), loadPricingDefaults()]).finally(() => {
+  Promise.all([loadMasterDropdownOptions(), loadRoleBasedPersonDropdowns(), loadPricingDefaults(), loadCustomerOptions()]).finally(() => {
+    renderCustomerOptions();
+    renderGateOperatorOptions();
     refreshTransporterOptions();
     loadTrips();
   });

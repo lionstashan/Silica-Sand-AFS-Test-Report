@@ -396,6 +396,29 @@ function buildInitialStatusHistory(initialStatus) {
 function readRoleFromRequest(req) {
   const role = req.header('x-user-role');
   const pin = req.header('x-user-pin');
+  const bearer = String(req.header('authorization') || '').trim();
+  const tokenHeader = String(req.header('x-user-token') || '').trim();
+  const token = tokenHeader || (bearer.toLowerCase().startsWith('bearer ') ? bearer.slice(7).trim() : '');
+
+  if (token) {
+    if (!role) return { error: 'Missing role for token-authenticated request', status: 401 };
+    if (!VALID_ROLES.includes(role)) return { error: 'Invalid role', status: 403 };
+    const verified = verifyTransportToken(token);
+    if (verified.error) return { error: verified.error, status: verified.status };
+    const tokenRoles = Array.isArray(verified.payload.roles) ? verified.payload.roles : [];
+    if (!tokenRoles.includes(role)) {
+      return { error: 'Role not assigned to authenticated user', status: 403 };
+    }
+    return {
+      role,
+      user: {
+        id: verified.payload.sub,
+        username: verified.payload.username,
+        full_name: verified.payload.full_name || null
+      },
+      auth_mode: 'token'
+    };
+  }
 
   if (!role || !pin) {
     return { error: 'Missing role credentials', status: 401 };
@@ -406,7 +429,7 @@ function readRoleFromRequest(req) {
   if (ROLE_PINS[role] !== pin) {
     return { error: 'Invalid role PIN', status: 403 };
   }
-  return { role };
+  return { role, auth_mode: 'pin' };
 }
 
 async function authenticateTransportV2WithPassword(username, password) {
@@ -3995,8 +4018,10 @@ app.post('/auth/employee-login', async (req, res) => {
   try {
     const auth = await authenticateTransportV2WithPassword(username, password);
     if (auth.error) return res.status(auth.status).json({ error: auth.error });
+    const token = createTransportToken(auth.user, auth.user.roles);
     return res.json({
       ok: true,
+      token,
       user: {
         id: auth.user.id,
         username: auth.user.username,
@@ -5888,6 +5913,28 @@ app.get('/masters/options', async (req, res) => {
   } catch (error) {
     console.error('Failed to load masters options', error);
     return res.status(500).json({ error: 'Failed to load masters options' });
+  }
+});
+
+app.get('/customers/options', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  try {
+    const result = await pool.query(
+      `SELECT DISTINCT value FROM (
+         SELECT NULLIF(TRIM(customer_name), '') AS value FROM customer_users WHERE is_active = true
+         UNION
+         SELECT NULLIF(TRIM(customer_name), '') AS value FROM trips
+         UNION
+         SELECT NULLIF(TRIM(customer_name), '') AS value FROM expected_trucks
+       ) x
+       WHERE value IS NOT NULL
+       ORDER BY value ASC`
+    );
+    return res.json(result.rows.map((r) => r.value).filter(Boolean));
+  } catch (error) {
+    console.error('Failed to load customer options', error);
+    return res.status(500).json({ error: 'Failed to load customer options' });
   }
 });
 

@@ -1288,6 +1288,29 @@ function renderTrendTable(rows = []) {
   `).join('');
 }
 
+function renderBarChart(containerId, rows = [], labelKey = 'key') {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  if (!Array.isArray(rows) || !rows.length) {
+    container.innerHTML = '<div class="sales-empty">No data</div>';
+    return;
+  }
+  const topRows = rows.slice(0, 8);
+  const maxValue = topRows.reduce((acc, row) => Math.max(acc, Number(row.total_amount || 0)), 0) || 1;
+  container.innerHTML = topRows.map((row) => {
+    const label = row[labelKey] || row.key || '-';
+    const value = Number(row.total_amount || 0);
+    const pct = Math.max(3, Math.round((value / maxValue) * 100));
+    return `
+      <div class="sales-bar-row">
+        <div class="sales-bar-label" title="${escapeHtml(String(label))}">${escapeHtml(String(label))}</div>
+        <div class="sales-bar-track"><div class="sales-bar-fill" style="width:${pct}%"></div></div>
+        <div class="sales-bar-value">₹ ${escapeHtml(formatCurrencyINR(value))}</div>
+      </div>
+    `;
+  }).join('');
+}
+
 async function loadSalesAnalytics() {
   if (!['Accounts', 'Admin', 'Manager'].includes(getCurrentRole())) return;
   const fromDate = document.getElementById('sales-from-date')?.value || '';
@@ -1311,11 +1334,19 @@ async function loadSalesAnalytics() {
     if (!response.ok) throw new Error(payload.error || 'Failed to load sales analytics');
     renderSalesKpis(payload.summary || {});
     renderTrendTable(payload.trend || []);
+    renderBarChart('sales-trend-chart', payload.trend || [], 'date');
+    renderBarChart('sales-grade-chart', payload.grade_wise || [], 'key');
+    renderBarChart('sales-customer-chart', payload.customer_wise || [], 'key');
+    renderBarChart('sales-material-chart', payload.material_wise || [], 'key');
     renderSimpleAggregateTable('sales-grade-table', payload.grade_wise || [], 'key');
     renderSimpleAggregateTable('sales-customer-table', payload.customer_wise || [], 'key');
     renderSimpleAggregateTable('sales-material-table', payload.material_wise || [], 'key');
   } catch (error) {
     console.error('Failed to load sales analytics', error);
+    renderBarChart('sales-trend-chart', [], 'date');
+    renderBarChart('sales-grade-chart', [], 'key');
+    renderBarChart('sales-customer-chart', [], 'key');
+    renderBarChart('sales-material-chart', [], 'key');
   } finally {
     if (loadBtn) loadBtn.disabled = false;
   }

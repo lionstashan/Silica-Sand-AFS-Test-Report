@@ -1217,6 +1217,76 @@ tr:nth-child(even) {
   gap: 16px;
 }
 
+.sales-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+  margin-bottom: 16px;
+}
+
+.sales-chart-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.sales-chart-card h3 {
+  margin: 0 0 10px;
+  font-size: 0.98rem;
+  color: #0f172a;
+}
+
+.sales-bar-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 180px;
+}
+
+.sales-bar-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) minmax(120px, 3fr) minmax(80px, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.sales-bar-label {
+  font-size: 0.78rem;
+  color: #334155;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sales-bar-track {
+  width: 100%;
+  height: 12px;
+  background: #e2e8f0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.sales-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #0f4c81, #38bdf8);
+}
+
+.sales-bar-value {
+  font-size: 0.78rem;
+  color: #0f172a;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sales-empty {
+  color: #64748b;
+  font-size: 0.85rem;
+  padding: 8px 4px;
+}
+
 .card-blue {
   border-left-color: #0f4c81;
 }
@@ -1275,6 +1345,14 @@ tr:nth-child(even) {
   .summary-cards {
     grid-template-columns: repeat(2, 1fr);
     gap: 12px;
+  }
+
+  .sales-chart-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-bar-row {
+    grid-template-columns: minmax(80px, 1fr) minmax(100px, 2fr) minmax(72px, 1fr);
   }
 
   .summary-card {
