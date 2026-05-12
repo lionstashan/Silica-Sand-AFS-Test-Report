@@ -232,6 +232,166 @@ button.is-busy::after {
   }
 }
 
+.rv-shell {
+  background: #fff;
+}
+
+#rv-branding {
+  border: 1px solid #dbe7f4;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #f9fcff;
+  margin-bottom: 10px;
+}
+
+.rv-brand-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.rv-company-name {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: #0f4c81;
+}
+
+.rv-brand-right {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.rv-logo {
+  width: 70px;
+  height: 70px;
+  object-fit: contain;
+  border-radius: 6px;
+  border: 1px solid #d7e2f0;
+  background: #fff;
+}
+
+.rv-logo-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: #0f4c81;
+}
+
+.rv-brand-legal {
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: #334155;
+}
+
+#rv-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.rv-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  font-size: 0.9rem;
+}
+
+.rv-chart-wrap {
+  border: 1px solid #dbe5f0;
+  border-radius: 10px;
+  background: #fbfdff;
+  padding: 10px;
+  margin-top: 12px;
+}
+
+.rv-chart-wrap h3 {
+  margin: 0 0 8px;
+  color: #0f4c81;
+  font-size: 0.95rem;
+}
+
+.rv-sieve-chart {
+  min-height: 170px;
+}
+
+.rv-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.rv-bar-col {
+  min-width: 52px;
+  text-align: center;
+}
+
+.rv-bar-value {
+  font-size: 0.76rem;
+  color: #334155;
+  margin-bottom: 4px;
+}
+
+.rv-bar-track {
+  height: 150px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+  padding: 2px;
+}
+
+.rv-bar-fill {
+  width: 100%;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #2f80ed, #34c6ff);
+}
+
+.rv-bar-label {
+  font-size: 0.75rem;
+  margin-top: 4px;
+  color: #0f172a;
+}
+
+.rv-axis-note {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
+.rv-contact-footer {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed #cbd5e1;
+  display: grid;
+  gap: 4px;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 900px) {
+  #rv-meta,
+  .rv-summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .rv-brand-head {
+    flex-direction: column;
+  }
+}
+
 .notif-badge {
   display: inline-block;
   margin-left: 6px;

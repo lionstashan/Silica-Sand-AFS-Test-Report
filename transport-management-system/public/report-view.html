@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <section class="panel wide-panel">
+  <section class="panel wide-panel rv-shell">
     <div class="workflow-row" style="justify-content:space-between;">
       <h2 id="rv-title">Report</h2>
       <div class="workflow-row">
@@ -15,8 +15,14 @@
         <a href="/reports" class="nav-link">Back</a>
       </div>
     </div>
-    <div id="rv-branding" class="mini"></div>
-    <div id="rv-meta" class="form-grid"></div>
+    <div id="rv-branding"></div>
+    <div id="rv-meta"></div>
+    <div class="rv-summary-strip">
+      <div><strong>Date:</strong> <span id="rv-date">-</span></div>
+      <div><strong>Material:</strong> <span id="rv-material">-</span></div>
+      <div><strong>Grade:</strong> <span id="rv-grade">-</span></div>
+      <div><strong>AFS Value:</strong> <span id="rv-afs-val">0.00</span></div>
+    </div>
     <div class="table-container">
       <table>
         <thead>
@@ -25,13 +31,18 @@
         <tbody id="rv-lines"></tbody>
       </table>
     </div>
+    <div class="rv-chart-wrap">
+      <h3>Sieve Analysis (Mesh vs Weight)</h3>
+      <div id="rv-sieve-chart" class="rv-sieve-chart"></div>
+    </div>
     <div class="workflow-row" style="margin-top:10px;">
       <span><strong>Total Qty:</strong> <span id="rv-total-qty">0.00</span></span>
       <span><strong>Total Product:</strong> <span id="rv-total-product">0.00</span></span>
       <span><strong>Total AFS:</strong> <span id="rv-total-afs">0.00</span></span>
     </div>
     <div id="rv-history" class="mini" style="margin-top:10px;"></div>
+    <div id="rv-contact-footer" class="rv-contact-footer"></div>
   </section>
-  <script src="/report-view.js?v=20260513-2"></script>
+  <script src="/report-view.js?v=20260513-3"></script>
 </body>
 </html>

@@ -171,7 +171,14 @@ function computeTotals() {
 }
 
 function applyTruckSuggestion(truck) {
-  if (!truck) return;
+  if (!truck) {
+    document.getElementById('r-trip-id').value = '';
+    document.getElementById('r-customer').value = '';
+    document.getElementById('r-loading-point').value = '';
+    document.getElementById('r-material').value = '';
+    document.getElementById('r-grade').value = '';
+    return;
+  }
   document.getElementById('r-trip-id').value = truck.id || '';
   document.getElementById('r-customer').value = truck.customer_name || '';
   document.getElementById('r-loading-point').value = truck.loading_point || '';
@@ -362,6 +369,11 @@ async function init() {
   document.getElementById('r-truck').addEventListener('change', () => {
     const truck = truckSuggestions.find((t) => String(t.truck_number).toLowerCase() === String(document.getElementById('r-truck').value).toLowerCase());
     applyTruckSuggestion(truck);
+  });
+  document.getElementById('r-truck').addEventListener('input', () => {
+    if (!document.getElementById('r-truck').value.trim()) {
+      applyTruckSuggestion(null);
+    }
   });
   document.getElementById('r-afs-mult').addEventListener('input', computeTotals);
   renderLineItems();

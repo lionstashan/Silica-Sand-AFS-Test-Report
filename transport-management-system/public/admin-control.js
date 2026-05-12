@@ -337,6 +337,7 @@ async function loadReportBranding() {
   try {
     const data = await api('/admin/control/report-branding');
     document.getElementById('rb-company-name').value = data.company_name || '';
+    document.getElementById('rb-logo-url').value = data.logo_url || '';
     document.getElementById('rb-address').value = data.address || '';
     document.getElementById('rb-phones').value = data.contact_phones || '';
     document.getElementById('rb-email').value = data.email || '';
@@ -583,6 +584,7 @@ async function init() {
         method: 'POST',
         body: JSON.stringify({
           company_name: document.getElementById('rb-company-name').value.trim(),
+          logo_url: document.getElementById('rb-logo-url').value.trim(),
           address: document.getElementById('rb-address').value.trim(),
           contact_phones: document.getElementById('rb-phones').value.trim(),
           email: document.getElementById('rb-email').value.trim(),

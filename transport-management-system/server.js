@@ -6083,7 +6083,8 @@ function computeLabTotals(lineItems, multiplier) {
   };
 }
 
-function validateReportPayload(payload, existingRow = null) {
+function validateReportPayload(payload, existingRow = null, options = {}) {
+  const mode = options.mode === 'finalize' ? 'finalize' : 'draft';
   const reportDate = String(payload.report_date || '').trim();
   const truckNumber = String(payload.truck_number || '').trim();
   const requestedTripId = toFiniteNumberOrNull(payload.trip_id);
@@ -6092,19 +6093,40 @@ function validateReportPayload(payload, existingRow = null) {
   const sieveSize = normalizeEmpty(payload.sieve_size);
   const lineItems = normalizeLabLineItems(payload.line_items);
   const totals = computeLabTotals(lineItems, payload.afs_multiplier);
-  if (!reportDate || !isValidIsoDate(reportDate)) return { error: 'Valid report_date is required (YYYY-MM-DD)' };
-  if (!truckNumber) return { error: 'truck_number is required' };
-  if (!lineItems.length) return { error: 'At least one sieve line item is required' };
-  if (totals.totalQuantity <= 0) return { error: 'At least one line weight must be greater than zero' };
+
+  // Draft mode is intentionally permissive for faster data capture.
   let tripId = requestedTripId;
   let isGeneric = requestedIsGeneric;
-  if (!isGeneric && !tripId) return { error: 'trip_id is required when report is not generic' };
-  if (isGeneric && !loadingPoint) return { error: 'loading_point is required for generic reports' };
+
+  // If truck is removed on UI, force unlink + generic draft.
+  if (!truckNumber) {
+    tripId = null;
+    isGeneric = true;
+  }
+
+  if (mode === 'finalize') {
+    if (isGeneric) {
+      if (!lineItems.length) return { error: 'At least one sieve line item is required' };
+      if (totals.totalQuantity <= 0) return { error: 'For generic report, line-item weight cannot be all zero' };
+    } else {
+      if (!reportDate || !isValidIsoDate(reportDate)) return { error: 'Valid report_date is required (YYYY-MM-DD)' };
+      if (!truckNumber) return { error: 'truck_number is required' };
+      if (!tripId) return { error: 'trip_id is required when report is not generic' };
+      if (!lineItems.length) return { error: 'At least one sieve line item is required' };
+      if (totals.totalQuantity <= 0) return { error: 'At least one line weight must be greater than zero' };
+    }
+  }
+
   if (existingRow && existingRow.status === 'FINALIZED') {
     return { error: 'Finalized reports cannot be edited directly' };
   }
+
+  const safeReportDate = reportDate && isValidIsoDate(reportDate)
+    ? reportDate
+    : new Date().toISOString().slice(0, 10);
+
   return {
-    reportDate,
+    reportDate: safeReportDate,
     truckNumber,
     loadingPoint,
     sieveSize,
@@ -6139,6 +6161,7 @@ app.post('/admin/control/report-branding', async (req, res) => {
   if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can update report branding' });
   const payload = {
     company_name: normalizeEmpty(req.body.company_name),
+    logo_url: normalizeEmpty(req.body.logo_url),
     address: normalizeEmpty(req.body.address),
     contact_phones: normalizeEmpty(req.body.contact_phones),
     email: normalizeEmpty(req.body.email),
@@ -6429,7 +6452,20 @@ app.post('/api/reports/:id/finalize', async (req, res) => {
   const existing = await pool.query(`SELECT * FROM lab_reports WHERE id = $1 LIMIT 1`, [id]);
   if (!existing.rows.length) return res.status(404).json({ error: 'Report not found' });
   const row = existing.rows[0];
-  if (!hasValue(row.loading_point)) return res.status(400).json({ error: 'Loading point is required before finalize' });
+  const finalizedValidation = validateReportPayload(
+    {
+      report_date: row.report_date,
+      truck_number: row.truck_number,
+      trip_id: row.trip_id,
+      is_generic: row.is_generic,
+      loading_point: row.loading_point,
+      line_items: row.line_items_json,
+      afs_multiplier: row.afs_multiplier
+    },
+    row,
+    { mode: 'finalize' }
+  );
+  if (finalizedValidation.error) return res.status(400).json({ error: finalizedValidation.error });
   const result = await pool.query(
     `UPDATE lab_reports
      SET status = 'FINALIZED',
