@@ -1,6 +1,8 @@
 let userRole = null;
+let employeeSessionRoles = [];
 let allTrips = [];
 const loadingDetailsDrafts = new Map();
+const billingDetailsDrafts = new Map();
 const tripDocumentsCache = new Map();
 const tripDocumentsLoading = new Set();
 
@@ -89,7 +91,7 @@ const ROLE_ALLOWED_TARGETS = {
 const DOC_UPLOAD_ROLES = ['Dispatch', 'Weighbridge', 'Accounts', 'Admin'];
 const DOC_VIEW_ROLES = ['Dispatch', 'Weighbridge', 'Accounts', 'Admin'];
 
-const DISPATCH_DROPDOWNS = {
+const DEFAULT_DISPATCH_DROPDOWNS = {
   loading_point: ['Office Front', 'Warehouse', 'Old Dry Plant', 'Near Crusher Plant', 'Glass Plant', 'Other'],
   labour_team: ['Dinesh', 'Shambhu', 'Chandan', 'JCB Loader', 'Tractor', 'Other'],
   material_type: ['Silica Sand', 'Ball Clay', 'Other'],
@@ -97,13 +99,15 @@ const DISPATCH_DROPDOWNS = {
   condition: ['Dry', 'Wet', 'Other'],
   packing: ['Loose', 'Old Bag', '3G Bag', '4G Bag', 'Other']
 };
-const PERSON_DROPDOWNS = {
+let DISPATCH_DROPDOWNS = { ...DEFAULT_DISPATCH_DROPDOWNS };
+const DEFAULT_PERSON_DROPDOWNS = {
   Gate: ['X', 'Y', 'Z', 'Other'],
   Dispatch: ['Jitendra Yadav', 'Other'],
   Loading: ['Rajesh Kumar', 'Jai Bhagwan', 'Other'],
   Weighbridge: ['Anil Sharma', 'Ajay', 'Other'],
   Accounts: ['Ashutosh', 'Other']
 };
+let PERSON_DROPDOWNS = { ...DEFAULT_PERSON_DROPDOWNS };
 const PERSON_FIELD_BY_ROLE = {
   Dispatch: 'dispatch_manager_name',
   Loading: 'loading_person_name',
@@ -128,6 +132,7 @@ const roleIndicator = document.getElementById('role-indicator');
 const timelineModal = document.getElementById('timeline-modal');
 const timelineModalTitle = document.getElementById('timeline-modal-title');
 const timelineModalBody = document.getElementById('timeline-modal-body');
+let globalToastTimer = null;
 const adminWorkflowModal = document.getElementById('admin-workflow-modal');
 const adminWorkflowModalTitle = document.getElementById('admin-workflow-modal-title');
 const adminWorkflowModalBody = document.getElementById('admin-workflow-modal-body');
@@ -156,6 +161,8 @@ const gatePersonSelect = document.getElementById('gate-person-select');
 const gatePersonOther = document.getElementById('gate-person-other');
 let transporterOptions = [];
 let locationOptions = [];
+let gradePricingMap = new Map();
+let pricingDefaults = { default_gst_percent: null };
 let tasksRows = [];
 let taskNotificationRows = [];
 let tasksNotificationPoll = null;
@@ -183,6 +190,34 @@ function getCurrentRole() {
   const role = getStoredRole();
   userRole = role || null;
   return userRole;
+}
+
+function normalizeAssigneeOptions(values, fallback = []) {
+  const normalized = Array.isArray(values)
+    ? values.map((v) => String(v || '').trim()).filter(Boolean)
+    : [];
+  const merged = [...new Set([...normalized, ...fallback.filter((v) => v && v !== 'Other')])];
+  return [...merged, 'Other'];
+}
+
+async function loadRoleBasedPersonDropdowns() {
+  try {
+    const response = await fetch('/assignees/by-role', { headers: getAuthHeaders() });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || 'Failed to load assignees');
+    }
+    const data = await response.json();
+    PERSON_DROPDOWNS = {
+      Gate: normalizeAssigneeOptions(data.Gate, DEFAULT_PERSON_DROPDOWNS.Gate),
+      Dispatch: normalizeAssigneeOptions(data.Dispatch, DEFAULT_PERSON_DROPDOWNS.Dispatch),
+      Loading: normalizeAssigneeOptions(data.Loading, DEFAULT_PERSON_DROPDOWNS.Loading),
+      Weighbridge: normalizeAssigneeOptions(data.Weighbridge, DEFAULT_PERSON_DROPDOWNS.Weighbridge),
+      Accounts: normalizeAssigneeOptions(data.Accounts, DEFAULT_PERSON_DROPDOWNS.Accounts)
+    };
+  } catch (_error) {
+    PERSON_DROPDOWNS = { ...DEFAULT_PERSON_DROPDOWNS };
+  }
 }
 
 function hasRoleAccess(allowedRoles) {
@@ -448,6 +483,12 @@ function statusDetailLabel(key) {
     tare_weight: 'Tare',
     gross_weight: 'Gross',
     net_weight: 'Net',
+    rate_used_per_mt: 'Rate (₹/MT)',
+    gst_percent_used: 'GST (%)',
+    taxable_amount: 'Taxable Amount (₹)',
+    gst_amount: 'GST Amount (₹)',
+    total_amount: 'Total Amount (₹)',
+    net_weight_snapshot_mt: 'Net Snapshot (MT)',
     gross_weight_attempts: 'Gross Attempts',
     dispatch_manager_name: 'Dispatch Manager',
     loading_person_name: 'Loading Manager',
@@ -470,7 +511,8 @@ function formatStatusDetailValue(key, value) {
     const attempts = Array.isArray(value) ? value : [];
     return `${attempts.length} entries`;
   }
-  if (['expected_weight', 'tare_weight', 'gross_weight', 'net_weight'].includes(key)) return formatWeightMT(value);
+  if (['expected_weight', 'tare_weight', 'gross_weight', 'net_weight', 'net_weight_snapshot_mt'].includes(key)) return formatWeightMT(value);
+  if (['rate_used_per_mt', 'gst_percent_used', 'taxable_amount', 'gst_amount', 'total_amount'].includes(key)) return String(value);
   return String(value);
 }
 
@@ -656,6 +698,11 @@ function openTimelineModal(tripId) {
       <div><strong>Expected Weight:</strong> ${formatWeightMT(trip.expected_weight)}</div>
       <div><strong>Final Net Weight:</strong> ${formatWeightMT(trip.net_weight)}</div>
       <div><strong>Variance:</strong> ${variance === null ? '-' : formatWeightMT(variance)}</div>
+      <div><strong>Rate Used (₹/MT):</strong> ${trip.rate_used_per_mt ?? '-'}</div>
+      <div><strong>GST (%):</strong> ${trip.gst_percent_used ?? '-'}</div>
+      <div><strong>Taxable Amount (₹):</strong> ${trip.taxable_amount ?? '-'}</div>
+      <div><strong>GST Amount (₹):</strong> ${trip.gst_amount ?? '-'}</div>
+      <div><strong>Total Amount (₹):</strong> ${trip.total_amount ?? '-'}</div>
       <div><strong>Last Load Fix Reason:</strong> ${escapeHtml(lastLoadFixReason || '-')}</div>
       <div><strong>Gross Attempts:</strong> ${parseGrossWeightAttempts(trip).length}</div>
     </div>
@@ -679,6 +726,52 @@ function getTruckTimelineButton(trip) {
 function showMessage(text, success = true) {
   messageEl.textContent = text;
   messageEl.style.color = success ? '#047857' : '#b91c1c';
+  showGlobalToast(text, success);
+}
+
+function showGlobalToast(text, success = true) {
+  if (!text) return;
+  let wrap = document.getElementById('global-toast-wrap');
+  if (!wrap) {
+    wrap = document.createElement('div');
+    wrap.id = 'global-toast-wrap';
+    wrap.className = 'global-toast-wrap';
+    document.body.appendChild(wrap);
+  }
+  if (globalToastTimer) {
+    clearTimeout(globalToastTimer);
+    globalToastTimer = null;
+  }
+  wrap.innerHTML = '';
+  const toast = document.createElement('div');
+  toast.className = `global-toast ${success ? 'success' : 'error'}`;
+  toast.textContent = String(text);
+  wrap.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  globalToastTimer = setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => {
+      if (wrap.contains(toast)) wrap.removeChild(toast);
+    }, 200);
+  }, success ? 2600 : 5000);
+}
+
+function setButtonBusy(button, busy, busyText = 'Processing...') {
+  if (!button) return;
+  if (busy) {
+    if (!button.dataset.originalText) {
+      button.dataset.originalText = button.textContent || '';
+    }
+    button.disabled = true;
+    button.textContent = busyText;
+    button.classList.add('is-busy');
+  } else {
+    button.disabled = false;
+    if (button.dataset.originalText) {
+      button.textContent = button.dataset.originalText;
+    }
+    button.classList.remove('is-busy');
+  }
 }
 
 function showTasksMessage(text, success = true) {
@@ -839,13 +932,12 @@ async function downloadTaskCommentAttachment(commentId) {
     }
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = 'attachment';
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
+    const opened = window.open(url, '_blank', 'noopener,noreferrer');
+    if (!opened) {
+      URL.revokeObjectURL(url);
+      throw new Error('Please allow popups to open attachment preview');
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60 * 1000);
   } catch (error) {
     showTasksMessage(error.message, false);
   }
@@ -1086,6 +1178,8 @@ async function markAllTaskNotificationsRead() {
 function showRoleSelection() {
   document.getElementById('role-modal').style.display = 'flex';
   document.getElementById('pin-modal').style.display = 'none';
+  const employeeRoleSelectModal = document.getElementById('employee-role-select-modal');
+  if (employeeRoleSelectModal) employeeRoleSelectModal.style.display = 'none';
   document.body.style.overflow = 'hidden';
 }
 
@@ -1102,30 +1196,60 @@ function showPINEntry(selectedRole) {
 function hideModals() {
   document.getElementById('role-modal').style.display = 'none';
   document.getElementById('pin-modal').style.display = 'none';
+  const employeeRoleSelectModal = document.getElementById('employee-role-select-modal');
+  if (employeeRoleSelectModal) employeeRoleSelectModal.style.display = 'none';
   document.body.style.overflow = 'auto';
+}
+
+function getEmployeeAuthSession() {
+  try {
+    const raw = localStorage.getItem('employeeAuth');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.roles)) return null;
+    return parsed;
+  } catch (_e) {
+    return null;
+  }
 }
 
 function applyRoleUI() {
   const role = getCurrentRole();
+  const roleSwitcher = document.getElementById('role-switcher');
+  const employeeAuth = getEmployeeAuthSession();
+  const sessionRoles = Array.isArray(employeeAuth?.roles) ? employeeAuth.roles.filter((r) => VALID_ROLES.includes(r)) : [];
   const canCreate = hasRoleAccess(['Gate']);
   const gatePanel = form?.closest('.panel');
   const dashboardLink = document.getElementById('dashboard-link');
   const customerPortalLink = document.getElementById('customer-portal-link');
   const expenseLink = document.getElementById('expense-link');
+  const expectedTrucksLink = document.getElementById('expected-trucks-link');
+  const adminControlLink = document.getElementById('admin-control-link');
   const canSeeTasks = !!role;
+  const canSeeDashboard = ['Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Manager', 'Admin'].includes(role);
+  const canSeeCustomerPortal = ['Admin', 'Manager', 'Dispatch', 'Accounts'].includes(role);
+  const canSeeExpectedTrucks = ['Gate', 'Admin', 'Manager', 'Dispatch'].includes(role);
+  const canSeeExpense = ['Admin', 'Accounts', 'Manager'].includes(role);
+  const canSeeAdminControl = role === 'Admin';
 
   if (gatePanel && !canCreate) {
     gatePanel.style.display = 'none';
   }
 
   if (dashboardLink) {
-    dashboardLink.style.display = role === 'Gate' ? 'none' : 'inline-block';
+    dashboardLink.style.display = canSeeDashboard ? 'inline-block' : 'none';
   }
   if (customerPortalLink) {
-    customerPortalLink.style.display = role === 'Gate' ? 'none' : 'inline-block';
+    customerPortalLink.style.display = canSeeCustomerPortal ? 'inline-block' : 'none';
   }
   if (expenseLink) {
-    expenseLink.style.display = ['Admin', 'Accounts', 'Manager'].includes(role) ? 'inline-block' : 'none';
+    expenseLink.style.display = canSeeExpense ? 'inline-block' : 'none';
+  }
+  if (expectedTrucksLink) {
+    expectedTrucksLink.style.display = canSeeExpectedTrucks ? 'inline-block' : 'none';
+  }
+  if (adminControlLink) {
+    adminControlLink.style.display = canSeeAdminControl ? 'inline-block' : 'none';
   }
   if (tasksLink) {
     tasksLink.style.display = canSeeTasks ? 'inline-block' : 'none';
@@ -1140,6 +1264,17 @@ function applyRoleUI() {
   if (roleIndicator && role) {
     roleIndicator.style.display = 'inline-block';
     roleIndicator.textContent = `Role: ${role}`;
+  }
+
+  if (roleSwitcher) {
+    if (sessionRoles.length > 1) {
+      roleSwitcher.innerHTML = sessionRoles.map((r) => `<option value="${r}">Switch: ${r}</option>`).join('');
+      roleSwitcher.value = role || sessionRoles[0];
+      roleSwitcher.style.display = 'inline-block';
+    } else {
+      roleSwitcher.style.display = 'none';
+      roleSwitcher.innerHTML = '';
+    }
   }
 }
 
@@ -1189,8 +1324,61 @@ function validatePIN(role, pin) {
 
 function logout() {
   localStorage.removeItem('userRole');
+  localStorage.removeItem('employeeAuth');
   userRole = null;
   window.location.reload();
+}
+
+function showEmployeeLoginMessage(message, ok = false) {
+  const el = document.getElementById('employee-login-message');
+  if (!el) return;
+  el.textContent = message;
+  el.style.display = message ? 'block' : 'none';
+  el.style.color = ok ? '#047857' : '#b91c1c';
+}
+
+async function loginEmployee() {
+  const usernameInput = document.getElementById('employee-login-username');
+  const passwordInput = document.getElementById('employee-login-password');
+  const loginBtn = document.getElementById('employee-login-btn');
+  if (!usernameInput || !passwordInput || !loginBtn) return;
+  const username = usernameInput.value.trim();
+  const password = passwordInput.value;
+  if (!username || !password) {
+    showEmployeeLoginMessage('Username and password are required');
+    return;
+  }
+  loginBtn.disabled = true;
+  showEmployeeLoginMessage('');
+  try {
+    const response = await fetch('/auth/employee-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data?.user) {
+      throw new Error(data.error || 'Login failed');
+    }
+    const roles = Array.isArray(data.user.roles) ? data.user.roles.filter((r) => VALID_ROLES.includes(r)) : [];
+    if (!roles.length) {
+      throw new Error('No transport role assigned to this user');
+    }
+    localStorage.setItem('employeeAuth', JSON.stringify({
+      id: data.user.id,
+      username: data.user.username,
+      full_name: data.user.full_name,
+      roles
+    }));
+    const current = getStoredRole();
+    const defaultRole = current && roles.includes(current) ? current : roles[0];
+    localStorage.setItem('userRole', defaultRole);
+    window.location.reload();
+  } catch (error) {
+    showEmployeeLoginMessage(error.message || 'Login failed');
+  } finally {
+    loginBtn.disabled = false;
+  }
 }
 
 async function autoOpenTasksFromQuery() {
@@ -1203,9 +1391,16 @@ async function autoOpenTasksFromQuery() {
 }
 
 function initializeRole() {
-  const storedRole = getStoredRole();
-  if (storedRole) {
-    userRole = storedRole;
+  const employeeAuth = getEmployeeAuthSession();
+  if (employeeAuth && Array.isArray(employeeAuth.roles) && employeeAuth.roles.length) {
+    const storedRole = getStoredRole();
+    if (!storedRole || !employeeAuth.roles.includes(storedRole)) {
+      localStorage.setItem('userRole', employeeAuth.roles[0]);
+    }
+  }
+  const activeRole = getStoredRole();
+  if (activeRole) {
+    userRole = activeRole;
     hideModals();
     showAppContent();
     return;
@@ -1343,6 +1538,86 @@ function refreshTransporterOptions() {
   transporterOptions = merged;
 }
 
+function normalizeMasterList(values = [], fallback = []) {
+  const fromApi = Array.isArray(values)
+    ? values.map((v) => (typeof v === 'object' ? v.value : v)).map((v) => String(v || '').trim()).filter(Boolean)
+    : [];
+  const merged = [...new Set([...fromApi, ...fallback.filter((v) => v && v !== 'Other')])];
+  return [...merged, 'Other'];
+}
+
+function toNumOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function round3(value) {
+  const n = toNumOrNull(value);
+  return n === null ? null : Number(n.toFixed(3));
+}
+
+function computeBillingAmounts(netWeight, ratePerMt, gstPercent) {
+  const net = toNumOrNull(netWeight);
+  const rate = Math.max(0, toNumOrNull(ratePerMt) ?? 0);
+  const gst = Math.max(0, toNumOrNull(gstPercent) ?? 0);
+  if (net === null || net <= 0) {
+    return { taxable: 0, gstAmount: 0, total: 0, safeRate: rate, safeGst: gst };
+  }
+  const taxable = round3(net * rate) || 0;
+  const gstAmount = round3((taxable * gst) / 100) || 0;
+  const total = round3(taxable + gstAmount) || 0;
+  return { taxable, gstAmount, total, safeRate: rate, safeGst: gst };
+}
+
+async function loadMasterDropdownOptions() {
+  const types = [
+    'materials',
+    'grades',
+    'conditions',
+    'packing',
+    'loading_points',
+    'loading_teams',
+    'transporters',
+    'locations'
+  ];
+  try {
+    const response = await fetch(`/masters/options?types=${encodeURIComponent(types.join(','))}`, { headers: getAuthHeaders() });
+    if (!response.ok) throw new Error('Failed to load master options');
+    const data = await response.json();
+    DISPATCH_DROPDOWNS.material_type = normalizeMasterList(data.materials, DEFAULT_DISPATCH_DROPDOWNS.material_type);
+    DISPATCH_DROPDOWNS.grade = normalizeMasterList(data.grades, DEFAULT_DISPATCH_DROPDOWNS.grade);
+    const gradeRows = Array.isArray(data.grades) ? data.grades : [];
+    gradePricingMap = new Map(
+      gradeRows
+        .filter((item) => item && typeof item === 'object' && item.value)
+        .map((item) => [String(item.value).trim().toLowerCase(), toNumOrNull(item.price_per_mt)])
+    );
+    DISPATCH_DROPDOWNS.condition = normalizeMasterList(data.conditions, DEFAULT_DISPATCH_DROPDOWNS.condition);
+    DISPATCH_DROPDOWNS.packing = normalizeMasterList(data.packing, DEFAULT_DISPATCH_DROPDOWNS.packing);
+    DISPATCH_DROPDOWNS.loading_point = normalizeMasterList(data.loading_points, DEFAULT_DISPATCH_DROPDOWNS.loading_point);
+    DISPATCH_DROPDOWNS.labour_team = normalizeMasterList(data.loading_teams, DEFAULT_DISPATCH_DROPDOWNS.labour_team);
+    transporterOptions = normalizeMasterList(data.transporters, BASE_TRANSPORTER_OPTIONS);
+    locationOptions = normalizeMasterList(data.locations, []);
+  } catch (_error) {
+    DISPATCH_DROPDOWNS = { ...DEFAULT_DISPATCH_DROPDOWNS };
+    transporterOptions = [...BASE_TRANSPORTER_OPTIONS];
+    locationOptions = [];
+    gradePricingMap = new Map();
+  }
+}
+
+async function loadPricingDefaults() {
+  try {
+    const response = await fetch('/pricing/defaults', { headers: getAuthHeaders() });
+    if (!response.ok) throw new Error('Failed to load pricing defaults');
+    const data = await response.json();
+    pricingDefaults.default_gst_percent = toNumOrNull(data.default_gst_percent);
+  } catch (_error) {
+    pricingDefaults.default_gst_percent = null;
+  }
+}
+
 function normalizeLocationName(value) {
   return String(value || '').trim().replace(/\s+/g, ' ');
 }
@@ -1460,6 +1735,16 @@ function clearLoadingDraft(tripId) {
   loadingDetailsDrafts.delete(String(tripId));
 }
 
+function getBillingDraft(tripId) {
+  return billingDetailsDrafts.get(String(tripId)) || {};
+}
+
+function setBillingDraftField(tripId, field, value) {
+  const key = String(tripId);
+  const existing = getBillingDraft(key);
+  billingDetailsDrafts.set(key, { ...existing, [field]: value });
+}
+
 function getBaseTripPayload(trip) {
   if (!trip) return {};
   return {
@@ -1495,6 +1780,14 @@ function getBaseTripPayload(trip) {
     gross_weight: trip.gross_weight,
     net_weight: trip.net_weight,
     gross_weight_attempts: trip.gross_weight_attempts,
+    rate_used_per_mt: trip.rate_used_per_mt,
+    gst_percent_used: trip.gst_percent_used,
+    taxable_amount: trip.taxable_amount,
+    gst_amount: trip.gst_amount,
+    total_amount: trip.total_amount,
+    net_weight_snapshot_mt: trip.net_weight_snapshot_mt,
+    billing_calculated_at: trip.billing_calculated_at,
+    billing_calculated_by: trip.billing_calculated_by,
     status: normalizeStatus(trip.status),
     final_status: trip.final_status,
     is_cancelled: trip.is_cancelled,
@@ -1645,17 +1938,28 @@ function getPersonValueFromRow(tripId, roleName, fallbackValue = '') {
 }
 
 async function putTrip(tripId, payload) {
+  const localTrip = getTripById(tripId);
+  const requestPayload = {
+    ...payload
+  };
+  if (requestPayload.version === undefined || requestPayload.version === null) {
+    requestPayload.version = localTrip?.version;
+  }
+
   const response = await fetch(`/trip/${tripId}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
       ...getAuthHeaders()
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(requestPayload)
   });
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
+    if (response.status === 409) {
+      throw new Error(error.error || 'This trip was updated by another user. Please refresh.');
+    }
     const received = error.received ? ` | Received: ${JSON.stringify(error.received)}` : '';
     throw new Error((error.error || 'Trip update failed') + received);
   }
@@ -1663,7 +1967,7 @@ async function putTrip(tripId, payload) {
   return response.json();
 }
 
-async function applyStatusChange(tripId, requestedStatus, extraFields = {}) {
+async function applyStatusChange(tripId, requestedStatus, extraFields = {}, sourceButton = null) {
   const role = getCurrentRole();
   const existingTrip = getTripById(tripId);
   if (!existingTrip) {
@@ -1797,6 +2101,7 @@ async function applyStatusChange(tripId, requestedStatus, extraFields = {}) {
   }
 
   try {
+    setButtonBusy(sourceButton, true, 'Updating...');
     const updatedTrip = await putTrip(tripId, payload);
     const autoNext = AUTO_STATUS_TRANSITIONS[requestedStatus];
 
@@ -1810,10 +2115,12 @@ async function applyStatusChange(tripId, requestedStatus, extraFields = {}) {
   } catch (error) {
     showMessage(error.message, false);
     console.error(error);
+  } finally {
+    setButtonBusy(sourceButton, false);
   }
 }
 
-async function cancelTrip(tripId) {
+async function cancelTrip(tripId, sourceButton = null) {
   const role = getCurrentRole();
   if (!['Dispatch', 'Admin'].includes(role)) {
     showMessage('Only Dispatch/Admin can cancel trips', false);
@@ -1850,12 +2157,15 @@ async function cancelTrip(tripId) {
   };
 
   try {
+    setButtonBusy(sourceButton, true, 'Cancelling...');
     await putTrip(tripId, payload);
     showMessage('Trip cancelled');
     await loadTrips();
   } catch (error) {
     showMessage(error.message, false);
     console.error(error);
+  } finally {
+    setButtonBusy(sourceButton, false);
   }
 }
 
@@ -1939,7 +2249,7 @@ function buildGrossAttemptEntry(trip, { tare, gross, net, decision, reason, oper
   ];
 }
 
-async function saveTareWeight(tripId) {
+async function saveTareWeight(tripId, sourceButton = null) {
   if (!hasRoleAccess(['Weighbridge', 'Admin'])) {
     showMessage('Only Weighbridge/Admin can save tare weight', false);
     return;
@@ -1964,16 +2274,19 @@ async function saveTareWeight(tripId) {
   };
 
   try {
+    setButtonBusy(sourceButton, true, 'Saving...');
     await putTrip(tripId, payload);
     showMessage('Tare weight saved');
     await loadTrips();
   } catch (error) {
     showMessage(error.message, false);
     console.error(error);
+  } finally {
+    setButtonBusy(sourceButton, false);
   }
 }
 
-async function markTareDone(tripId) {
+async function markTareDone(tripId, sourceButton = null) {
   const trip = getTripById(tripId);
   if (!trip) return;
   const tare = getWeightFromRow(tripId, 'tare_weight') || Number(trip.tare_weight);
@@ -1992,10 +2305,10 @@ async function markTareDone(tripId) {
     extraFields.tare_weight = tare;
   }
 
-  await applyStatusChange(tripId, 'TARE_WEIGHT_DONE', extraFields);
+  await applyStatusChange(tripId, 'TARE_WEIGHT_DONE', extraFields, sourceButton);
 }
 
-async function saveGrossWeight(tripId) {
+async function saveGrossWeight(tripId, sourceButton = null) {
   if (!hasRoleAccess(['Weighbridge', 'Admin'])) {
     showMessage('Only Weighbridge/Admin can save gross weight', false);
     return;
@@ -2034,16 +2347,19 @@ async function saveGrossWeight(tripId) {
   };
 
   try {
+    setButtonBusy(sourceButton, true, 'Saving...');
     await putTrip(tripId, payload);
     showMessage('Gross weight saved');
     await loadTrips();
   } catch (error) {
     showMessage(error.message, false);
     console.error(error);
+  } finally {
+    setButtonBusy(sourceButton, false);
   }
 }
 
-async function markGrossDone(tripId) {
+async function markGrossDone(tripId, sourceButton = null) {
   const trip = getTripById(tripId);
   if (!trip) return;
   const gross = getWeightFromRow(tripId, 'gross_weight') || Number(trip.gross_weight);
@@ -2085,10 +2401,10 @@ async function markGrossDone(tripId) {
     gross_weight_attempts: nextAttempts,
     load_fix_reason: null
   };
-  await applyStatusChange(tripId, 'GROSS_WEIGHT_DONE', extraFields);
+  await applyStatusChange(tripId, 'GROSS_WEIGHT_DONE', extraFields, sourceButton);
 }
 
-async function sendForLoadFix(tripId) {
+async function sendForLoadFix(tripId, sourceButton = null) {
   if (!hasRoleAccess(['Weighbridge', 'Admin'])) {
     showMessage('Only Weighbridge/Admin can send for load fix', false);
     return;
@@ -2140,7 +2456,7 @@ async function sendForLoadFix(tripId) {
     weight_operator_name: operatorName,
     gross_weight_attempts: nextAttempts,
     load_fix_reason: reason.trim()
-  });
+  }, sourceButton);
 }
 
 async function fetchTripDocuments(tripId, force = false) {
@@ -2221,19 +2537,18 @@ async function downloadTripDocument(docId, fileName = 'document') {
     }
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = fileName || 'document';
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
+    const opened = window.open(url, '_blank', 'noopener,noreferrer');
+    if (!opened) {
+      URL.revokeObjectURL(url);
+      throw new Error('Please allow popups to open document preview');
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60 * 1000);
   } catch (error) {
     showMessage(error.message, false);
   }
 }
 
-async function uploadTripDocument(tripId) {
+async function uploadTripDocument(tripId, sourceButton = null) {
   if (!canUploadTripDocuments()) {
     showMessage('Role cannot upload documents', false);
     return;
@@ -2253,6 +2568,7 @@ async function uploadTripDocument(tripId) {
   }
 
   try {
+    setButtonBusy(sourceButton, true, 'Uploading...');
     const response = await fetch(`/trip/${tripId}/documents`, {
       method: 'POST',
       headers: {
@@ -2271,13 +2587,16 @@ async function uploadTripDocument(tripId) {
     applyFilters();
   } catch (error) {
     showMessage(error.message, false);
+  } finally {
+    setButtonBusy(sourceButton, false);
   }
 }
 
-async function deleteTripDocument(tripId, docId) {
+async function deleteTripDocument(tripId, docId, sourceButton = null) {
   const confirmDelete = window.confirm('Delete this document?');
   if (!confirmDelete) return;
   try {
+    setButtonBusy(sourceButton, true, 'Deleting...');
     const response = await fetch(`/trip/${tripId}/documents/${docId}`, {
       method: 'DELETE',
       headers: {
@@ -2293,6 +2612,8 @@ async function deleteTripDocument(tripId, docId) {
     applyFilters();
   } catch (error) {
     showMessage(error.message, false);
+  } finally {
+    setButtonBusy(sourceButton, false);
   }
 }
 
@@ -2586,7 +2907,7 @@ function getDispatchEditor(trip) {
       <label>Condition ${renderDispatchSelect('condition', trip.id, conditionValue)}</label>
       <label>Packing ${renderDispatchSelect('packing', trip.id, packingValue)}</label>
       <label>Location
-        <input type="text" list="location-options" data-trip-id="${trip.id}" data-dispatch-field="location" class="dispatch-input" value="${escapeHtml(String(locationValue))}" />
+        <input type="text" data-trip-id="${trip.id}" data-dispatch-field="location" class="dispatch-input" value="${escapeHtml(String(locationValue))}" placeholder="Enter location" />
       </label>
       <label>Loading Point ${renderDispatchSelect('loading_point', trip.id, loadingPointValue)}</label>
       <label>Expected Weight (MT)
@@ -2621,6 +2942,41 @@ function getLoadingStartEditor(trip) {
       ` : ''}
       <label>Loading Team ${renderDispatchSelect('labour_team', trip.id, loadingTeamValue)}</label>
       <label>Loading Manager ${renderPersonSelect('Loading', trip.id, loadingPersonValue)}</label>
+    </div>
+  `;
+}
+
+function getBillingEditor(trip) {
+  if (!hasRoleAccess(['Accounts', 'Admin'])) return '';
+  const draft = getBillingDraft(trip.id);
+  const gradeKey = String(trip.grade || '').trim().toLowerCase();
+  const defaultRate = gradePricingMap.get(gradeKey);
+  const defaultGst = pricingDefaults.default_gst_percent;
+  const rateValue = draft.rate_used_per_mt ?? trip.rate_used_per_mt ?? defaultRate ?? '';
+  const gstValue = draft.gst_percent_used ?? trip.gst_percent_used ?? defaultGst ?? '';
+  const netWeight = toNumOrNull(trip.net_weight_snapshot_mt ?? trip.net_weight) ?? 0;
+  const amounts = computeBillingAmounts(netWeight, rateValue, gstValue);
+
+  return `
+    <div class="dispatch-editor billing-editor">
+      <label>Net Weight (MT)
+        <input type="text" class="dispatch-input" value="${escapeHtml(formatWeightMT(netWeight))}" disabled />
+      </label>
+      <label>Rate (₹/MT)
+        <input type="number" step="0.001" min="0" data-trip-id="${trip.id}" data-billing-field="rate_used_per_mt" class="dispatch-input" value="${escapeHtml(String(rateValue))}" />
+      </label>
+      <label>GST (%)
+        <input type="number" step="0.001" min="0" data-trip-id="${trip.id}" data-billing-field="gst_percent_used" class="dispatch-input" value="${escapeHtml(String(gstValue))}" />
+      </label>
+      <label>Taxable Amount (₹)
+        <input type="text" data-trip-id="${trip.id}" data-billing-field="taxable_amount_preview" class="dispatch-input" value="${escapeHtml(String(amounts.taxable.toFixed(2)))}" disabled />
+      </label>
+      <label>GST Amount (₹)
+        <input type="text" data-trip-id="${trip.id}" data-billing-field="gst_amount_preview" class="dispatch-input" value="${escapeHtml(String(amounts.gstAmount.toFixed(2)))}" disabled />
+      </label>
+      <label>Total Amount (₹)
+        <input type="text" data-trip-id="${trip.id}" data-billing-field="total_amount_preview" class="dispatch-input" value="${escapeHtml(String(amounts.total.toFixed(2)))}" disabled />
+      </label>
     </div>
   `;
 }
@@ -2730,6 +3086,7 @@ function buildWorkflowActionBlocks(trip, role, status, options = {}) {
         <label>Accounts Manager
           ${renderPersonSelect('Accounts', trip.id, trip.accounts_person_name || '')}
         </label>
+        ${status === 'BILLING_PENDING' ? getBillingEditor(trip) : ''}
       </div>
     `);
   }
@@ -3023,7 +3380,7 @@ async function handleStatusTargetClick(button) {
       waitingPayload.dispatch_manager_name = dispatchName;
       waitingPayload.dispatch_done_by = dispatchName;
     }
-    await applyStatusChange(tripId, 'WAITING', waitingPayload);
+    await applyStatusChange(tripId, 'WAITING', waitingPayload, button);
     return;
   }
 
@@ -3050,7 +3407,7 @@ async function handleStatusTargetClick(button) {
     if (Number.isFinite(parsedExpectedWeight) && parsedExpectedWeight > 0) {
       loadingPayload.expected_weight = parsedExpectedWeight;
     }
-    await applyStatusChange(tripId, 'LOADING_IN_PROGRESS', loadingPayload);
+    await applyStatusChange(tripId, 'LOADING_IN_PROGRESS', loadingPayload, button);
     clearLoadingDraft(tripId);
     return;
   }
@@ -3100,11 +3457,24 @@ async function handleStatusTargetClick(button) {
       showMessage('Select accounts manager name', false);
       return;
     }
+    const draft = getBillingDraft(tripId);
+    const rateValue = toNumOrNull(draft.rate_used_per_mt ?? trip.rate_used_per_mt);
+    const gstValue = toNumOrNull(draft.gst_percent_used ?? trip.gst_percent_used);
+    const netWeight = toNumOrNull(trip.net_weight_snapshot_mt ?? trip.net_weight) ?? 0;
+    const amounts = computeBillingAmounts(netWeight, rateValue, gstValue);
     extraFields.accounts_person_name = accountsName;
     extraFields.billing_done_by = accountsName;
+    extraFields.rate_used_per_mt = amounts.safeRate;
+    extraFields.gst_percent_used = amounts.safeGst;
+    extraFields.taxable_amount = amounts.taxable;
+    extraFields.gst_amount = amounts.gstAmount;
+    extraFields.total_amount = amounts.total;
+    extraFields.net_weight_snapshot_mt = round3(netWeight) || 0;
+    extraFields.billing_calculated_at = new Date().toISOString();
+    extraFields.billing_calculated_by = accountsName;
   }
 
-  await applyStatusChange(tripId, targetStatus, extraFields);
+  await applyStatusChange(tripId, targetStatus, extraFields, button);
 }
 
 function handleDispatchInputChange(selectEl) {
@@ -3156,6 +3526,34 @@ function persistDispatchDraft(inputEl) {
   }
 }
 
+function updateBillingPreview(tripId) {
+  const trip = getTripById(tripId);
+  if (!trip) return;
+  const draft = getBillingDraft(tripId);
+  const rateInput = document.querySelector(`[data-trip-id="${tripId}"][data-billing-field="rate_used_per_mt"]`);
+  const gstInput = document.querySelector(`[data-trip-id="${tripId}"][data-billing-field="gst_percent_used"]`);
+  const taxablePreview = document.querySelector(`[data-trip-id="${tripId}"][data-billing-field="taxable_amount_preview"]`);
+  const gstPreview = document.querySelector(`[data-trip-id="${tripId}"][data-billing-field="gst_amount_preview"]`);
+  const totalPreview = document.querySelector(`[data-trip-id="${tripId}"][data-billing-field="total_amount_preview"]`);
+  if (!rateInput || !gstInput || !taxablePreview || !gstPreview || !totalPreview) return;
+
+  const rateValue = draft.rate_used_per_mt ?? rateInput.value;
+  const gstValue = draft.gst_percent_used ?? gstInput.value;
+  const netWeight = toNumOrNull(trip.net_weight_snapshot_mt ?? trip.net_weight) ?? 0;
+  const amounts = computeBillingAmounts(netWeight, rateValue, gstValue);
+  taxablePreview.value = String(amounts.taxable.toFixed(2));
+  gstPreview.value = String(amounts.gstAmount.toFixed(2));
+  totalPreview.value = String(amounts.total.toFixed(2));
+}
+
+function persistBillingDraft(inputEl) {
+  const tripId = inputEl.dataset.tripId;
+  const field = inputEl.dataset.billingField;
+  if (!tripId || !field || !['rate_used_per_mt', 'gst_percent_used'].includes(field)) return;
+  setBillingDraftField(tripId, field, inputEl.value.trim());
+  updateBillingPreview(tripId);
+}
+
 function updateLoadingButtonState(tripId) {
   const button = document.querySelector(
     `[data-action="status-change"][data-target-status="LOADING_IN_PROGRESS"][data-trip-id="${tripId}"]`
@@ -3186,27 +3584,27 @@ function bindRowActionHandlers(root = document) {
   });
 
   root.querySelectorAll('[data-action="cancel"]').forEach((button) => {
-    button.addEventListener('click', () => cancelTrip(button.dataset.tripId));
+    button.addEventListener('click', () => cancelTrip(button.dataset.tripId, button));
   });
 
   root.querySelectorAll('[data-action="save-tare"]').forEach((button) => {
-    button.addEventListener('click', () => saveTareWeight(button.dataset.tripId));
+    button.addEventListener('click', () => saveTareWeight(button.dataset.tripId, button));
   });
 
   root.querySelectorAll('[data-action="mark-tare-done"]').forEach((button) => {
-    button.addEventListener('click', () => markTareDone(button.dataset.tripId));
+    button.addEventListener('click', () => markTareDone(button.dataset.tripId, button));
   });
 
   root.querySelectorAll('[data-action="save-gross"]').forEach((button) => {
-    button.addEventListener('click', () => saveGrossWeight(button.dataset.tripId));
+    button.addEventListener('click', () => saveGrossWeight(button.dataset.tripId, button));
   });
 
   root.querySelectorAll('[data-action="send-load-fix"]').forEach((button) => {
-    button.addEventListener('click', () => sendForLoadFix(button.dataset.tripId));
+    button.addEventListener('click', () => sendForLoadFix(button.dataset.tripId, button));
   });
 
   root.querySelectorAll('[data-action="mark-gross-done"]').forEach((button) => {
-    button.addEventListener('click', () => markGrossDone(button.dataset.tripId));
+    button.addEventListener('click', () => markGrossDone(button.dataset.tripId, button));
   });
 
   root.querySelectorAll('.dispatch-input[data-dispatch-field]').forEach((input) => {
@@ -3223,6 +3621,11 @@ function bindRowActionHandlers(root = document) {
       persistDispatchDraft(input);
       updateLoadingButtonState(input.dataset.tripId);
     });
+  });
+
+  root.querySelectorAll('.dispatch-input[data-billing-field]').forEach((input) => {
+    input.addEventListener('input', () => persistBillingDraft(input));
+    input.addEventListener('change', () => persistBillingDraft(input));
   });
 
   root.querySelectorAll('.weight-input[data-weight-field="tare_weight"], .weight-input[data-weight-field="gross_weight"]').forEach((input) => {
@@ -3278,19 +3681,19 @@ function bindRowActionHandlers(root = document) {
   });
 
   root.querySelectorAll('[data-action="admin-save"]').forEach((button) => {
-    button.addEventListener('click', () => saveAdminManualData(button.dataset.tripId));
+    button.addEventListener('click', () => saveAdminManualData(button.dataset.tripId, button));
   });
 
   root.querySelectorAll('[data-action="admin-delete-trip"]').forEach((button) => {
-    button.addEventListener('click', () => deleteAdminTrip(button.dataset.tripId));
+    button.addEventListener('click', () => deleteAdminTrip(button.dataset.tripId, button));
   });
 
   root.querySelectorAll('[data-action="upload-doc"]').forEach((button) => {
-    button.addEventListener('click', () => uploadTripDocument(button.dataset.tripId));
+    button.addEventListener('click', () => uploadTripDocument(button.dataset.tripId, button));
   });
 
   root.querySelectorAll('[data-action="delete-doc"]').forEach((button) => {
-    button.addEventListener('click', () => deleteTripDocument(button.dataset.tripId, button.dataset.docId));
+    button.addEventListener('click', () => deleteTripDocument(button.dataset.tripId, button.dataset.docId, button));
   });
 
   root.querySelectorAll('[data-action="download-doc"]').forEach((button) => {
@@ -3333,7 +3736,7 @@ function readAdminFieldValue(fieldKey, inputValue) {
   return inputValue.trim() === '' ? null : inputValue.trim();
 }
 
-async function saveAdminManualData(tripId) {
+async function saveAdminManualData(tripId, sourceButton = null) {
   if (!hasRoleAccess(['Admin'])) {
     showMessage('Only Admin can edit manual data', false);
     return;
@@ -3364,16 +3767,19 @@ async function saveAdminManualData(tripId) {
   }
 
   try {
+    setButtonBusy(sourceButton, true, 'Saving...');
     await putTrip(tripId, payload);
     showMessage('Manual data updated successfully');
     await loadTrips();
   } catch (error) {
     showMessage(error.message, false);
     console.error(error);
+  } finally {
+    setButtonBusy(sourceButton, false);
   }
 }
 
-async function deleteAdminTrip(tripId) {
+async function deleteAdminTrip(tripId, sourceButton = null) {
   if (!hasRoleAccess(['Admin'])) {
     showMessage('Only Admin can delete trips', false);
     return;
@@ -3387,6 +3793,7 @@ async function deleteAdminTrip(tripId) {
   if (!confirmed) return;
 
   try {
+    setButtonBusy(sourceButton, true, 'Deleting...');
     const response = await fetch(`/trip/${tripId}`, {
       method: 'DELETE',
       headers: {
@@ -3404,6 +3811,8 @@ async function deleteAdminTrip(tripId) {
   } catch (error) {
     showMessage(error.message, false);
     console.error(error);
+  } finally {
+    setButtonBusy(sourceButton, false);
   }
 }
 
@@ -3487,6 +3896,21 @@ document.addEventListener('DOMContentLoaded', () => {
     logout();
   });
   document.getElementById('expense-link')?.addEventListener('click', openExpenseWithSso);
+  document.getElementById('employee-login-btn')?.addEventListener('click', loginEmployee);
+  document.getElementById('employee-login-password')?.addEventListener('keypress', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      loginEmployee();
+    }
+  });
+  document.getElementById('role-switcher')?.addEventListener('change', (event) => {
+    const selectedRole = event.target.value;
+    const employeeAuth = getEmployeeAuthSession();
+    const roles = Array.isArray(employeeAuth?.roles) ? employeeAuth.roles : [];
+    if (!selectedRole || !roles.includes(selectedRole)) return;
+    localStorage.setItem('userRole', selectedRole);
+    window.location.reload();
+  });
 
   tasksLink?.addEventListener('click', async (event) => {
     event.preventDefault();
@@ -3550,8 +3974,10 @@ document.addEventListener('DOMContentLoaded', () => {
   initializeRole();
   syncTripsTableHeader();
   refreshStatusFilterOptions();
-  refreshTransporterOptions();
-  loadTrips();
+  Promise.all([loadMasterDropdownOptions(), loadRoleBasedPersonDropdowns(), loadPricingDefaults()]).finally(() => {
+    refreshTransporterOptions();
+    loadTrips();
+  });
   loadTaskAssignees();
   loadTaskNotifications();
   autoOpenTasksFromQuery();
@@ -3619,7 +4045,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const payload = getFormData();
+    const submitBtn = document.getElementById('save-button');
     try {
+      setButtonBusy(submitBtn, true, 'Submitting...');
       const response = await fetch('/trip', {
         method: 'POST',
         headers: {
@@ -3650,6 +4078,8 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (error) {
       showMessage(error.message, false);
       console.error(error);
+    } finally {
+      setButtonBusy(submitBtn, false);
     }
   });
 

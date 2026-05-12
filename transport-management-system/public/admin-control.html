@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Indus Silica Sand - Admin Control Panel</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>Admin Control Panel</h1>
+    <p>Manage users, access and master data from one place.</p>
+    <div class="header-actions">
+      <span id="role-indicator" class="role-indicator"></span>
+      <select id="role-switcher" class="nav-link nav-btn" style="display:none;"></select>
+      <a href="/" class="nav-link">Back to Main</a>
+    </div>
+  </header>
+
+  <section class="panel wide-panel">
+    <h2>Overview</h2>
+    <div id="overview-cards" class="summary-cards"></div>
+    <div id="overview-flags" class="mini"></div>
+    <div id="overview-pins" class="mini"></div>
+    <div style="margin-top:10px;">
+      <button id="seed-sync-btn" type="button">Seed Current Data Into Control Panel</button>
+    </div>
+  </section>
+
+  <section class="panel wide-panel">
+    <h2>Employees & Access</h2>
+    <div class="expense-actions">
+      <button type="button" id="employee-add-btn">Add Employee</button>
+      <button type="button" id="employee-refresh-btn">Refresh</button>
+    </div>
+    <div class="table-container">
+      <table class="trip-table-dashboard-active">
+        <thead><tr><th>Username</th><th>Name</th><th>Transport Access</th><th>Expense Access</th><th>Status</th><th>Updated</th><th>Action</th></tr></thead>
+        <tbody id="employees-table"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div id="employee-modal" class="timeline-modal" style="display:none;">
+    <div class="timeline-modal-content">
+      <div class="timeline-modal-header">
+        <h3 id="employee-modal-title">Employee</h3>
+        <button type="button" id="employee-modal-close" class="timeline-close-btn">Close</button>
+      </div>
+      <form id="employee-form" class="form-grid">
+        <label>Username<input type="text" id="e-username" required /></label>
+        <label>Full Name<input type="text" id="e-full-name" required /></label>
+        <label>Password<input type="text" id="e-password" placeholder="Optional reset/new password" /></label>
+        <fieldset style="grid-column: 1 / -1; border: 1px solid #d1d5db; border-radius: 8px; padding: 10px;">
+          <legend style="padding: 0 6px;">Transport Roles</legend>
+          <div id="e-transport-roles" class="transport-roles-checklist" style="display:grid;grid-template-columns:repeat(2,minmax(140px,1fr));gap:8px;">
+            <label><input type="checkbox" value="Gate" /> Gate</label>
+            <label><input type="checkbox" value="Weighbridge" /> Weighbridge</label>
+            <label><input type="checkbox" value="Dispatch" /> Dispatch</label>
+            <label><input type="checkbox" value="Loading" /> Loading</label>
+            <label><input type="checkbox" value="Accounts" /> Accounts</label>
+            <label><input type="checkbox" value="Manager" /> Manager</label>
+            <label><input type="checkbox" value="Admin" /> Admin</label>
+          </div>
+        </fieldset>
+        <label>Expense Role
+          <select id="e-expense-role">
+            <option value="">None</option>
+            <option value="Employee">Employee</option>
+            <option value="Accounts">Accounts</option>
+            <option value="Manager">Manager</option>
+            <option value="Admin">Admin</option>
+          </select>
+        </label>
+        <label>Status
+          <select id="e-active">
+            <option value="true">Active</option>
+            <option value="false">Inactive</option>
+          </select>
+        </label>
+        <button type="submit" id="employee-save-btn">Save Employee</button>
+      </form>
+      <p id="employee-modal-message" class="mini" style="margin:10px 0 0;"></p>
+    </div>
+  </div>
+
+  <section class="panel wide-panel">
+    <h2>Customers</h2>
+    <form id="customer-user-form" class="form-grid">
+      <label>Customer Name<input type="text" id="cu-customer" required /></label>
+      <label>Display Name<input type="text" id="cu-display" /></label>
+      <label>Username<input type="text" id="cu-username" required /></label>
+      <label>Password<input type="text" id="cu-password" placeholder="Set/Reset password" /></label>
+      <label>Status
+        <select id="cu-active">
+          <option value="true">Active</option>
+          <option value="false">Inactive</option>
+        </select>
+      </label>
+      <button type="submit">Save Customer User</button>
+    </form>
+    <p id="customer-user-message" class="mini" style="margin:10px 0 0;"></p>
+    <div class="table-container">
+      <table class="trip-table-dashboard-active">
+        <thead><tr><th>Customer</th><th>Display</th><th>Username</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody id="customer-users-table"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel wide-panel">
+    <h2>Master Data</h2>
+    <form id="master-form" class="form-grid">
+      <label>Type
+        <select id="m-type">
+          <option value="products">products</option>
+          <option value="materials">materials</option>
+          <option value="grades">grades</option>
+          <option value="conditions">conditions</option>
+          <option value="packing">packing</option>
+          <option value="loading_points">loading_points</option>
+          <option value="loading_teams">loading_teams</option>
+          <option value="transporters">transporters</option>
+        </select>
+      </label>
+      <label>Value<input type="text" id="m-value" required /></label>
+      <label id="m-price-wrap" style="display:none;">Price per MT
+        <input type="number" id="m-price" step="0.01" min="0" placeholder="Optional" />
+      </label>
+      <label>Status
+        <select id="m-active">
+          <option value="true">Active</option>
+          <option value="false">Inactive</option>
+        </select>
+      </label>
+      <button type="submit">Save Master Value</button>
+    </form>
+    <button id="master-refresh-btn" type="button">Refresh Selected Type</button>
+    <div class="table-container">
+      <table class="trip-table-dashboard-active">
+        <thead><tr><th>Type</th><th>Value</th><th>Price/MT</th><th>Status</th><th>Updated</th><th>Action</th></tr></thead>
+        <tbody id="master-table"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel wide-panel">
+    <h2>Pricing Settings</h2>
+    <form id="settings-form" class="form-grid">
+      <label>Default GST %
+        <input type="number" id="s-gst" min="0" max="100" step="0.01" placeholder="e.g. 18" />
+      </label>
+      <button type="submit">Save Settings</button>
+    </form>
+    <p id="settings-message" class="mini" style="margin:10px 0 0;"></p>
+  </section>
+
+  <section class="panel wide-panel">
+    <p id="admin-control-message"></p>
+  </section>
+
+  <script src="/admin-control.js?v=20260511-10"></script>
+</body>
+</html>

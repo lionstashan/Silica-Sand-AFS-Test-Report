@@ -47,6 +47,33 @@
     .expense-secondary { background: #fff; color: #1f2937; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
     .expense-danger { background: #b91c1c; color: #fff; border: 1px solid #b91c1c; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
     #review-remarks { width: 100%; margin-top: 10px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px; min-height: 76px; }
+    #review-remarks.remarks-error { border-color: #b91c1c; box-shadow: 0 0 0 1px #b91c1c inset; }
+    .remarks-error-text { color: #b91c1c; font-size: 12px; margin-top: 6px; display: none; }
+    .expense-toast-wrap {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 10000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: none;
+    }
+    .expense-toast {
+      min-width: 240px;
+      max-width: 360px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 13px;
+      box-shadow: 0 8px 20px rgba(2, 6, 23, 0.22);
+      opacity: 0;
+      transform: translateY(-8px);
+      transition: all 180ms ease;
+    }
+    .expense-toast.show { opacity: 1; transform: translateY(0); }
+    .expense-toast.success { background: #0a7a2f; }
+    .expense-toast.error { background: #b91c1c; }
     @media (max-width: 900px) {
       .expense-grid { grid-template-columns: 1fr; }
       .expense-list { max-height: none; }
@@ -145,6 +172,7 @@
               <button id="payment-complete-btn" class="expense-primary">Payment Completed</button>
             </div>
             <textarea id="review-remarks" placeholder="Remarks / reason"></textarea>
+            <div id="review-remarks-error" class="remarks-error-text">Enter payment completion remarks.</div>
             <div style="margin-top:10px;">
               <label class="field-label">Upload Document</label>
               <div class="expense-actions">
@@ -164,6 +192,7 @@
       <div id="global-msg" class="mini" style="margin-top:8px;"></div>
     </div>
   </div>
+  <div id="expense-toast-wrap" class="expense-toast-wrap" aria-live="polite" aria-atomic="true"></div>
   <div id="expense-notification-modal" class="timeline-modal" style="display:none;">
     <div class="timeline-modal-content" style="max-width:640px;">
       <div class="timeline-modal-header">
@@ -176,6 +205,6 @@
       <div id="expense-notification-list" class="mini"></div>
     </div>
   </div>
-  <script src="/expense.js?v=20260508-18"></script>
+  <script src="/expense.js?v=20260511-22"></script>
 </body>
 </html>

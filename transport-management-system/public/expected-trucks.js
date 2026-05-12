@@ -4,15 +4,18 @@ const ROLE_PINS = {
   Dispatch: 'D9M4',
   Loading: 'L5Q8',
   Accounts: 'A6R1',
+  Manager: 'M2N6',
   Admin: '2802'
 };
-const ALLOWED_ROLES = ['Gate', 'Dispatch', 'Admin'];
+const ALLOWED_ROLES = ['Gate', 'Dispatch', 'Manager', 'Admin'];
 const IST_TIMEZONE = 'Asia/Kolkata';
 
 let userRole = null;
+let employeeSessionRoles = [];
 let rows = [];
 let refreshTimer = null;
 let taskNotificationPoll = null;
+let globalToastTimer = null;
 
 const table = document.getElementById('expected-table');
 const mobileList = document.getElementById('expected-mobile-list');
@@ -43,6 +46,18 @@ function getStoredRole() {
   return ALLOWED_ROLES.includes(role) ? role : null;
 }
 
+function getEmployeeAuthSession() {
+  try {
+    const raw = localStorage.getItem('employeeAuth');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.roles)) return null;
+    return parsed;
+  } catch (_e) {
+    return null;
+  }
+}
+
 function getAuthHeaders() {
   const role = getStoredRole();
   const pin = role ? ROLE_PINS[role] : null;
@@ -56,6 +71,31 @@ function getAuthHeaders() {
 function showMessage(text, success = true) {
   messageEl.textContent = text;
   messageEl.style.color = success ? '#047857' : '#b91c1c';
+  showGlobalToast(text, success);
+}
+
+function showGlobalToast(text, success = true) {
+  if (!text) return;
+  let wrap = document.getElementById('global-toast-wrap');
+  if (!wrap) {
+    wrap = document.createElement('div');
+    wrap.id = 'global-toast-wrap';
+    wrap.className = 'global-toast-wrap';
+    document.body.appendChild(wrap);
+  }
+  if (globalToastTimer) clearTimeout(globalToastTimer);
+  wrap.innerHTML = '';
+  const toast = document.createElement('div');
+  toast.className = `global-toast ${success ? 'success' : 'error'}`;
+  toast.textContent = String(text);
+  wrap.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  globalToastTimer = setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => {
+      if (wrap.contains(toast)) wrap.removeChild(toast);
+    }, 200);
+  }, success ? 2600 : 5000);
 }
 
 function showRoleSelection() {
@@ -87,6 +127,21 @@ function showAppContent() {
   roleIndicator.style.display = 'inline-block';
   roleIndicator.textContent = `Role: ${userRole}`;
   document.getElementById('logout-link').style.display = 'inline-block';
+  const switcher = document.getElementById('role-switcher');
+  if (switcher) {
+    const auth = getEmployeeAuthSession();
+    employeeSessionRoles = Array.isArray(auth?.roles)
+      ? auth.roles.filter((r) => ALLOWED_ROLES.includes(r))
+      : [];
+    if (employeeSessionRoles.length > 1) {
+      switcher.innerHTML = employeeSessionRoles.map((r) => `<option value="${r}">Switch: ${r}</option>`).join('');
+      switcher.value = userRole && employeeSessionRoles.includes(userRole) ? userRole : employeeSessionRoles[0];
+      switcher.style.display = 'inline-block';
+    } else {
+      switcher.style.display = 'none';
+      switcher.innerHTML = '';
+    }
+  }
   if (taskNotificationsBtn) taskNotificationsBtn.style.display = 'inline-block';
 }
 
@@ -112,6 +167,14 @@ async function loadTaskNotifications() {
 }
 
 function initializeRole() {
+  const auth = getEmployeeAuthSession();
+  if (auth && Array.isArray(auth.roles) && auth.roles.length) {
+    const storedRole = getStoredRole();
+    const allowedAuthRoles = auth.roles.filter((r) => ALLOWED_ROLES.includes(r));
+    if ((!storedRole || !allowedAuthRoles.includes(storedRole)) && allowedAuthRoles.length) {
+      localStorage.setItem('userRole', allowedAuthRoles[0]);
+    }
+  }
   const role = getStoredRole();
   if (role) {
     userRole = role;
@@ -302,6 +365,14 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('logout-link').addEventListener('click', (event) => {
     event.preventDefault();
     logout();
+  });
+  document.getElementById('role-switcher')?.addEventListener('change', (event) => {
+    const selectedRole = event.target.value;
+    const auth = getEmployeeAuthSession();
+    const roles = Array.isArray(auth?.roles) ? auth.roles.filter((r) => ALLOWED_ROLES.includes(r)) : [];
+    if (!selectedRole || !roles.includes(selectedRole)) return;
+    localStorage.setItem('userRole', selectedRole);
+    window.location.reload();
   });
   taskNotificationsBtn?.addEventListener('click', () => {
     window.location.href = '/';

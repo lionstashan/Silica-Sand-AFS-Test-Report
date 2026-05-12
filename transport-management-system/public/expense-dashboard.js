@@ -2,6 +2,7 @@ const TOKEN_KEY = 'expenseToken';
 const USER_KEY = 'expenseUser';
 let expenseNotifications = [];
 let notifPoll = null;
+let globalToastTimer = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -21,6 +22,45 @@ function setMsg(msg, isError = false) {
   const el = $('msg');
   el.textContent = msg || '';
   el.style.color = isError ? '#b00020' : '#64748b';
+  if (msg) showGlobalToast(msg, !isError);
+}
+
+function showGlobalToast(text, success = true) {
+  if (!text) return;
+  let wrap = document.getElementById('global-toast-wrap');
+  if (!wrap) {
+    wrap = document.createElement('div');
+    wrap.id = 'global-toast-wrap';
+    wrap.className = 'global-toast-wrap';
+    document.body.appendChild(wrap);
+  }
+  if (globalToastTimer) clearTimeout(globalToastTimer);
+  wrap.innerHTML = '';
+  const toast = document.createElement('div');
+  toast.className = `global-toast ${success ? 'success' : 'error'}`;
+  toast.textContent = String(text);
+  wrap.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  globalToastTimer = setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => {
+      if (wrap.contains(toast)) wrap.removeChild(toast);
+    }, 200);
+  }, success ? 2600 : 5000);
+}
+
+function setButtonBusy(button, busy, busyText = 'Processing...') {
+  if (!button) return;
+  if (busy) {
+    if (!button.dataset.originalText) button.dataset.originalText = button.textContent || '';
+    button.disabled = true;
+    button.textContent = busyText;
+    button.classList.add('is-busy');
+  } else {
+    button.disabled = false;
+    if (button.dataset.originalText) button.textContent = button.dataset.originalText;
+    button.classList.remove('is-busy');
+  }
 }
 
 function fmt(value) {
@@ -149,7 +189,9 @@ function renderCards(summary) {
 }
 
 async function loadDashboard() {
+  const loadBtn = $('load-btn');
   try {
+    setButtonBusy(loadBtn, true, 'Loading...');
     setMsg('Loading...');
     const data = await api(`/expenses/dashboard${qs()}`);
     renderCards(data.summary || {});
@@ -159,11 +201,15 @@ async function loadDashboard() {
     setMsg('');
   } catch (error) {
     setMsg(error.message, true);
+  } finally {
+    setButtonBusy(loadBtn, false);
   }
 }
 
 async function exportCsv() {
+  const exportBtn = $('export-btn');
   try {
+    setButtonBusy(exportBtn, true, 'Exporting...');
     const response = await fetch(`/expenses/export${qs()}`, { headers: getHeaders() });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
@@ -178,8 +224,11 @@ async function exportCsv() {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+    setMsg('Export downloaded');
   } catch (error) {
     setMsg(error.message, true);
+  } finally {
+    setButtonBusy(exportBtn, false);
   }
 }
 

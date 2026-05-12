@@ -21,12 +21,13 @@ const BASE_TRANSPORTER_OPTIONS = [
   'Ravi Road Lines'
 ];
 
-const DISPATCH_DROPDOWNS = {
+const DEFAULT_DISPATCH_DROPDOWNS = {
   material_type: ['Silica Sand', 'Ball Clay', 'Other'],
   grade: ['Glass Grade', 'Foundry Grade', '30-150', '30-80', '18-30', '16-30', '14-16', '12-16', '14-12', 'Ball Clay', 'Raw', 'Other'],
   condition: ['Dry', 'Wet', 'Other'],
   packing: ['Loose', 'Old Bag', '3G Bag', '4G Bag', 'Other']
 };
+let DISPATCH_DROPDOWNS = { ...DEFAULT_DISPATCH_DROPDOWNS };
 
 const CUSTOMER_DROPDOWN_CONFIG = [
   { field: 'material_type', selectId: 'customer-material-type', otherId: 'customer-material-type-other' },
@@ -65,6 +66,8 @@ const locationOptionsDatalist = document.getElementById('customer-location-optio
 const timelineModal = document.getElementById('timeline-modal');
 const timelineModalTitle = document.getElementById('timeline-modal-title');
 const timelineModalBody = document.getElementById('timeline-modal-body');
+let globalToastTimer = null;
+let timelineRequestSeq = 0;
 
 function escapeHtml(value) {
   return String(value || '')
@@ -269,14 +272,17 @@ async function openTimelineModal(tripId) {
   timelineModalBody.innerHTML = '<div class="mini-muted">Loading timeline...</div>';
   timelineModal.style.display = 'flex';
   document.body.style.overflow = 'hidden';
+  const requestSeq = ++timelineRequestSeq;
 
   let timelineRow = null;
   try {
     timelineRow = await fetchCustomerTripTimeline(tripId);
   } catch (error) {
+    if (requestSeq !== timelineRequestSeq) return;
     timelineModalBody.innerHTML = `<div class="mini-muted">${escapeHtml(error.message || 'Failed to load timeline')}</div>`;
     return;
   }
+  if (requestSeq !== timelineRequestSeq) return;
 
   const effective = {
     ...row,
@@ -310,6 +316,7 @@ async function openTimelineModal(tripId) {
 
 function closeTimelineModal() {
   if (!timelineModal) return;
+  timelineRequestSeq += 1;
   timelineModal.style.display = 'none';
   document.body.style.overflow = 'auto';
 }
@@ -325,18 +332,48 @@ function wireTruckTimelineEvents() {
 function showMessage(text, success = true) {
   messageEl.textContent = text;
   messageEl.style.color = success ? '#047857' : '#b91c1c';
+  showGlobalToast(text, success);
 }
 
 function showLoginMessage(text, success = false) {
   if (!loginMessageEl) return;
   loginMessageEl.textContent = text;
   loginMessageEl.style.color = success ? '#047857' : '#b91c1c';
+  showGlobalToast(text, success);
 }
 
 function showAdminCustomerMessage(text, success = true) {
   if (!adminCustomerMessageEl) return;
   adminCustomerMessageEl.textContent = text;
   adminCustomerMessageEl.style.color = success ? '#047857' : '#b91c1c';
+  showGlobalToast(text, success);
+}
+
+function showGlobalToast(text, success = true) {
+  if (!text) return;
+  let wrap = document.getElementById('global-toast-wrap');
+  if (!wrap) {
+    wrap = document.createElement('div');
+    wrap.id = 'global-toast-wrap';
+    wrap.className = 'global-toast-wrap';
+    document.body.appendChild(wrap);
+  }
+  if (globalToastTimer) {
+    clearTimeout(globalToastTimer);
+    globalToastTimer = null;
+  }
+  wrap.innerHTML = '';
+  const toast = document.createElement('div');
+  toast.className = `global-toast ${success ? 'success' : 'error'}`;
+  toast.textContent = String(text);
+  wrap.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  globalToastTimer = setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => {
+      if (wrap.contains(toast)) wrap.removeChild(toast);
+    }, 200);
+  }, success ? 2600 : 5000);
 }
 
 function isAdminSession() {
@@ -541,6 +578,33 @@ function initCustomerDropdowns() {
     selectEl.addEventListener('change', () => toggleOtherInput(selectEl, otherEl));
     toggleOtherInput(selectEl, otherEl);
   });
+}
+
+function normalizeMasterList(values = [], fallback = []) {
+  const fromApi = Array.isArray(values)
+    ? values.map((v) => (typeof v === 'object' ? v.value : v)).map((v) => String(v || '').trim()).filter(Boolean)
+    : [];
+  const merged = [...new Set([...fromApi, ...fallback.filter((v) => v && v !== 'Other')])];
+  return [...merged, 'Other'];
+}
+
+async function loadCustomerMasterOptions() {
+  const types = ['materials', 'grades', 'conditions', 'packing', 'transporters', 'locations'];
+  try {
+    const response = await fetch(`/customer/masters/options?types=${encodeURIComponent(types.join(','))}`, {
+      headers: getCustomerAuthHeaders()
+    });
+    if (!response.ok) throw new Error('Failed to load master options');
+    const data = await response.json();
+    DISPATCH_DROPDOWNS.material_type = normalizeMasterList(data.materials, DEFAULT_DISPATCH_DROPDOWNS.material_type);
+    DISPATCH_DROPDOWNS.grade = normalizeMasterList(data.grades, DEFAULT_DISPATCH_DROPDOWNS.grade);
+    DISPATCH_DROPDOWNS.condition = normalizeMasterList(data.conditions, DEFAULT_DISPATCH_DROPDOWNS.condition);
+    DISPATCH_DROPDOWNS.packing = normalizeMasterList(data.packing, DEFAULT_DISPATCH_DROPDOWNS.packing);
+    transporterOptions = normalizeMasterList(data.transporters, BASE_TRANSPORTER_OPTIONS);
+    locationOptions = normalizeMasterList(data.locations, []);
+  } catch (_error) {
+    DISPATCH_DROPDOWNS = { ...DEFAULT_DISPATCH_DROPDOWNS };
+  }
 }
 
 function getDropdownValue(field) {
@@ -809,13 +873,12 @@ async function downloadCustomerDocument(docId, fileName = 'document') {
     }
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = fileName;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
+    const opened = window.open(url, '_blank', 'noopener,noreferrer');
+    if (!opened) {
+      URL.revokeObjectURL(url);
+      throw new Error('Please allow popups to open document preview');
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60 * 1000);
   } catch (error) {
     showMessage(error.message, false);
   }
@@ -900,6 +963,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   initTransporterTypeahead();
+  await loadCustomerMasterOptions();
   initCustomerDropdowns();
   refreshLocationOptions();
 

@@ -29,6 +29,19 @@ const pool = new Pool({
 });
 
 async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      id SERIAL PRIMARY KEY,
+      migration_key TEXT NOT NULL UNIQUE,
+      applied_at TIMESTAMPTZ DEFAULT NOW(),
+      rollback_key TEXT
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_schema_migrations_applied_at
+    ON schema_migrations(applied_at DESC)
+  `);
+
   const createTableQuery = `
     CREATE TABLE IF NOT EXISTS trips (
       id SERIAL PRIMARY KEY,
@@ -63,6 +76,14 @@ async function initDb() {
       tare_weight NUMERIC,
       gross_weight NUMERIC,
       net_weight NUMERIC,
+      rate_used_per_mt NUMERIC,
+      gst_percent_used NUMERIC,
+      taxable_amount NUMERIC,
+      gst_amount NUMERIC,
+      total_amount NUMERIC,
+      net_weight_snapshot_mt NUMERIC,
+      billing_calculated_at TIMESTAMPTZ,
+      billing_calculated_by TEXT,
       gross_weight_attempts JSONB DEFAULT '[]'::jsonb,
       status TEXT,
       final_status TEXT,
@@ -99,9 +120,44 @@ async function initDb() {
     ADD COLUMN IF NOT EXISTS gross_done_by TEXT,
     ADD COLUMN IF NOT EXISTS loading_done_by TEXT,
     ADD COLUMN IF NOT EXISTS billing_done_by TEXT,
+    ADD COLUMN IF NOT EXISTS rate_used_per_mt NUMERIC,
+    ADD COLUMN IF NOT EXISTS gst_percent_used NUMERIC,
+    ADD COLUMN IF NOT EXISTS taxable_amount NUMERIC,
+    ADD COLUMN IF NOT EXISTS gst_amount NUMERIC,
+    ADD COLUMN IF NOT EXISTS total_amount NUMERIC,
+    ADD COLUMN IF NOT EXISTS net_weight_snapshot_mt NUMERIC,
+    ADD COLUMN IF NOT EXISTS billing_calculated_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS billing_calculated_by TEXT,
     ADD COLUMN IF NOT EXISTS condition TEXT,
     ADD COLUMN IF NOT EXISTS packing TEXT,
     ADD COLUMN IF NOT EXISTS location TEXT
+  `);
+  await pool.query(`
+    ALTER TABLE trips
+    ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_trips_status_updated_at
+    ON trips(status, updated_at DESC)
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS trip_events (
+      id SERIAL PRIMARY KEY,
+      trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+      actor_role TEXT NOT NULL,
+      actor_name TEXT,
+      event_type TEXT NOT NULL,
+      from_status TEXT,
+      to_status TEXT,
+      request_id TEXT,
+      remarks TEXT,
+      field_changes_json JSONB DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_trip_events_trip_created
+    ON trip_events(trip_id, created_at DESC)
   `);
   await pool.query(`
     ALTER TABLE trips
@@ -365,7 +421,12 @@ async function initDb() {
     )
   `);
   await pool.query(`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_expense_claims_voucher_no_unique ON expense_claims(voucher_no) WHERE deleted_at IS NULL
+    DROP INDEX IF EXISTS idx_expense_claims_voucher_no_unique
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_expense_claims_employee_voucher_lookup
+    ON expense_claims(employee_id, lower(trim(voucher_no)))
+    WHERE deleted_at IS NULL
   `);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_expense_claims_status ON expense_claims(status)
@@ -375,6 +436,21 @@ async function initDb() {
   `);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_expense_claims_assigned_role ON expense_claims(current_assigned_role, status)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_expense_claims_updated_at
+    ON expense_claims(updated_at DESC)
+    WHERE deleted_at IS NULL
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_expense_claims_status_updated
+    ON expense_claims(status, updated_at DESC)
+    WHERE deleted_at IS NULL
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_expense_claims_claim_date
+    ON expense_claims(claim_date DESC)
+    WHERE deleted_at IS NULL
   `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS expense_claim_documents (
@@ -467,11 +543,99 @@ async function initDb() {
     )
   `);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS expense_sso_nonces (
+      id SERIAL PRIMARY KEY,
+      nonce_hash TEXT NOT NULL UNIQUE,
+      transport_role TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_expense_sso_nonces_expiry
+    ON expense_sso_nonces(expires_at)
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      full_name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_roles (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role_name TEXT NOT NULL,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(user_id, role_name)
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_user_roles_role_name
+    ON user_roles(role_name)
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS permissions (
+      id SERIAL PRIMARY KEY,
+      permission_key TEXT NOT NULL UNIQUE,
+      description TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS role_permissions (
+      id SERIAL PRIMARY KEY,
+      role_name TEXT NOT NULL,
+      permission_id INTEGER NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(role_name, permission_id)
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admin_master_values (
+      id SERIAL PRIMARY KEY,
+      master_type TEXT NOT NULL,
+      value TEXT NOT NULL,
+      is_active BOOLEAN DEFAULT true,
+      metadata_json JSONB DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(master_type, value)
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_admin_master_values_type_active
+    ON admin_master_values(master_type, is_active, updated_at DESC)
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admin_settings (
+      key TEXT PRIMARY KEY,
+      value_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
     ALTER TABLE expense_claims
     ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1,
     ADD COLUMN IF NOT EXISTS previous_status TEXT,
     ADD COLUMN IF NOT EXISTS more_info_requested_by_user_id INTEGER REFERENCES expense_users(id) ON DELETE SET NULL,
     ADD COLUMN IF NOT EXISTS more_info_requested_by_role TEXT
+  `);
+  await pool.query(`
+    ALTER TABLE expense_claims
+    ALTER COLUMN pay_to DROP NOT NULL,
+    ALTER COLUMN voucher_no DROP NOT NULL,
+    ALTER COLUMN claim_date DROP NOT NULL,
+    ALTER COLUMN amount DROP NOT NULL,
+    ALTER COLUMN purpose DROP NOT NULL
   `);
   await pool.query(`
     ALTER TABLE expense_notifications

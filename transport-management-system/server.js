@@ -6,19 +6,12 @@ const express = require('express');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const { initDb, pool } = require('./db');
+const { appConfig, validateProductionConfig } = require('./config');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Manager', 'Admin'];
-const ROLE_PINS = {
-  Gate: 'G8P2',
-  Weighbridge: 'W3K7',
-  Dispatch: 'D9M4',
-  Loading: 'L5Q8',
-  Accounts: 'A6R1',
-  Manager: 'M2N6',
-  Admin: '2802'
-};
+const ROLE_PINS = appConfig.rolePins;
 
 const STATUS_FLOW = [
   'IN_GATE',
@@ -112,12 +105,15 @@ const EXPENSE_DOC_ALLOWED_MIME_TYPES = new Set([
 ]);
 const EXPENSE_DOC_MAX_SIZE_BYTES = 5 * 1024 * 1024;
 const DOC_UPLOAD_DIR = path.resolve(process.env.DOC_UPLOAD_DIR || path.join(__dirname, 'uploads', 'docs'));
+const UPLOADS_ROOT_DIR = path.resolve(path.join(__dirname, 'uploads'));
 const TASK_STATUSES = ['OPEN', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED'];
 const TASK_TEAMS = VALID_ROLES;
-const CUSTOMER_TOKEN_SECRET = String(process.env.CUSTOMER_TOKEN_SECRET || 'change-me-customer-token-secret');
+const CUSTOMER_TOKEN_SECRET = appConfig.secrets.customerTokenSecret;
 const CUSTOMER_TOKEN_TTL_SECONDS = Number.parseInt(process.env.CUSTOMER_TOKEN_TTL_SECONDS || '604800', 10); // 7 days
-const EXPENSE_TOKEN_SECRET = String(process.env.EXPENSE_TOKEN_SECRET || 'change-me-expense-token-secret');
+const EXPENSE_TOKEN_SECRET = appConfig.secrets.expenseTokenSecret;
 const EXPENSE_TOKEN_TTL_SECONDS = Number.parseInt(process.env.EXPENSE_TOKEN_TTL_SECONDS || '604800', 10); // 7 days
+const TRANSPORT_TOKEN_SECRET = appConfig.secrets.transportTokenSecret;
+const TRANSPORT_TOKEN_TTL_SECONDS = Number.parseInt(process.env.TRANSPORT_TOKEN_TTL_SECONDS || '86400', 10); // 1 day
 const EXPENSE_LOGIN_MAX_ATTEMPTS = 5;
 const EXPENSE_LOGIN_WINDOW_MINUTES = 15;
 const EXPENSE_LOGIN_LOCK_MINUTES = 15;
@@ -181,9 +177,10 @@ const uploadExpenseDocument = multer({
 
 app.use(express.json());
 app.use((req, res, next) => {
+  req.requestId = crypto.randomUUID();
+  res.setHeader('x-request-id', req.requestId);
   if (isExpenseRoute(req.path)) {
-    req.expenseRequestId = crypto.randomUUID();
-    res.setHeader('x-request-id', req.expenseRequestId);
+    req.expenseRequestId = req.requestId;
   }
   next();
 });
@@ -412,6 +409,37 @@ function readRoleFromRequest(req) {
   return { role };
 }
 
+async function authenticateTransportV2WithPassword(username, password) {
+  const result = await pool.query(
+    `SELECT id, username, full_name, password_hash, is_active
+     FROM users
+     WHERE username = $1
+     LIMIT 1`,
+    [username]
+  );
+  if (!result.rows.length) return { error: 'Invalid credentials', status: 403 };
+  const user = result.rows[0];
+  if (!user.is_active) return { error: 'User is inactive', status: 403 };
+  const matches = await bcrypt.compare(String(password || ''), String(user.password_hash || ''));
+  if (!matches) return { error: 'Invalid credentials', status: 403 };
+  const rolesRes = await pool.query(
+    `SELECT role_name
+     FROM user_roles
+     WHERE user_id = $1 AND is_active = true
+     ORDER BY role_name ASC`,
+    [user.id]
+  );
+  const roles = rolesRes.rows.map((row) => row.role_name).filter((role) => VALID_ROLES.includes(role));
+  return {
+    user: {
+      id: user.id,
+      username: user.username,
+      full_name: user.full_name,
+      roles
+    }
+  };
+}
+
 function getUploaderDisplayNameForRole(role, trip) {
   if (!trip) return null;
   if (role === 'Dispatch') return normalizeEmpty(trip.dispatch_manager_name || trip.dispatch_done_by);
@@ -499,7 +527,6 @@ async function getActiveCustomerUserByIdAndUsername(id, username) {
 
 async function authenticateCustomerWithPassword(username, password) {
   try {
-    const { page, limit } = getPagination(req);
     const result = await pool.query(
       `SELECT id, customer_name, username, display_name, is_active, password
        FROM customer_users
@@ -636,6 +663,55 @@ function createExpenseToken(user) {
       .digest()
   );
   return `${headerPart}.${payloadPart}.${signaturePart}`;
+}
+
+function createTransportToken(user, roles) {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    sub: user.id,
+    username: user.username,
+    full_name: user.full_name,
+    roles: Array.isArray(roles) ? roles : [],
+    iat: now,
+    exp: now + TRANSPORT_TOKEN_TTL_SECONDS
+  };
+  const headerPart = toBase64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const payloadPart = toBase64Url(JSON.stringify(payload));
+  const signaturePart = toBase64Url(
+    crypto
+      .createHmac('sha256', TRANSPORT_TOKEN_SECRET)
+      .update(`${headerPart}.${payloadPart}`)
+      .digest()
+  );
+  return `${headerPart}.${payloadPart}.${signaturePart}`;
+}
+
+function verifyTransportToken(token) {
+  const parts = String(token || '').split('.');
+  if (parts.length !== 3) return { error: 'Invalid transport token format', status: 401 };
+  const [headerPart, payloadPart, signaturePart] = parts;
+  const expectedSignature = toBase64Url(
+    crypto
+      .createHmac('sha256', TRANSPORT_TOKEN_SECRET)
+      .update(`${headerPart}.${payloadPart}`)
+      .digest()
+  );
+  if (signaturePart !== expectedSignature) {
+    return { error: 'Invalid transport token signature', status: 401 };
+  }
+  try {
+    const payload = JSON.parse(fromBase64Url(payloadPart).toString('utf8'));
+    const now = Math.floor(Date.now() / 1000);
+    if (!payload || !payload.sub || !payload.username || !Array.isArray(payload.roles)) {
+      return { error: 'Invalid transport token payload', status: 401 };
+    }
+    if (!payload.exp || payload.exp <= now) {
+      return { error: 'Transport token expired', status: 401 };
+    }
+    return { payload };
+  } catch (_err) {
+    return { error: 'Invalid transport token payload', status: 401 };
+  }
 }
 
 function verifyExpenseToken(token) {
@@ -833,12 +909,27 @@ function hashExpenseToken(token) {
   return crypto.createHash('sha256').update(String(token || ''), 'utf8').digest('hex');
 }
 
+function hashNonce(value) {
+  return crypto.createHash('sha256').update(String(value || ''), 'utf8').digest('hex');
+}
+
 function safeCsvValue(value) {
   if (value === null || value === undefined) return '';
   let raw = String(value);
   if (/^[=+\-@]/.test(raw)) raw = `'${raw}`;
   if (/[",\n]/.test(raw)) return `"${raw.replace(/"/g, '""')}"`;
   return raw;
+}
+
+function buildTripFieldChanges(before, after, fields) {
+  const changes = {};
+  fields.forEach((field) => {
+    const beforeValue = before?.[field];
+    const afterValue = after?.[field];
+    if (valuesEqual(field, beforeValue, afterValue)) return;
+    changes[field] = { old: beforeValue ?? null, new: afterValue ?? null };
+  });
+  return changes;
 }
 
 async function recordExpenseLoginAttempt({ username, ipAddress, success, failureReason = null, userAgent = null }) {
@@ -1232,6 +1323,38 @@ function toFiniteNumberOrNull(value) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
+function roundTo3(value) {
+  const numeric = toFiniteNumberOrNull(value);
+  if (numeric === null) return null;
+  return Number(numeric.toFixed(3));
+}
+
+async function resolveBillingDefaultsByGrade(grade) {
+  const safeGrade = String(grade || '').trim();
+  let ratePerMt = null;
+  let gstPercent = null;
+
+  if (safeGrade) {
+    const gradeRate = await pool.query(
+      `SELECT metadata_json
+       FROM admin_master_values
+       WHERE master_type = 'grades' AND is_active = true AND lower(value) = lower($1)
+       LIMIT 1`,
+      [safeGrade]
+    );
+    ratePerMt = toFiniteNumberOrNull(gradeRate.rows[0]?.metadata_json?.price_per_mt);
+  }
+
+  const pricingDefaults = await pool.query(
+    `SELECT value_json
+     FROM admin_settings
+     WHERE key = 'pricing_defaults'
+     LIMIT 1`
+  );
+  gstPercent = toFiniteNumberOrNull(pricingDefaults.rows[0]?.value_json?.default_gst_percent);
+  return { ratePerMt, gstPercent };
+}
+
 function normalizeGrossWeightAttempts(value) {
   if (value == null) return [];
   const source = typeof value === 'string' ? (() => {
@@ -1282,6 +1405,9 @@ app.get('/dashboard', (req, res) => {
 
 app.get('/expected-trucks-page', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'expected-trucks.html'));
+});
+app.get('/admin-control', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin-control.html'));
 });
 
 app.get('/customer', (req, res) => {
@@ -1572,12 +1698,165 @@ app.get('/trips', async (req, res) => {
   }
 });
 
+app.get('/accounts/sales-analytics', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!['Accounts', 'Admin', 'Manager'].includes(auth.role)) {
+    return res.status(403).json({ error: 'Role cannot access sales analytics' });
+  }
+
+  const fromDate = normalizeEmpty(req.query.from_date);
+  const toDate = normalizeEmpty(req.query.to_date);
+  const customer = normalizeEmpty(req.query.customer);
+  const grade = normalizeEmpty(req.query.grade);
+  const material = normalizeEmpty(req.query.material);
+  const statusScope = normalizeEmpty(req.query.status_scope) || 'BILLED_ONLY';
+
+  let statuses = ['BILLING_COMPLETED'];
+  if (statusScope === 'COMPLETED_EXITED') statuses = ['COMPLETED', 'EXITED'];
+  if (statusScope === 'ALL_BILLED') statuses = ['BILLING_COMPLETED', 'COMPLETED', 'EXITED'];
+
+  const conditions = [
+    `status = ANY($1::text[])`,
+    `COALESCE(total_amount, 0) >= 0`,
+    `COALESCE(net_weight_snapshot_mt, net_weight, 0) >= 0`
+  ];
+  const params = [statuses];
+
+  if (fromDate) {
+    params.push(fromDate);
+    conditions.push(`(COALESCE(billing_calculated_at, out_time, updated_at) AT TIME ZONE 'Asia/Kolkata')::date >= $${params.length}::date`);
+  }
+  if (toDate) {
+    params.push(toDate);
+    conditions.push(`(COALESCE(billing_calculated_at, out_time, updated_at) AT TIME ZONE 'Asia/Kolkata')::date <= $${params.length}::date`);
+  }
+  if (customer) {
+    params.push(customer);
+    conditions.push(`lower(customer_name) = lower($${params.length})`);
+  }
+  if (grade) {
+    params.push(grade);
+    conditions.push(`lower(grade) = lower($${params.length})`);
+  }
+  if (material) {
+    params.push(material);
+    conditions.push(`lower(material_type) = lower($${params.length})`);
+  }
+
+  const baseSql = `
+    WITH filtered AS (
+      SELECT
+        id,
+        customer_name,
+        grade,
+        material_type,
+        COALESCE(net_weight_snapshot_mt, net_weight, 0)::numeric AS qty_mt,
+        COALESCE(rate_used_per_mt, 0)::numeric AS rate_used_per_mt,
+        COALESCE(gst_percent_used, 0)::numeric AS gst_percent_used,
+        COALESCE(taxable_amount, 0)::numeric AS taxable_amount,
+        COALESCE(gst_amount, 0)::numeric AS gst_amount,
+        COALESCE(total_amount, 0)::numeric AS total_amount,
+        status,
+        COALESCE(billing_calculated_at, out_time, updated_at) AS metric_ts
+      FROM trips
+      WHERE ${conditions.join(' AND ')}
+    )
+    SELECT * FROM filtered
+  `;
+
+  try {
+    const filtered = await pool.query(baseSql, params);
+    const rows = filtered.rows;
+
+    const toNum = (v) => Number(v || 0);
+    const summary = rows.reduce((acc, row) => {
+      acc.total_trips += 1;
+      acc.total_qty_mt += toNum(row.qty_mt);
+      acc.total_taxable_amount += toNum(row.taxable_amount);
+      acc.total_gst_amount += toNum(row.gst_amount);
+      acc.total_sales_amount += toNum(row.total_amount);
+      return acc;
+    }, { total_trips: 0, total_qty_mt: 0, total_taxable_amount: 0, total_gst_amount: 0, total_sales_amount: 0 });
+    summary.avg_realization_per_mt = summary.total_qty_mt > 0
+      ? Number((summary.total_sales_amount / summary.total_qty_mt).toFixed(2))
+      : 0;
+
+    const aggregateBy = (key) => {
+      const map = new Map();
+      rows.forEach((row) => {
+        const name = String(row[key] || 'Unspecified');
+        const current = map.get(name) || { key: name, qty_mt: 0, total_amount: 0, trips: 0 };
+        current.qty_mt += toNum(row.qty_mt);
+        current.total_amount += toNum(row.total_amount);
+        current.trips += 1;
+        map.set(name, current);
+      });
+      return Array.from(map.values())
+        .map((item) => ({
+          ...item,
+          qty_mt: Number(item.qty_mt.toFixed(3)),
+          total_amount: Number(item.total_amount.toFixed(2)),
+          avg_rate_per_mt: item.qty_mt > 0 ? Number((item.total_amount / item.qty_mt).toFixed(2)) : 0
+        }))
+        .sort((a, b) => b.total_amount - a.total_amount);
+    };
+
+    const gradeWise = aggregateBy('grade');
+    const customerWise = aggregateBy('customer_name');
+    const materialWise = aggregateBy('material_type');
+
+    const trendMap = new Map();
+    rows.forEach((row) => {
+      const d = new Date(row.metric_ts);
+      const key = Number.isNaN(d.getTime()) ? 'Unknown' : new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(d);
+      const current = trendMap.get(key) || { date: key, qty_mt: 0, total_amount: 0, trips: 0 };
+      current.qty_mt += toNum(row.qty_mt);
+      current.total_amount += toNum(row.total_amount);
+      current.trips += 1;
+      trendMap.set(key, current);
+    });
+    const trend = Array.from(trendMap.values())
+      .map((item) => ({
+        ...item,
+        qty_mt: Number(item.qty_mt.toFixed(3)),
+        total_amount: Number(item.total_amount.toFixed(2))
+      }))
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
+    return res.json({
+      scope: { status_scope: statusScope, statuses },
+      filters: { from_date: fromDate, to_date: toDate, customer, grade, material },
+      summary: {
+        ...summary,
+        total_qty_mt: Number(summary.total_qty_mt.toFixed(3)),
+        total_taxable_amount: Number(summary.total_taxable_amount.toFixed(2)),
+        total_gst_amount: Number(summary.total_gst_amount.toFixed(2)),
+        total_sales_amount: Number(summary.total_sales_amount.toFixed(2))
+      },
+      trend,
+      grade_wise: gradeWise,
+      customer_wise: customerWise,
+      material_wise: materialWise
+    });
+  } catch (error) {
+    console.error('Failed to load sales analytics', error);
+    return res.status(500).json({ error: 'Failed to load sales analytics' });
+  }
+});
+
 app.put('/trip/:id', async (req, res) => {
   const { id } = req.params;
   const auth = readRoleFromRequest(req);
   if (auth.error) {
     return res.status(auth.status).json({ error: auth.error });
   }
+
+  const expectedVersion = parsePositiveId(req.body?.version);
+  if (!expectedVersion) {
+    return res.status(400).json({ error: 'version is required for update' });
+  }
+  delete req.body.version;
 
   let existingTrip;
   try {
@@ -1623,6 +1902,14 @@ app.put('/trip/:id', async (req, res) => {
     'tare_weight',
     'gross_weight',
     'net_weight',
+    'rate_used_per_mt',
+    'gst_percent_used',
+    'taxable_amount',
+    'gst_amount',
+    'total_amount',
+    'net_weight_snapshot_mt',
+    'billing_calculated_at',
+    'billing_calculated_by',
     'gross_weight_attempts',
     'status',
     'final_status',
@@ -1825,6 +2112,32 @@ app.put('/trip/:id', async (req, res) => {
     }
   }
 
+  if (isStatusChange && requestedStatus === 'BILLING_COMPLETED') {
+    const effectiveNetWeight = toFiniteNumberOrNull(req.body.net_weight ?? existingTrip.net_weight);
+    if (effectiveNetWeight === null || effectiveNetWeight <= 0) {
+      return res.status(400).json({ error: 'Cannot complete billing without valid net weight' });
+    }
+
+    const defaults = await resolveBillingDefaultsByGrade(req.body.grade ?? existingTrip.grade);
+    const resolvedRate = toFiniteNumberOrNull(req.body.rate_used_per_mt ?? existingTrip.rate_used_per_mt ?? defaults.ratePerMt);
+    const resolvedGst = toFiniteNumberOrNull(req.body.gst_percent_used ?? existingTrip.gst_percent_used ?? defaults.gstPercent);
+    const safeRate = resolvedRate !== null && resolvedRate >= 0 ? resolvedRate : 0;
+    const safeGst = resolvedGst !== null && resolvedGst >= 0 ? resolvedGst : 0;
+    const taxable = roundTo3(effectiveNetWeight * safeRate) || 0;
+    const gstAmount = roundTo3((taxable * safeGst) / 100) || 0;
+    const totalAmount = roundTo3(taxable + gstAmount) || 0;
+    const accountsName = normalizeEmpty(req.body.accounts_person_name ?? existingTrip.accounts_person_name);
+
+    req.body.rate_used_per_mt = roundTo3(safeRate) || 0;
+    req.body.gst_percent_used = roundTo3(safeGst) || 0;
+    req.body.taxable_amount = taxable;
+    req.body.gst_amount = gstAmount;
+    req.body.total_amount = totalAmount;
+    req.body.net_weight_snapshot_mt = roundTo3(effectiveNetWeight) || 0;
+    req.body.billing_calculated_at = new Date().toISOString();
+    req.body.billing_calculated_by = accountsName || auth.role;
+  }
+
   if (Object.prototype.hasOwnProperty.call(req.body, 'gross_weight_attempts')) {
     req.body.gross_weight_attempts = normalizeGrossWeightAttempts(req.body.gross_weight_attempts);
   }
@@ -1867,6 +2180,7 @@ app.put('/trip/:id', async (req, res) => {
 
   const setClause = [
     ...providedFields.map((field, index) => `${field} = $${index + 1}`),
+    'version = version + 1',
     'updated_at = NOW()'
   ].join(', ');
   const values = providedFields.map((field) => (
@@ -1875,20 +2189,51 @@ app.put('/trip/:id', async (req, res) => {
       : req.body[field]
   ));
 
+  if (Number(existingTrip.version) !== Number(expectedVersion)) {
+    return res.status(409).json({ error: 'This trip was updated by another user. Please refresh.' });
+  }
+
+  const client = await pool.connect();
   try {
-    let result = await pool.query(
-      `UPDATE trips SET ${setClause} WHERE id = $${providedFields.length + 1} RETURNING *`,
-      [...values, id]
+    await client.query('BEGIN');
+    const updateQuery = `UPDATE trips SET ${setClause} WHERE id = $${providedFields.length + 1} AND version = $${providedFields.length + 2} RETURNING *`;
+    const result = await client.query(
+      updateQuery,
+      [...values, id, expectedVersion]
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Trip not found' });
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'This trip was updated by another user. Please refresh.' });
     }
 
-    res.json(result.rows[0]);
+    const updated = result.rows[0];
+    const fieldChanges = buildTripFieldChanges(existingTrip, updated, providedFields);
+    await client.query(
+      `INSERT INTO trip_events (
+        trip_id, actor_role, actor_name, event_type, from_status, to_status, request_id, remarks, field_changes_json
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [
+        Number(id),
+        auth.role,
+        null,
+        isStatusChange ? 'STATUS_CHANGE' : 'DATA_UPDATE',
+        currentStatus,
+        normalizeStatus(updated.status),
+        req.requestId || null,
+        null,
+        JSON.stringify(fieldChanges)
+      ]
+    );
+
+    await client.query('COMMIT');
+    res.json(updated);
   } catch (error) {
+    try { await client.query('ROLLBACK'); } catch (_err) {}
     console.error('Error updating trip', error);
     res.status(500).json({ error: 'Failed to update trip' });
+  } finally {
+    client.release();
   }
 });
 
@@ -1985,7 +2330,7 @@ app.post('/trip/:id/documents', (req, res) => {
     return res.status(400).json({ error: 'Invalid trip id' });
   }
 
-  uploadExpenseDocument.single('file')(req, res, async (uploadError) => {
+  uploadDocument.single('file')(req, res, async (uploadError) => {
     if (uploadError) {
       const message = uploadError.message || 'Failed to upload file';
       return res.status(400).json({ error: message });
@@ -2063,15 +2408,12 @@ app.get('/documents/:id/download', async (req, res) => {
     }
 
     const doc = result.rows[0];
-    const absolutePath = path.resolve(__dirname, doc.storage_path);
-    if (!absolutePath.startsWith(path.resolve(DOC_UPLOAD_DIR))) {
-      return res.status(403).json({ error: 'Invalid document path' });
-    }
-    if (!fs.existsSync(absolutePath)) {
+    const absolutePath = resolveStoredFilePath(doc.storage_path);
+    if (!absolutePath) {
       return res.status(404).json({ error: 'Document file missing' });
     }
 
-    return res.download(absolutePath, doc.file_name);
+    return sendFileInline(res, absolutePath, doc.file_name, doc.mime_type || null);
   } catch (error) {
     console.error('Failed to download trip document', error);
     return res.status(500).json({ error: 'Failed to download trip document' });
@@ -2228,14 +2570,11 @@ app.get('/customer/documents/:id/download', async (req, res) => {
     if (!allowed) {
       return res.status(403).json({ error: 'Not allowed to download this document' });
     }
-    const absolutePath = path.resolve(__dirname, doc.storage_path);
-    if (!absolutePath.startsWith(path.resolve(DOC_UPLOAD_DIR))) {
-      return res.status(403).json({ error: 'Invalid document path' });
-    }
-    if (!fs.existsSync(absolutePath)) {
+    const absolutePath = resolveStoredFilePath(doc.storage_path);
+    if (!absolutePath) {
       return res.status(404).json({ error: 'Document file missing' });
     }
-    return res.download(absolutePath, doc.file_name);
+    return sendFileInline(res, absolutePath, doc.file_name);
   } catch (error) {
     console.error('Failed to download customer document', error);
     return res.status(500).json({ error: 'Failed to download document' });
@@ -2300,6 +2639,44 @@ app.get('/tasks/assignees', async (req, res) => {
   } catch (error) {
     console.error('Failed to load task assignee suggestions', error);
     return res.status(500).json({ error: 'Failed to load assignee suggestions' });
+  }
+});
+
+app.get('/assignees/by-role', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  try {
+    const result = await pool.query(
+      `SELECT u.full_name, ur.role_name
+       FROM users u
+       JOIN user_roles ur ON ur.user_id = u.id
+       WHERE u.is_active = true
+         AND ur.is_active = true
+         AND ur.role_name = ANY($1::text[])
+         AND u.full_name IS NOT NULL
+         AND length(trim(u.full_name)) > 0
+       ORDER BY ur.role_name, u.full_name`,
+      [['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Manager', 'Admin']]
+    );
+    const byRole = {
+      Gate: [],
+      Dispatch: [],
+      Loading: [],
+      Weighbridge: [],
+      Accounts: [],
+      Manager: [],
+      Admin: []
+    };
+    result.rows.forEach((row) => {
+      const roleName = String(row.role_name || '').trim();
+      const fullName = String(row.full_name || '').trim();
+      if (!roleName || !fullName || !byRole[roleName]) return;
+      if (!byRole[roleName].includes(fullName)) byRole[roleName].push(fullName);
+    });
+    return res.json(byRole);
+  } catch (error) {
+    console.error('Failed to load assignees by role', error);
+    return res.status(500).json({ error: 'Failed to load assignees by role' });
   }
 });
 
@@ -2718,14 +3095,11 @@ app.get('/tasks/comments/:id/download', async (req, res) => {
     if (!result.rows.length) return res.status(404).json({ error: 'Attachment not found' });
     const comment = result.rows[0];
     if (!comment.attachment_path) return res.status(404).json({ error: 'No attachment for this comment' });
-    const absolutePath = path.resolve(__dirname, comment.attachment_path);
-    if (!absolutePath.startsWith(path.resolve(DOC_UPLOAD_DIR))) {
-      return res.status(403).json({ error: 'Invalid attachment path' });
-    }
-    if (!fs.existsSync(absolutePath)) {
+    const absolutePath = resolveStoredFilePath(comment.attachment_path);
+    if (!absolutePath) {
       return res.status(404).json({ error: 'Attachment file missing' });
     }
-    return res.download(absolutePath, comment.attachment_name || 'attachment');
+    return sendFileInline(res, absolutePath, comment.attachment_name || 'attachment');
   } catch (error) {
     console.error('Failed to download task comment attachment', error);
     return res.status(500).json({ error: 'Failed to download attachment' });
@@ -2939,14 +3313,11 @@ app.get('/admin/customer-portal/documents/:id/download', async (req, res) => {
     if (!allowed) {
       return res.status(403).json({ error: 'Selected customer cannot access this document' });
     }
-    const absolutePath = path.resolve(__dirname, doc.storage_path);
-    if (!absolutePath.startsWith(path.resolve(DOC_UPLOAD_DIR))) {
-      return res.status(403).json({ error: 'Invalid document path' });
-    }
-    if (!fs.existsSync(absolutePath)) {
+    const absolutePath = resolveStoredFilePath(doc.storage_path);
+    if (!absolutePath) {
       return res.status(404).json({ error: 'Document file missing' });
     }
-    return res.download(absolutePath, doc.file_name);
+    return sendFileInline(res, absolutePath, doc.file_name);
   } catch (error) {
     console.error('Failed to download admin customer portal document', error);
     return res.status(500).json({ error: 'Failed to download document' });
@@ -3140,8 +3511,8 @@ app.get('/customer/dashboard-summary', async (req, res) => {
 app.get('/expected-trucks', async (req, res) => {
   const auth = readRoleFromRequest(req);
   if (auth.error) return res.status(auth.status).json({ error: auth.error });
-  if (!['Gate', 'Dispatch', 'Admin'].includes(auth.role)) {
-    return res.status(403).json({ error: 'Only Gate/Dispatch/Admin can view expected trucks' });
+  if (!['Gate', 'Dispatch', 'Manager', 'Admin'].includes(auth.role)) {
+    return res.status(403).json({ error: 'Only Gate/Dispatch/Manager/Admin can view expected trucks' });
   }
 
   const requestedStatus = normalizeExpectedTruckStatus(req.query.status || '');
@@ -3349,6 +3720,7 @@ async function runExpenseSecurityCleanup() {
   try {
     await pool.query(`DELETE FROM expense_token_revocations WHERE expires_at <= NOW()`);
     await pool.query(`DELETE FROM expense_login_attempts WHERE created_at < NOW() - INTERVAL '90 days'`);
+    await pool.query(`DELETE FROM expense_sso_nonces WHERE expires_at <= NOW() OR used_at IS NOT NULL`);
   } catch (error) {
     console.error('Expense security cleanup failed', error);
   }
@@ -3475,6 +3847,27 @@ app.post('/expense/logout', async (req, res) => {
   return res.json({ ok: true, request_id: req.expenseRequestId });
 });
 
+app.post('/expense/sso/challenge', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  const expenseRole = mapTransportRoleToExpenseRole(auth.role);
+  if (!expenseRole) return res.status(403).json({ error: 'You are not authorized for Expense access.' });
+
+  const nonce = crypto.randomBytes(24).toString('hex');
+  const nonceHash = hashNonce(nonce);
+  try {
+    await pool.query(
+      `INSERT INTO expense_sso_nonces(nonce_hash, transport_role, expires_at)
+       VALUES ($1, $2, NOW() + INTERVAL '2 minutes')`,
+      [nonceHash, auth.role]
+    );
+    return res.json({ ok: true, nonce, expires_in_seconds: 120, request_id: req.requestId });
+  } catch (error) {
+    console.error('Expense SSO challenge failed', error);
+    return res.status(500).json({ error: 'Failed to create SSO challenge' });
+  }
+});
+
 app.post('/expense/sso', async (req, res) => {
   const auth = readRoleFromRequest(req);
   const ipAddress = getRequestIp(req);
@@ -3491,6 +3884,31 @@ app.post('/expense/sso', async (req, res) => {
       userAgent
     });
     return res.status(403).json({ error: 'You are not authorized for Expense access.' });
+  }
+
+  const nonce = String(req.header('x-sso-nonce') || '').trim();
+  if (nonce) {
+    const nonceHash = hashNonce(nonce);
+    const nonceRes = await pool.query(
+      `UPDATE expense_sso_nonces
+       SET used_at = NOW()
+       WHERE nonce_hash = $1
+         AND transport_role = $2
+         AND used_at IS NULL
+         AND expires_at > NOW()
+       RETURNING id`,
+      [nonceHash, transportRole]
+    );
+    if (!nonceRes.rows.length) {
+      await recordExpenseLoginAttempt({
+        username: `transport_${transportRole}`,
+        ipAddress,
+        success: false,
+        failureReason: 'expense_sso_nonce_invalid_or_expired',
+        userAgent
+      });
+      return res.status(403).json({ error: 'Invalid or expired SSO challenge' });
+    }
   }
 
   const client = await pool.connect();
@@ -3548,6 +3966,85 @@ app.post('/expense/sso', async (req, res) => {
   }
 });
 
+app.post('/auth/v2/login', async (req, res) => {
+  if (!appConfig.flags.enableUserAuthV2) {
+    return res.status(403).json({ error: 'User auth v2 is disabled' });
+  }
+  const username = String(req.body.username || '').trim();
+  const password = String(req.body.password || '').trim();
+  if (!username || !password) {
+    return res.status(400).json({ error: 'username and password are required' });
+  }
+  try {
+    const auth = await authenticateTransportV2WithPassword(username, password);
+    if (auth.error) return res.status(auth.status).json({ error: auth.error });
+    const token = createTransportToken(auth.user, auth.user.roles);
+    return res.json({ ok: true, token, user: auth.user, request_id: req.requestId });
+  } catch (error) {
+    console.error('Transport v2 login failed', error);
+    return res.status(500).json({ error: 'Failed to login' });
+  }
+});
+
+app.post('/auth/employee-login', async (req, res) => {
+  const username = String(req.body.username || '').trim();
+  const password = String(req.body.password || '').trim();
+  if (!username || !password) {
+    return res.status(400).json({ error: 'username and password are required' });
+  }
+  try {
+    const auth = await authenticateTransportV2WithPassword(username, password);
+    if (auth.error) return res.status(auth.status).json({ error: auth.error });
+    return res.json({
+      ok: true,
+      user: {
+        id: auth.user.id,
+        username: auth.user.username,
+        full_name: auth.user.full_name,
+        roles: auth.user.roles
+      },
+      request_id: req.requestId
+    });
+  } catch (error) {
+    console.error('Employee login failed', error);
+    return res.status(500).json({ error: 'Failed to login' });
+  }
+});
+
+app.get('/auth/v2/me', async (req, res) => {
+  if (!appConfig.flags.enableUserAuthV2) {
+    return res.status(403).json({ error: 'User auth v2 is disabled' });
+  }
+  const bearer = String(req.header('authorization') || '').trim();
+  const tokenHeader = String(req.header('x-user-token') || '').trim();
+  const token = tokenHeader || (bearer.toLowerCase().startsWith('bearer ') ? bearer.slice(7).trim() : '');
+  if (!token) return res.status(401).json({ error: 'Missing transport token' });
+  const verified = verifyTransportToken(token);
+  if (verified.error) return res.status(verified.status).json({ error: verified.error });
+  try {
+    const result = await pool.query(
+      `SELECT id, username, full_name, is_active FROM users WHERE id = $1 LIMIT 1`,
+      [verified.payload.sub]
+    );
+    if (!result.rows.length) return res.status(403).json({ error: 'User not found' });
+    const user = result.rows[0];
+    if (!user.is_active) return res.status(403).json({ error: 'User inactive' });
+    const rolesRes = await pool.query(
+      `SELECT role_name FROM user_roles WHERE user_id = $1 AND is_active = true ORDER BY role_name ASC`,
+      [user.id]
+    );
+    return res.json({
+      id: user.id,
+      username: user.username,
+      full_name: user.full_name,
+      roles: rolesRes.rows.map((row) => row.role_name).filter((role) => VALID_ROLES.includes(role))
+    });
+  } catch (error) {
+    console.error('Transport v2 me failed', error);
+    return res.status(500).json({ error: 'Failed to fetch user profile' });
+  }
+});
+
 app.get('/expense/me', async (req, res) => {
   const auth = await readExpenseUserFromRequest(req);
   if (auth.error) return res.status(auth.status).json({ error: auth.error });
@@ -3590,25 +4087,27 @@ app.post('/expenses', async (req, res) => {
     purpose: normalizeEmpty(req.body.purpose)
   };
 
-  if (!payload.pay_to || !payload.voucher_no || !payload.claim_date || payload.amount === null || payload.amount <= 0 || !payload.category_id || !payload.purpose) {
-    return res.status(400).json({ error: 'pay_to, voucher_no, claim_date, amount, category_id and purpose are required' });
+  if (payload.amount !== null && payload.amount <= 0) {
+    return res.status(400).json({ error: 'amount must be greater than 0 when provided' });
   }
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const duplicateVoucher = await client.query(
-      `SELECT id
-       FROM expense_claims
-       WHERE employee_id = $1
-         AND lower(trim(voucher_no)) = lower(trim($2))
-         AND deleted_at IS NULL
-       LIMIT 1`,
-      [auth.user.id, payload.voucher_no]
-    );
-    if (duplicateVoucher.rows.length) {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'Duplicate voucher number for this employee' });
+    if (payload.voucher_no) {
+      const duplicateVoucher = await client.query(
+        `SELECT id
+         FROM expense_claims
+         WHERE employee_id = $1
+           AND lower(trim(voucher_no)) = lower(trim($2))
+           AND deleted_at IS NULL
+         LIMIT 1`,
+        [auth.user.id, payload.voucher_no]
+      );
+      if (duplicateVoucher.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'Duplicate voucher number for this employee' });
+      }
     }
     const insert = await client.query(
       `INSERT INTO expense_claims(
@@ -3786,22 +4285,24 @@ app.put('/expenses/:id(\\d+)', async (req, res) => {
       category_id: parsePositiveId(req.body.category_id ?? existing.category_id),
       purpose: normalizeEmpty(req.body.purpose ?? existing.purpose)
     };
-    if (!next.pay_to || !next.voucher_no || !next.claim_date || next.amount === null || next.amount <= 0 || !next.category_id || !next.purpose) {
+    if (next.amount !== null && next.amount <= 0) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Required claim fields are missing' });
+      return res.status(400).json({ error: 'amount must be greater than 0 when provided' });
     }
-    const duplicateVoucher = await client.query(
-      `SELECT id FROM expense_claims
-       WHERE employee_id = $1
-         AND lower(trim(voucher_no)) = lower(trim($2))
-         AND id <> $3
-         AND deleted_at IS NULL
-       LIMIT 1`,
-      [existing.employee_id, next.voucher_no, claimId]
-    );
-    if (duplicateVoucher.rows.length) {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'Duplicate voucher number for this employee' });
+    if (next.voucher_no) {
+      const duplicateVoucher = await client.query(
+        `SELECT id FROM expense_claims
+         WHERE employee_id = $1
+           AND lower(trim(voucher_no)) = lower(trim($2))
+           AND id <> $3
+           AND deleted_at IS NULL
+         LIMIT 1`,
+        [existing.employee_id, next.voucher_no, claimId]
+      );
+      if (duplicateVoucher.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'Duplicate voucher number for this employee' });
+      }
     }
 
     const fieldChanges = {};
@@ -4166,7 +4667,6 @@ app.post('/expenses/:id(\\d+)/payment-completed', async (req, res) => {
   const expectedVersion = parseExpectedVersion(req);
   if (expectedVersion === null) return res.status(400).json({ error: 'version is required for payment action' });
   const remarks = normalizeEmpty(req.body.remarks);
-  if (!remarks) return res.status(400).json({ error: 'remarks is required before payment completion' });
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -4187,14 +4687,6 @@ app.post('/expenses/:id(\\d+)/payment-completed', async (req, res) => {
     if (!isValidExpenseTransition(claim.status, 'PAYMENT_COMPLETED')) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: `Invalid transition: ${claim.status} -> PAYMENT_COMPLETED` });
-    }
-    const proofRes = await client.query(
-      `SELECT id FROM expense_claim_documents WHERE claim_id = $1 AND doc_type = 'PAYMENT_PROOF' LIMIT 1`,
-      [claimId]
-    );
-    if (!proofRes.rows.length) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Payment proof document is required before payment completion' });
     }
     const updated = await client.query(
       `UPDATE expense_claims
@@ -4244,7 +4736,7 @@ app.post('/expenses/:id(\\d+)/documents', async (req, res) => {
   const claimId = parsePositiveId(req.params.id);
   if (!claimId) return res.status(400).json({ error: 'Invalid claim id' });
 
-  uploadDocument.single('file')(req, res, async (uploadError) => {
+  uploadExpenseDocument.single('file')(req, res, async (uploadError) => {
     if (uploadError) return res.status(400).json({ error: uploadError.message || 'Upload failed' });
     if (!req.file) return res.status(400).json({ error: 'File is required' });
     const docType = String(req.body.doc_type || '').toUpperCase();
@@ -4325,10 +4817,9 @@ app.get('/expenses/documents/:id/download', async (req, res) => {
     if (!canExpenseUserAccessClaim(auth.user, doc)) {
       return res.status(403).json({ error: 'Not allowed to view this document' });
     }
-    const absolutePath = path.resolve(__dirname, doc.storage_path);
-    if (!absolutePath.startsWith(path.resolve(DOC_UPLOAD_DIR))) return res.status(403).json({ error: 'Invalid document path' });
-    if (!fs.existsSync(absolutePath)) return res.status(404).json({ error: 'File missing' });
-    return res.download(absolutePath, doc.file_name);
+    const absolutePath = resolveStoredFilePath(doc.storage_path);
+    if (!absolutePath) return res.status(404).json({ error: 'File missing' });
+    return sendFileInline(res, absolutePath, doc.file_name, doc.mime_type || null);
   } catch (error) {
     console.error('Failed to download expense document', error);
     return res.status(500).json({ error: 'Failed to download expense document' });
@@ -4475,15 +4966,30 @@ app.get('/expenses/dashboard', async (req, res) => {
       return acc;
     }, {}));
 
-    const pendingQueue = rows.filter((r) => ['ACCOUNTS_REVIEW', 'MANAGER_REVIEW', 'ADMIN_REVIEW', 'NEED_MORE_INFO'].includes(r.status));
-    const paymentQueue = rows.filter((r) => ['PAYMENT_PENDING', 'PAYMENT_INITIATED'].includes(r.status));
+    const pendingQueue = rows
+      .filter((r) => ['ACCOUNTS_REVIEW', 'MANAGER_REVIEW', 'ADMIN_REVIEW', 'NEED_MORE_INFO'].includes(r.status))
+      .slice(0, 500);
+    const paymentQueue = rows
+      .filter((r) => ['PAYMENT_PENDING', 'PAYMENT_INITIATED'].includes(r.status))
+      .slice(0, 500);
     const sortedRecent = [...rows].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
     const totalRecent = sortedRecent.length;
     const start = (page - 1) * limit;
     const recentClaims = sortedRecent.slice(start, start + limit);
     const recentClaimsMeta = getPaginationMeta({ page, limit, total: totalRecent });
 
-    return res.json({ summary, pendingQueue, paymentQueue, recentClaims, recentClaimsMeta, categoryTotals, employeeTotals, rows });
+    const includeRows = String(req.query.include_rows || 'false').toLowerCase() === 'true';
+    return res.json({
+      summary,
+      pendingQueue,
+      paymentQueue,
+      recentClaims,
+      recentClaimsMeta,
+      categoryTotals,
+      employeeTotals,
+      rows: includeRows ? rows : [],
+      rows_truncated: !includeRows
+    });
   } catch (error) {
     console.error('Failed to load expense dashboard', error);
     return res.status(500).json({ error: 'Failed to load expense dashboard' });
@@ -4675,9 +5181,788 @@ app.get('/expenses', async (req, res) => {
   }
 });
 
+app.get('/admin/control/users', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can manage control panel users' });
+  try {
+    const usersRes = await pool.query(
+      `SELECT u.id, u.username, u.full_name, u.is_active, u.created_at, u.updated_at,
+              COALESCE(json_agg(ur.role_name ORDER BY ur.role_name) FILTER (WHERE ur.role_name IS NOT NULL), '[]'::json) AS roles
+       FROM users u
+       LEFT JOIN user_roles ur ON ur.user_id = u.id AND ur.is_active = true
+       GROUP BY u.id
+       ORDER BY u.updated_at DESC, u.id DESC`
+    );
+    return res.json(usersRes.rows);
+  } catch (error) {
+    console.error('Failed to load control panel users', error);
+    return res.status(500).json({ error: 'Failed to load users' });
+  }
+});
+
+app.get('/admin/control/employees', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can view employees' });
+  try {
+    const usersRes = await pool.query(
+      `SELECT u.id, u.username, u.full_name, u.is_active, u.updated_at,
+              COALESCE(json_agg(ur.role_name ORDER BY ur.role_name) FILTER (WHERE ur.role_name IS NOT NULL AND ur.is_active = true), '[]'::json) AS transport_roles
+       FROM users u
+       LEFT JOIN user_roles ur ON ur.user_id = u.id
+       GROUP BY u.id
+       ORDER BY u.updated_at DESC, u.id DESC`
+    );
+    const expenseRes = await pool.query(
+      `SELECT id, username, full_name, role, is_active, updated_at
+       FROM expense_users
+       ORDER BY updated_at DESC, id DESC`
+    );
+
+    const byUsername = new Map();
+    usersRes.rows.forEach((u) => {
+      byUsername.set(u.username, {
+        username: u.username,
+        full_name: u.full_name,
+        is_active: u.is_active,
+        updated_at: u.updated_at,
+        transport_roles: Array.isArray(u.transport_roles) ? u.transport_roles : [],
+        expense_role: null,
+        source: 'transport'
+      });
+    });
+    expenseRes.rows.forEach((e) => {
+      if (byUsername.has(e.username)) {
+        const row = byUsername.get(e.username);
+        row.expense_role = e.role;
+        row.is_active = row.is_active && e.is_active;
+        row.updated_at = row.updated_at > e.updated_at ? row.updated_at : e.updated_at;
+        row.source = 'both';
+      } else {
+        byUsername.set(e.username, {
+          username: e.username,
+          full_name: e.full_name,
+          is_active: e.is_active,
+          updated_at: e.updated_at,
+          transport_roles: [],
+          expense_role: e.role,
+          source: 'expense'
+        });
+      }
+    });
+    return res.json(Array.from(byUsername.values()).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)));
+  } catch (error) {
+    console.error('Failed to load employees', error);
+    return res.status(500).json({ error: 'Failed to load employees' });
+  }
+});
+
+app.post('/admin/control/employees', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can manage employees' });
+
+  const username = String(req.body.username || '').trim();
+  const fullName = String(req.body.full_name || '').trim();
+  const password = normalizeEmpty(req.body.password);
+  const isActive = req.body.is_active === undefined ? true : Boolean(req.body.is_active);
+  const transportRoles = Array.isArray(req.body.transport_roles)
+    ? req.body.transport_roles.filter((r) => VALID_ROLES.includes(r))
+    : [];
+  const expenseRole = normalizeEmpty(req.body.expense_role);
+  const validExpenseRole = expenseRole && EXPENSE_ROLES.includes(expenseRole) ? expenseRole : null;
+
+  if (!username || !fullName) {
+    return res.status(400).json({ error: 'username and full_name are required' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    let transportUserId = null;
+    if (transportRoles.length > 0) {
+      const existingTransportUser = await client.query(
+        `SELECT id, password_hash FROM users WHERE username = $1 LIMIT 1`,
+        [username]
+      );
+      const hash = password ? await bcrypt.hash(String(password), BCRYPT_COST) : null;
+      const existingHash = existingTransportUser.rows.length ? existingTransportUser.rows[0].password_hash : null;
+      const hashForInsert = hash || existingHash || await bcrypt.hash('ChangeMe#123', BCRYPT_COST);
+      const uRes = await client.query(
+        `INSERT INTO users(username, full_name, password_hash, is_active)
+         VALUES ($1,$2,$3,$4)
+         ON CONFLICT (username) DO UPDATE
+         SET full_name = EXCLUDED.full_name,
+             is_active = EXCLUDED.is_active,
+             password_hash = COALESCE(EXCLUDED.password_hash, users.password_hash),
+             updated_at = NOW()
+         RETURNING id`,
+        [username, fullName, hashForInsert, isActive]
+      );
+      transportUserId = uRes.rows[0].id;
+      await client.query(`UPDATE user_roles SET is_active = false, updated_at = NOW() WHERE user_id = $1`, [transportUserId]);
+      for (const roleName of transportRoles) {
+        await client.query(
+          `INSERT INTO user_roles(user_id, role_name, is_active)
+           VALUES ($1,$2,true)
+           ON CONFLICT (user_id, role_name)
+           DO UPDATE SET is_active = true, updated_at = NOW()`,
+          [transportUserId, roleName]
+        );
+      }
+    }
+
+    if (validExpenseRole) {
+      const existing = await client.query(`SELECT id FROM expense_users WHERE username = $1 LIMIT 1`, [username]);
+      const hash = password ? await bcrypt.hash(String(password), BCRYPT_COST) : null;
+      if (existing.rows.length) {
+        await client.query(
+          `UPDATE expense_users
+           SET full_name = $1,
+               role = $2,
+               is_active = $3,
+               password = COALESCE($4, password),
+               updated_at = NOW()
+           WHERE id = $5`,
+          [fullName, validExpenseRole, isActive, hash, existing.rows[0].id]
+        );
+      } else {
+        const finalHash = hash || await bcrypt.hash('ChangeMe#123', BCRYPT_COST);
+        await client.query(
+          `INSERT INTO expense_users(employee_code, full_name, username, password, role, is_active)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [null, fullName, username, finalHash, validExpenseRole, isActive]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    return res.status(201).json({ ok: true, username, full_name: fullName, transport_roles: transportRoles, expense_role: validExpenseRole, is_active: isActive });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Failed to upsert employee', error);
+    return res.status(500).json({ error: `Failed to save employee: ${error.message || 'unknown error'}` });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/admin/control/overview', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can view control overview' });
+  try {
+    const [usersCount, expenseUsersCount, customersCount] = await Promise.all([
+      pool.query(`SELECT COUNT(*)::int AS count FROM users WHERE is_active = true`),
+      pool.query(`SELECT COUNT(*)::int AS count FROM expense_users WHERE is_active = true`),
+      pool.query(`SELECT COUNT(*)::int AS count FROM customer_users WHERE is_active = true`)
+    ]);
+    return res.json({
+      flags: appConfig.flags,
+      role_pins: ROLE_PINS,
+      counts: {
+        users_active: usersCount.rows[0]?.count || 0,
+        expense_users_active: expenseUsersCount.rows[0]?.count || 0,
+        customer_users_active: customersCount.rows[0]?.count || 0
+      }
+    });
+  } catch (error) {
+    console.error('Failed to load control overview', error);
+    return res.status(500).json({ error: 'Failed to load control overview' });
+  }
+});
+
+app.post('/admin/control/users', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can create control panel users' });
+
+  const username = String(req.body.username || '').trim();
+  const fullName = String(req.body.full_name || '').trim();
+  const password = String(req.body.password || '').trim();
+  const roles = Array.isArray(req.body.roles) ? req.body.roles.filter((r) => VALID_ROLES.includes(r)) : [];
+  if (!username || !fullName || !password || !roles.length) {
+    return res.status(400).json({ error: 'username, full_name, password and at least one valid role are required' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const hash = await bcrypt.hash(password, BCRYPT_COST);
+    const userRes = await client.query(
+      `INSERT INTO users(username, full_name, password_hash, is_active)
+       VALUES ($1, $2, $3, true)
+       ON CONFLICT (username) DO UPDATE SET full_name = EXCLUDED.full_name, password_hash = EXCLUDED.password_hash, is_active = true, updated_at = NOW()
+       RETURNING id, username, full_name, is_active`,
+      [username, fullName, hash]
+    );
+    const userId = userRes.rows[0].id;
+    await client.query(`UPDATE user_roles SET is_active = false, updated_at = NOW() WHERE user_id = $1`, [userId]);
+    for (const roleName of roles) {
+      await client.query(
+        `INSERT INTO user_roles(user_id, role_name, is_active)
+         VALUES ($1, $2, true)
+         ON CONFLICT (user_id, role_name) DO UPDATE SET is_active = true, updated_at = NOW()`,
+        [userId, roleName]
+      );
+    }
+    await client.query('COMMIT');
+    return res.status(201).json({ ...userRes.rows[0], roles });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Failed to upsert control panel user', error);
+    return res.status(500).json({ error: 'Failed to upsert user' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/admin/control/expense-users', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can view expense users' });
+  try {
+    const result = await pool.query(
+      `SELECT id, employee_code, full_name, username, role, is_active, created_at, updated_at
+       FROM expense_users
+       ORDER BY updated_at DESC, id DESC`
+    );
+    return res.json(result.rows);
+  } catch (error) {
+    console.error('Failed to load expense users', error);
+    return res.status(500).json({ error: 'Failed to load expense users' });
+  }
+});
+
+app.post('/admin/control/expense-users', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can upsert expense users' });
+  const employeeCode = normalizeEmpty(req.body.employee_code);
+  const fullName = String(req.body.full_name || '').trim();
+  const username = String(req.body.username || '').trim();
+  const role = String(req.body.role || '').trim();
+  const password = normalizeEmpty(req.body.password);
+  const isActive = req.body.is_active === undefined ? true : Boolean(req.body.is_active);
+  if (!fullName || !username || !EXPENSE_ROLES.includes(role)) {
+    return res.status(400).json({ error: 'full_name, username and valid role are required' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const existing = await client.query(`SELECT id, password FROM expense_users WHERE username = $1 LIMIT 1`, [username]);
+    let passwordHash = null;
+    if (password) {
+      passwordHash = await bcrypt.hash(String(password), BCRYPT_COST);
+    }
+    let row;
+    if (existing.rows.length) {
+      const current = existing.rows[0];
+      await client.query(
+        `UPDATE expense_users
+         SET employee_code = COALESCE($1, employee_code),
+             full_name = $2,
+             role = $3,
+             is_active = $4,
+             password = COALESCE($5, password),
+             updated_at = NOW()
+         WHERE id = $6`,
+        [employeeCode, fullName, role, isActive, passwordHash, current.id]
+      );
+      const refreshed = await client.query(
+        `SELECT id, employee_code, full_name, username, role, is_active, created_at, updated_at
+         FROM expense_users WHERE id = $1`,
+        [current.id]
+      );
+      row = refreshed.rows[0];
+    } else {
+      const finalHash = passwordHash || await bcrypt.hash('ChangeMe#123', BCRYPT_COST);
+      const inserted = await client.query(
+        `INSERT INTO expense_users(employee_code, full_name, username, password, role, is_active)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         RETURNING id, employee_code, full_name, username, role, is_active, created_at, updated_at`,
+        [employeeCode, fullName, username, finalHash, role, isActive]
+      );
+      row = inserted.rows[0];
+    }
+    await client.query('COMMIT');
+    return res.status(201).json(row);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Failed to upsert expense user', error);
+    return res.status(500).json({ error: 'Failed to upsert expense user' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/admin/control/customer-users', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can view customer users' });
+  try {
+    const result = await pool.query(
+      `SELECT id, customer_name, username, display_name, is_active, created_at, updated_at
+       FROM customer_users
+       ORDER BY updated_at DESC, id DESC`
+    );
+    return res.json(result.rows);
+  } catch (error) {
+    console.error('Failed to load customer users', error);
+    return res.status(500).json({ error: 'Failed to load customer users' });
+  }
+});
+
+app.post('/admin/control/customer-users', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can upsert customer users' });
+  const customerName = String(req.body.customer_name || '').trim();
+  const username = String(req.body.username || '').trim();
+  const displayName = normalizeEmpty(req.body.display_name);
+  const password = normalizeEmpty(req.body.password);
+  const isActive = req.body.is_active === undefined ? true : Boolean(req.body.is_active);
+  if (!customerName || !username) {
+    return res.status(400).json({ error: 'customer_name and username are required' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const existing = await client.query(`SELECT id, password FROM customer_users WHERE username = $1 LIMIT 1`, [username]);
+    let passwordHash = null;
+    if (password) {
+      passwordHash = await bcrypt.hash(String(password), BCRYPT_COST);
+    }
+    let row;
+    if (existing.rows.length) {
+      const current = existing.rows[0];
+      await client.query(
+        `UPDATE customer_users
+         SET customer_name = $1,
+             display_name = $2,
+             is_active = $3,
+             password = COALESCE($4, password),
+             updated_at = NOW()
+         WHERE id = $5`,
+        [customerName, displayName, isActive, passwordHash, current.id]
+      );
+      const refreshed = await client.query(
+        `SELECT id, customer_name, username, display_name, is_active, created_at, updated_at
+         FROM customer_users WHERE id = $1`,
+        [current.id]
+      );
+      row = refreshed.rows[0];
+    } else {
+      const finalHash = passwordHash || await bcrypt.hash('ChangeMe#123', BCRYPT_COST);
+      const inserted = await client.query(
+        `INSERT INTO customer_users(customer_name, username, password, display_name, is_active)
+         VALUES ($1,$2,$3,$4,$5)
+         RETURNING id, customer_name, username, display_name, is_active, created_at, updated_at`,
+        [customerName, username, finalHash, displayName, isActive]
+      );
+      row = inserted.rows[0];
+    }
+    await client.query('COMMIT');
+    return res.status(201).json(row);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Failed to upsert customer user', error);
+    return res.status(500).json({ error: 'Failed to upsert customer user' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/admin/control/seed-current-data', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can run control seed sync' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const seedAccounts = [
+      { role: 'Admin', username: 'admin_role', full_name: 'Transport Admin', password: 'Admin@1234' },
+      { role: 'Manager', username: 'manager_role', full_name: 'Transport Manager', password: 'Manager@1234' },
+      { role: 'Accounts', username: 'accounts_role', full_name: 'Transport Accounts', password: 'Accounts@1234' },
+      { role: 'Dispatch', username: 'dispatch_role', full_name: 'Transport Dispatch', password: 'Dispatch@1234' },
+      { role: 'Loading', username: 'loading_role', full_name: 'Transport Loading', password: 'Loading@1234' },
+      { role: 'Weighbridge', username: 'weighbridge_role', full_name: 'Transport Weighbridge', password: 'Weighbridge@1234' },
+      { role: 'Gate', username: 'gate_role', full_name: 'Transport Gate', password: 'Gate@1234' }
+    ];
+
+    for (const account of seedAccounts) {
+      const hash = await bcrypt.hash(account.password, BCRYPT_COST);
+      const userRes = await client.query(
+        `INSERT INTO users(username, full_name, password_hash, is_active)
+         VALUES ($1,$2,$3,true)
+         ON CONFLICT (username)
+         DO UPDATE SET full_name = EXCLUDED.full_name, is_active = true, updated_at = NOW()
+         RETURNING id`,
+        [account.username, account.full_name, hash]
+      );
+      const userId = userRes.rows[0].id;
+      await client.query(
+        `INSERT INTO user_roles(user_id, role_name, is_active)
+         VALUES ($1,$2,true)
+         ON CONFLICT (user_id, role_name)
+         DO UPDATE SET is_active = true, updated_at = NOW()`,
+        [userId, account.role]
+      );
+    }
+
+    const masterQueries = [
+      {
+        type: 'materials',
+        sql: `SELECT DISTINCT NULLIF(TRIM(material_type), '') AS value FROM trips WHERE NULLIF(TRIM(material_type), '') IS NOT NULL`
+      },
+      {
+        type: 'grades',
+        sql: `SELECT DISTINCT NULLIF(TRIM(grade), '') AS value FROM trips WHERE NULLIF(TRIM(grade), '') IS NOT NULL`
+      },
+      {
+        type: 'conditions',
+        sql: `SELECT DISTINCT NULLIF(TRIM(condition), '') AS value FROM trips WHERE NULLIF(TRIM(condition), '') IS NOT NULL`
+      },
+      {
+        type: 'packing',
+        sql: `SELECT DISTINCT NULLIF(TRIM(packing), '') AS value FROM trips WHERE NULLIF(TRIM(packing), '') IS NOT NULL`
+      },
+      {
+        type: 'loading_points',
+        sql: `SELECT DISTINCT NULLIF(TRIM(loading_point), '') AS value FROM trips WHERE NULLIF(TRIM(loading_point), '') IS NOT NULL`
+      },
+      {
+        type: 'loading_teams',
+        sql: `SELECT DISTINCT NULLIF(TRIM(labour_team), '') AS value FROM trips WHERE NULLIF(TRIM(labour_team), '') IS NOT NULL`
+      },
+      {
+        type: 'transporters',
+        sql: `
+          SELECT DISTINCT value FROM (
+            SELECT NULLIF(TRIM(transporter), '') AS value FROM trips
+            UNION
+            SELECT NULLIF(TRIM(transporter), '') AS value FROM expected_trucks
+          ) x WHERE value IS NOT NULL`
+      },
+      {
+        type: 'locations',
+        sql: `
+          SELECT DISTINCT value FROM (
+            SELECT NULLIF(TRIM(location), '') AS value FROM trips
+            UNION
+            SELECT NULLIF(TRIM(location), '') AS value FROM expected_trucks
+          ) x WHERE value IS NOT NULL`
+      }
+    ];
+
+    let mastersInserted = 0;
+    for (const def of masterQueries) {
+      const rows = await client.query(def.sql);
+      for (const row of rows.rows) {
+        if (!row.value) continue;
+        const upsert = await client.query(
+          `INSERT INTO admin_master_values(master_type, value, is_active, metadata_json)
+           VALUES ($1,$2,true,'{}'::jsonb)
+           ON CONFLICT (master_type, value)
+           DO UPDATE SET is_active = true, updated_at = NOW()
+           RETURNING id`,
+          [def.type, row.value]
+        );
+        if (upsert.rows.length) mastersInserted += 1;
+      }
+    }
+
+    await client.query('COMMIT');
+    return res.json({
+      ok: true,
+      transport_users_seeded: seedAccounts.length,
+      master_values_synced: mastersInserted
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Failed to seed current control data', error);
+    return res.status(500).json({ error: 'Failed to seed current data' });
+  } finally {
+    client.release();
+  }
+});
+
+function normalizeMasterType(type) {
+  const key = String(type || '').trim().toLowerCase();
+  const aliases = {
+    packings: 'packing',
+    materials: 'materials',
+    grades: 'grades',
+    conditions: 'conditions',
+    loading_points: 'loading_points',
+    loading_teams: 'loading_teams',
+    transporters: 'transporters',
+    locations: 'locations',
+    products: 'products',
+    packing: 'packing'
+  };
+  return aliases[key] || key;
+}
+
+function sendFileInline(res, absolutePath, fileName, mimeType = null) {
+  if (mimeType) res.type(mimeType);
+  const safeName = String(fileName || 'document').replace(/"/g, '');
+  res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+  return res.sendFile(absolutePath);
+}
+
+function resolveStoredFilePath(storagePath) {
+  const raw = String(storagePath || '').trim();
+  if (!raw) return null;
+  const candidates = [];
+  if (path.isAbsolute(raw)) {
+    candidates.push(path.resolve(raw));
+  }
+  candidates.push(path.resolve(__dirname, raw));
+  if (!raw.startsWith('uploads/')) {
+    candidates.push(path.resolve(UPLOADS_ROOT_DIR, raw));
+    candidates.push(path.resolve(DOC_UPLOAD_DIR, raw));
+  }
+  const roots = [UPLOADS_ROOT_DIR, DOC_UPLOAD_DIR];
+  for (const candidate of candidates) {
+    if (roots.some((root) => candidate.startsWith(root)) && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function getMasterFallbackQueries() {
+  return {
+    materials: `SELECT DISTINCT NULLIF(TRIM(material_type), '') AS value FROM trips WHERE NULLIF(TRIM(material_type), '') IS NOT NULL`,
+    grades: `SELECT DISTINCT NULLIF(TRIM(grade), '') AS value FROM trips WHERE NULLIF(TRIM(grade), '') IS NOT NULL`,
+    conditions: `SELECT DISTINCT NULLIF(TRIM(condition), '') AS value FROM trips WHERE NULLIF(TRIM(condition), '') IS NOT NULL`,
+    packing: `SELECT DISTINCT NULLIF(TRIM(packing), '') AS value FROM trips WHERE NULLIF(TRIM(packing), '') IS NOT NULL`,
+    loading_points: `SELECT DISTINCT NULLIF(TRIM(loading_point), '') AS value FROM trips WHERE NULLIF(TRIM(loading_point), '') IS NOT NULL`,
+    loading_teams: `SELECT DISTINCT NULLIF(TRIM(labour_team), '') AS value FROM trips WHERE NULLIF(TRIM(labour_team), '') IS NOT NULL`,
+    transporters: `
+      SELECT DISTINCT value FROM (
+        SELECT NULLIF(TRIM(transporter), '') AS value FROM trips
+        UNION
+        SELECT NULLIF(TRIM(transporter), '') AS value FROM expected_trucks
+      ) x WHERE value IS NOT NULL`,
+    locations: `
+      SELECT DISTINCT value FROM (
+        SELECT NULLIF(TRIM(location), '') AS value FROM trips
+        UNION
+        SELECT NULLIF(TRIM(location), '') AS value FROM expected_trucks
+      ) x WHERE value IS NOT NULL`
+  };
+}
+
+async function readMasterOptionsForTypes(types = []) {
+  const fallbackQueries = getMasterFallbackQueries();
+  const result = {};
+  for (const rawType of types) {
+    const masterType = normalizeMasterType(rawType);
+    if (!masterType || masterType === 'customers') continue;
+    const rows = await pool.query(
+      `SELECT value, metadata_json
+       FROM admin_master_values
+       WHERE master_type = $1 AND is_active = true
+       ORDER BY updated_at DESC, id DESC`,
+      [masterType]
+    );
+    if (rows.rows.length) {
+      if (masterType === 'materials' || masterType === 'grades') {
+        result[rawType] = rows.rows.map((r) => ({
+          value: r.value,
+          price_per_mt: Number(r.metadata_json?.price_per_mt) || null
+        }));
+      } else {
+        result[rawType] = rows.rows.map((r) => r.value).filter(Boolean);
+      }
+      continue;
+    }
+    const fallbackSql = fallbackQueries[masterType];
+    if (!fallbackSql) {
+      result[rawType] = [];
+      continue;
+    }
+    const fallback = await pool.query(fallbackSql);
+    if (masterType === 'materials' || masterType === 'grades') {
+      result[rawType] = fallback.rows.map((r) => ({ value: r.value, price_per_mt: null })).filter((r) => r.value);
+    } else {
+      result[rawType] = fallback.rows.map((r) => r.value).filter(Boolean);
+    }
+  }
+  return result;
+}
+
+app.get('/admin/control/masters/:masterType', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can view master values' });
+  const masterType = normalizeMasterType(req.params.masterType);
+  if (masterType === 'customers') {
+    return res.status(400).json({ error: 'customers master type is disabled. Manage customers from Customers section.' });
+  }
+  if (!masterType) return res.status(400).json({ error: 'masterType is required' });
+  try {
+    const rows = await pool.query(
+      `SELECT id, master_type, value, is_active, metadata_json, created_at, updated_at
+       FROM admin_master_values
+       WHERE master_type = $1
+       ORDER BY is_active DESC, updated_at DESC, id DESC`,
+      [masterType]
+    );
+    if (rows.rows.length) {
+      return res.json(rows.rows);
+    }
+
+    const sql = getMasterFallbackQueries()[masterType];
+    if (!sql) return res.json([]);
+    const fallback = await pool.query(sql);
+    const mapped = fallback.rows
+      .map((r, idx) => ({
+        id: -(idx + 1),
+        master_type: masterType,
+        value: r.value,
+        is_active: true,
+        metadata_json: {},
+        created_at: null,
+        updated_at: null
+      }));
+    return res.json(mapped);
+  } catch (error) {
+    console.error('Failed to load master values', error);
+    return res.status(500).json({ error: 'Failed to load master values' });
+  }
+});
+
+app.post('/admin/control/masters/:masterType', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can update master values' });
+  const masterType = normalizeMasterType(req.params.masterType);
+  if (masterType === 'customers') {
+    return res.status(400).json({ error: 'customers master type is disabled. Manage customers from Customers section.' });
+  }
+  const value = String(req.body.value || '').trim();
+  const isActive = req.body.is_active === undefined ? true : Boolean(req.body.is_active);
+  const metadata = req.body.metadata_json && typeof req.body.metadata_json === 'object'
+    ? req.body.metadata_json
+    : {};
+  if (masterType === 'materials' || masterType === 'grades') {
+    const rate = req.body.price_per_mt;
+    metadata.price_per_mt = rate === '' || rate === null || rate === undefined ? null : Number(rate);
+    if (metadata.price_per_mt !== null && (!Number.isFinite(metadata.price_per_mt) || metadata.price_per_mt < 0)) {
+      return res.status(400).json({ error: 'price_per_mt must be a valid non-negative number' });
+    }
+  }
+  if (!masterType || !value) {
+    return res.status(400).json({ error: 'masterType and value are required' });
+  }
+  try {
+    const result = await pool.query(
+      `INSERT INTO admin_master_values(master_type, value, is_active, metadata_json)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (master_type, value)
+       DO UPDATE SET is_active = EXCLUDED.is_active, metadata_json = EXCLUDED.metadata_json, updated_at = NOW()
+       RETURNING id, master_type, value, is_active, metadata_json, created_at, updated_at`,
+      [masterType, value, isActive, JSON.stringify(metadata)]
+    );
+    return res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Failed to upsert master value', error);
+    return res.status(500).json({ error: 'Failed to upsert master value' });
+  }
+});
+
+app.get('/masters/options', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  const types = String(req.query.types || '').split(',').map((t) => t.trim()).filter(Boolean);
+  if (!types.length) return res.status(400).json({ error: 'types query is required' });
+  try {
+    const data = await readMasterOptionsForTypes(types);
+    return res.json(data);
+  } catch (error) {
+    console.error('Failed to load masters options', error);
+    return res.status(500).json({ error: 'Failed to load masters options' });
+  }
+});
+
+app.get('/pricing/defaults', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  try {
+    const row = await pool.query(`SELECT value_json FROM admin_settings WHERE key = 'pricing_defaults' LIMIT 1`);
+    return res.json({
+      default_gst_percent: toFiniteNumberOrNull(row.rows[0]?.value_json?.default_gst_percent)
+    });
+  } catch (error) {
+    console.error('Failed to load pricing defaults', error);
+    return res.status(500).json({ error: 'Failed to load pricing defaults' });
+  }
+});
+
+app.get('/customer/masters/options', async (req, res) => {
+  const auth = await readCustomerUserFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  const types = String(req.query.types || '').split(',').map((t) => t.trim()).filter(Boolean);
+  if (!types.length) return res.status(400).json({ error: 'types query is required' });
+  try {
+    const data = await readMasterOptionsForTypes(types);
+    return res.json(data);
+  } catch (error) {
+    console.error('Failed to load customer masters options', error);
+    return res.status(500).json({ error: 'Failed to load master options' });
+  }
+});
+
+app.get('/admin/control/settings', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can view settings' });
+  try {
+    const row = await pool.query(`SELECT value_json FROM admin_settings WHERE key = 'pricing_defaults' LIMIT 1`);
+    return res.json(row.rows[0]?.value_json || { default_gst_percent: null });
+  } catch (error) {
+    console.error('Failed to load admin settings', error);
+    return res.status(500).json({ error: 'Failed to load settings' });
+  }
+});
+
+app.post('/admin/control/settings', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can update settings' });
+  const gst = req.body.default_gst_percent;
+  const gstValue = gst === '' || gst === null || gst === undefined ? null : Number(gst);
+  if (gstValue !== null && (!Number.isFinite(gstValue) || gstValue < 0 || gstValue > 100)) {
+    return res.status(400).json({ error: 'default_gst_percent must be between 0 and 100' });
+  }
+  try {
+    const valueJson = { default_gst_percent: gstValue };
+    const result = await pool.query(
+      `INSERT INTO admin_settings(key, value_json, updated_at)
+       VALUES ('pricing_defaults', $1::jsonb, NOW())
+       ON CONFLICT (key)
+       DO UPDATE SET value_json = EXCLUDED.value_json, updated_at = NOW()
+       RETURNING value_json, updated_at`,
+      [JSON.stringify(valueJson)]
+    );
+    return res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Failed to update admin settings', error);
+    return res.status(500).json({ error: 'Failed to update settings' });
+  }
+});
+
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
+
+validateProductionConfig();
 
 initDb()
   .then(async () => {

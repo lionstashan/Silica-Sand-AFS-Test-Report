@@ -7,6 +7,7 @@ let queueIndex = -1;
 let activeClaim = null;
 let expenseNotifications = [];
 let expenseNotifPoll = null;
+let toastTimer = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -14,6 +15,50 @@ function setMessage(msg, isError = false) {
   const el = $('global-msg');
   el.textContent = msg || '';
   el.style.color = isError ? '#b00020' : '#666';
+  if (msg) showToast(msg, isError);
+}
+
+function showToast(msg, isError = false) {
+  const wrap = $('expense-toast-wrap');
+  if (!wrap || !msg) return;
+  if (toastTimer) {
+    clearTimeout(toastTimer);
+    toastTimer = null;
+  }
+  wrap.innerHTML = '';
+  const toast = document.createElement('div');
+  toast.className = `expense-toast ${isError ? 'error' : 'success'}`;
+  toast.textContent = msg;
+  wrap.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  toastTimer = setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => {
+      if (wrap.contains(toast)) wrap.removeChild(toast);
+    }, 200);
+  }, isError ? 5000 : 2600);
+}
+
+function setButtonBusy(button, busy, busyText = 'Processing...') {
+  if (!button) return;
+  if (busy) {
+    if (!button.dataset.originalText) button.dataset.originalText = button.textContent || '';
+    button.disabled = true;
+    button.textContent = busyText;
+    button.classList.add('is-busy');
+  } else {
+    button.disabled = false;
+    if (button.dataset.originalText) button.textContent = button.dataset.originalText;
+    button.classList.remove('is-busy');
+  }
+}
+
+function clearRemarksError() {
+  const remarksEl = $('review-remarks');
+  const errEl = $('review-remarks-error');
+  if (!remarksEl || !errEl) return;
+  remarksEl.classList.remove('remarks-error');
+  errEl.style.display = 'none';
 }
 
 function getToken() {
@@ -138,7 +183,9 @@ async function login() {
     $('login-msg').textContent = 'Username and password are required';
     return;
   }
+  const loginBtn = $('login-btn');
   try {
+    setButtonBusy(loginBtn, true, 'Logging in...');
     const data = await api('/expense/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -159,6 +206,8 @@ async function login() {
     }, 15000);
   } catch (error) {
     $('login-msg').textContent = error.message;
+  } finally {
+    setButtonBusy(loginBtn, false);
   }
 }
 
@@ -166,10 +215,10 @@ async function loadCategories() {
   const rows = await api('/expense-categories', { headers: getHeaders() });
   const select = $('f-category');
   if (!Array.isArray(rows) || rows.length === 0) {
-    select.innerHTML = '<option value="">No categories available</option>';
+    select.innerHTML = '<option value="">Select (Optional)</option>';
     return;
   }
-  select.innerHTML = rows.map((r) => `<option value="${r.id}">${r.name}</option>`).join('');
+  select.innerHTML = ['<option value="">Select (Optional)</option>', ...rows.map((r) => `<option value="${r.id}">${r.name}</option>`)].join('');
 }
 
 function claimCard(claim) {
@@ -189,7 +238,9 @@ async function loadMyClaims() {
 }
 
 async function createAndSubmitClaim() {
+  const createBtn = $('create-claim-btn');
   try {
+    setButtonBusy(createBtn, true, 'Submitting...');
     const claim = await api('/expenses', {
       method: 'POST',
       headers: getHeaders(),
@@ -221,6 +272,8 @@ async function createAndSubmitClaim() {
     await loadMyClaims();
   } catch (error) {
     setMessage(error.message, true);
+  } finally {
+    setButtonBusy(createBtn, false);
   }
 }
 
@@ -309,14 +362,8 @@ async function downloadDoc(docId) {
   const url = URL.createObjectURL(blob);
   const opened = window.open(url, '_blank', 'noopener,noreferrer');
   if (!opened) {
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = '';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-    return;
+    URL.revokeObjectURL(url);
+    throw new Error('Please allow popups to open document preview');
   }
   setTimeout(() => URL.revokeObjectURL(url), 60 * 1000);
 }
@@ -332,34 +379,46 @@ async function renderActiveClaim() {
     return;
   }
   const row = queue[queueIndex];
-  const data = await api(`/expenses/${row.id}`, { headers: getHeaders() });
-  const claim = data.claim;
-  activeClaim = claim;
-  const docs = (data.documents || []).map((d) => `<a href="#" data-doc="${d.id}">${d.doc_type} - ${d.file_name}</a>`).join('') || '<div class="mini">No documents.</div>';
-  $('claim-detail').innerHTML = `
-    <div><strong>${claim.claim_number}</strong> (${queueIndex + 1}/${queue.length})</div>
-    <div>Status: ${badge(claim.status)} (v${claim.version})</div>
-    <div>Employee: ${claim.employee_name} (${claim.employee_code || '-'})</div>
-    <div>Pay To: ${claim.pay_to}</div>
-    <div>Voucher: ${claim.voucher_no}</div>
-    <div>Date: ${claim.claim_date}</div>
-    <div>Amount: ${claim.amount}</div>
-    <div>Category: ${claim.category_name || '-'}</div>
-    <div>Purpose: ${claim.purpose}</div>
-    <div class="doc-list" style="margin-top:8px;"><strong>Attachments</strong><br>${docs}</div>
-  `;
-  updateActionButtons(claim);
+  $('claim-detail').innerHTML = '<div class="mini">Loading claim details...</div>';
+  try {
+    const data = await api(`/expenses/${row.id}`, { headers: getHeaders() });
+    const claim = data.claim;
+    activeClaim = claim;
+    const docs = (data.documents || []).map((d) => `<a href="#" data-doc="${d.id}">${d.doc_type} - ${d.file_name}</a>`).join('') || '<div class="mini">No documents.</div>';
+    $('claim-detail').innerHTML = `
+      <div><strong>${claim.claim_number}</strong> (${queueIndex + 1}/${queue.length})</div>
+      <div>Status: ${badge(claim.status)} (v${claim.version})</div>
+      <div>Employee: ${claim.employee_name} (${claim.employee_code || '-'})</div>
+      <div>Pay To: ${claim.pay_to || '-'}</div>
+      <div>Voucher: ${claim.voucher_no || '-'}</div>
+      <div>Date: ${claim.claim_date || '-'}</div>
+      <div>Amount: ${claim.amount ?? '-'}</div>
+      <div>Category: ${claim.category_name || '-'}</div>
+      <div>Purpose: ${claim.purpose || '-'}</div>
+      <div class="doc-list" style="margin-top:8px;"><strong>Attachments</strong><br>${docs}</div>
+    `;
+    updateActionButtons(claim);
 
-  $('claim-detail').querySelectorAll('[data-doc]').forEach((a) => {
-    a.addEventListener('click', async (e) => {
-      e.preventDefault();
-      try {
-        await downloadDoc(Number(a.getAttribute('data-doc')));
-      } catch (error) {
-        setMessage(error.message, true);
-      }
+    $('claim-detail').querySelectorAll('[data-doc]').forEach((a) => {
+      a.addEventListener('click', async (e) => {
+        e.preventDefault();
+        try {
+          await downloadDoc(Number(a.getAttribute('data-doc')));
+        } catch (error) {
+          setMessage(error.message, true);
+        }
+      });
     });
-  });
+  } catch (error) {
+    activeClaim = null;
+    $('claim-detail').innerHTML = `
+      <div class="mini">
+        Failed to load claim details. Please click Refresh Claim.
+      </div>
+    `;
+    updateActionButtons(null);
+    setMessage(error.message || 'Failed to load claim details', true);
+  }
 }
 
 function updateActionButtons(claim) {
@@ -444,9 +503,19 @@ async function runReviewAction(kind) {
   }
   const version = activeClaim?.version || claim.version;
   const remarks = $('review-remarks').value.trim();
+  clearRemarksError();
+  const actionButtonMap = {
+    approve: 'approve-btn',
+    'need-info': 'need-info-btn',
+    reject: 'reject-btn',
+    'payment-init': 'payment-init-btn',
+    'payment-complete': 'payment-complete-btn'
+  };
+  const actionBtn = $(actionButtonMap[kind] || '');
   try {
+    setButtonBusy(actionBtn, true, 'Updating...');
     if (kind === 'reject' && !confirm('Are you sure you want to reject this claim?')) return;
-    if (kind === 'payment-complete' && !confirm('Confirm payment completed? Payment proof and remarks are required.')) return;
+    if (kind === 'payment-complete' && !confirm('Confirm payment completed?')) return;
     if (kind === 'payment-init') {
       await api(`/expenses/${claim.id}/payment-initiated`, {
         method: 'POST',
@@ -454,7 +523,6 @@ async function runReviewAction(kind) {
         body: JSON.stringify({ remarks, version })
       });
     } else if (kind === 'payment-complete') {
-      if (!remarks) throw new Error('Enter payment completion remarks');
       await api(`/expenses/${claim.id}/payment-completed`, {
         method: 'POST',
         headers: getHeaders(),
@@ -479,6 +547,8 @@ async function runReviewAction(kind) {
     await loadQueue();
   } catch (error) {
     setMessage(error.message, true);
+  } finally {
+    setButtonBusy(actionBtn, false);
   }
 }
 
@@ -505,26 +575,40 @@ async function uploadReviewDoc() {
   }
   const file = $('review-doc-file').files[0];
   if (!file) return;
+  const uploadBtn = $('upload-doc-btn');
   try {
+    setButtonBusy(uploadBtn, true, 'Uploading...');
     await uploadDoc(claim.id, file, $('review-doc-type').value);
     setMessage('Document uploaded');
     await renderActiveClaim();
   } catch (error) {
     setMessage(error.message, true);
+  } finally {
+    setButtonBusy(uploadBtn, false);
   }
 }
 
 function bindReviewerActions() {
-  $('prev-btn').addEventListener('click', async () => {
+  $('prev-btn').addEventListener('click', async (event) => {
     if (queueIndex > 0) {
+      setButtonBusy(event.currentTarget, true, 'Loading...');
       queueIndex -= 1;
-      await renderActiveClaim();
+      try {
+        await renderActiveClaim();
+      } finally {
+        setButtonBusy(event.currentTarget, false);
+      }
     }
   });
-  $('next-btn').addEventListener('click', async () => {
+  $('next-btn').addEventListener('click', async (event) => {
     if (queueIndex < queue.length - 1) {
+      setButtonBusy(event.currentTarget, true, 'Loading...');
       queueIndex += 1;
-      await renderActiveClaim();
+      try {
+        await renderActiveClaim();
+      } finally {
+        setButtonBusy(event.currentTarget, false);
+      }
     }
   });
   $('approve-btn').addEventListener('click', () => runReviewAction('approve'));
@@ -533,8 +617,22 @@ function bindReviewerActions() {
   $('payment-init-btn').addEventListener('click', () => runReviewAction('payment-init'));
   $('payment-complete-btn').addEventListener('click', () => runReviewAction('payment-complete'));
   $('upload-doc-btn').addEventListener('click', uploadReviewDoc);
-  $('claim-refresh-btn').addEventListener('click', renderActiveClaim);
-  $('refresh-queue-btn').addEventListener('click', loadQueue);
+  $('claim-refresh-btn').addEventListener('click', async (event) => {
+    setButtonBusy(event.currentTarget, true, 'Refreshing...');
+    try {
+      await renderActiveClaim();
+    } finally {
+      setButtonBusy(event.currentTarget, false);
+    }
+  });
+  $('refresh-queue-btn').addEventListener('click', async (event) => {
+    setButtonBusy(event.currentTarget, true, 'Refreshing...');
+    try {
+      await loadQueue();
+    } finally {
+      setButtonBusy(event.currentTarget, false);
+    }
+  });
 }
 
 function getDashboardQuery() {
@@ -563,7 +661,9 @@ function renderSimpleTable(elId, rows, cols) {
 }
 
 async function loadDashboard() {
+  const btn = $('load-dashboard-btn');
   try {
+    setButtonBusy(btn, true, 'Loading...');
     const data = await api(`/expenses/dashboard${getDashboardQuery()}`, { headers: getHeaders() });
     const s = data.summary || {};
     $('dashboard-cards').innerHTML = `
@@ -593,11 +693,15 @@ async function loadDashboard() {
     ]);
   } catch (error) {
     setMessage(error.message, true);
+  } finally {
+    setButtonBusy(btn, false);
   }
 }
 
 async function exportCsv() {
+  const btn = $('export-csv-btn');
   try {
+    setButtonBusy(btn, true, 'Exporting...');
     const response = await fetch(`/expenses/export${getDashboardQuery()}`, { headers: { 'x-expense-token': getToken() } });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
@@ -612,8 +716,11 @@ async function exportCsv() {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+    setMessage('Export downloaded');
   } catch (error) {
     setMessage(error.message, true);
+  } finally {
+    setButtonBusy(btn, false);
   }
 }
 
@@ -650,6 +757,7 @@ function setup() {
   if (loadDashboardBtn) loadDashboardBtn.addEventListener('click', loadDashboard);
   const exportCsvBtn = $('export-csv-btn');
   if (exportCsvBtn) exportCsvBtn.addEventListener('click', exportCsv);
+  $('review-remarks')?.addEventListener('input', clearRemarksError);
   bindReviewerActions();
   $('expense-notifications-btn')?.addEventListener('click', async () => {
     $('expense-notification-modal').style.display = 'flex';

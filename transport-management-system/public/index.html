@@ -27,6 +27,29 @@
           <a href="/customer" class="public-portal-link">Customer Portal</a>
         </div>
       </div>
+      <div class="public-portal-links" style="margin-top: 16px;">
+        <p>Employee Login</p>
+        <div class="form-grid" style="margin-bottom: 8px;">
+          <label>Username
+            <input type="text" id="employee-login-username" autocomplete="username" />
+          </label>
+          <label>Password
+            <input type="password" id="employee-login-password" autocomplete="current-password" />
+          </label>
+        </div>
+        <button type="button" id="employee-login-btn">Login</button>
+        <p id="employee-login-message" style="margin-top:8px;color:#b91c1c;display:none;"></p>
+      </div>
+    </div>
+  </div>
+
+  <div id="employee-role-select-modal" style="display: none;">
+    <div class="pin-modal-content">
+      <h2>Select Role</h2>
+      <p id="employee-role-label">Choose role for this session</p>
+      <select id="employee-role-select"></select>
+      <button id="employee-role-submit-btn">Continue</button>
+      <button id="employee-role-cancel-btn">Back</button>
     </div>
   </div>
 
@@ -47,6 +70,7 @@
     <p>Record truck entries at the gate.</p>
     <div class="header-actions">
       <span id="role-indicator" class="role-indicator" style="display: none;"></span>
+      <select id="role-switcher" class="nav-link nav-btn" style="display:none;"></select>
       <button type="button" id="task-notifications-btn" class="nav-link nav-btn header-bell-btn" style="display:none;" aria-label="Task notifications" title="Task notifications">
         <span class="bell-icon">🔔</span><span id="task-notification-badge" class="notif-badge" style="display:none;">0</span>
       </button>
@@ -57,6 +81,7 @@
       <a href="/expense" id="expense-link" class="nav-link" style="display:none;">Expense Portal</a>
       <a href="/expected-trucks-page" id="expected-trucks-link" class="nav-link">Expected Trucks</a>
       <a href="/customer" id="customer-portal-link" class="nav-link">Customer Portal</a>
+      <a href="/admin-control" id="admin-control-link" class="nav-link" style="display:none;">Control Panel</a>
       <a href="#" id="tasks-link" class="nav-link" style="display:none;">Tasks</a>
     </nav>
   </header>
@@ -259,6 +284,6 @@
   <datalist id="task-assignee-options"></datalist>
   <footer class="footer-watermark">© Indus Silica Sand</footer>
 
-  <script src="app.js?v=20260508-2"></script>
+  <script src="app.js?v=20260511-7"></script>
 </body>
 </html>

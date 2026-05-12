@@ -47,6 +47,7 @@
     <p>Real-time overview of transport operations.</p>
     <div class="header-actions">
       <span id="role-indicator" class="role-indicator" style="display: none;"></span>
+      <select id="role-switcher" class="nav-link nav-btn" style="display:none;"></select>
       <button type="button" id="task-notifications-btn" class="nav-link nav-btn header-bell-btn" style="display:none;" aria-label="Task notifications" title="Task notifications">
         <span class="bell-icon">🔔</span><span id="task-notification-badge" class="notif-badge" style="display:none;">0</span>
       </button>
@@ -56,8 +57,9 @@
       <a href="/" class="nav-link">← Back to Main</a>
       <a href="/?openTasks=1" class="nav-link">Tasks</a>
       <a href="/expense" id="expense-link" class="nav-link" style="display:none;">Expense Portal</a>
-      <a href="/expected-trucks-page" class="nav-link">Expected Trucks</a>
-      <a href="/customer" class="nav-link">Customer Portal</a>
+      <a href="/expected-trucks-page" id="expected-trucks-link" class="nav-link" style="display:none;">Expected Trucks</a>
+      <a href="/customer" id="customer-portal-link" class="nav-link" style="display:none;">Customer Portal</a>
+      <a href="/admin-control" id="admin-control-link" class="nav-link" style="display:none;">Control Panel</a>
     </nav>
   </header>
 
@@ -139,6 +141,74 @@
     <div id="report-mobile-list" class="mobile-trip-list mobile-only"></div>
   </section>
 
+  <section id="sales-analytics-panel" class="panel wide-panel" style="display: none;">
+    <h2>Accounts Sales Analytics</h2>
+    <div class="filters">
+      <div class="filter-group">
+        <label>From Date:
+          <input type="date" id="sales-from-date" />
+        </label>
+        <label>To Date:
+          <input type="date" id="sales-to-date" />
+        </label>
+        <label>Customer:
+          <input type="text" id="sales-customer-filter" placeholder="Customer name" />
+        </label>
+        <label>Grade:
+          <input type="text" id="sales-grade-filter" placeholder="Grade" />
+        </label>
+        <label>Material:
+          <input type="text" id="sales-material-filter" placeholder="Material" />
+        </label>
+        <label>Status Scope:
+          <select id="sales-status-scope">
+            <option value="BILLED_ONLY">Billing Completed</option>
+            <option value="ALL_BILLED">Billing+Completed+Exited</option>
+            <option value="COMPLETED_EXITED">Completed+Exited</option>
+          </select>
+        </label>
+        <button id="sales-load-btn" type="button">Load Analytics</button>
+      </div>
+    </div>
+    <div id="sales-kpi-cards" class="summary-cards"></div>
+    <div class="table-container">
+      <h3>Trend (Date-wise)</h3>
+      <table>
+        <thead>
+          <tr><th>Date</th><th>Trips</th><th>Qty (MT)</th><th>Amount (₹)</th></tr>
+        </thead>
+        <tbody id="sales-trend-table"></tbody>
+      </table>
+    </div>
+    <div class="table-container">
+      <h3>Grade-wise Sales</h3>
+      <table>
+        <thead>
+          <tr><th>Grade</th><th>Trips</th><th>Qty (MT)</th><th>Amount (₹)</th><th>Avg ₹/MT</th></tr>
+        </thead>
+        <tbody id="sales-grade-table"></tbody>
+      </table>
+    </div>
+    <div class="table-container">
+      <h3>Customer-wise Sales</h3>
+      <table>
+        <thead>
+          <tr><th>Customer</th><th>Trips</th><th>Qty (MT)</th><th>Amount (₹)</th><th>Avg ₹/MT</th></tr>
+        </thead>
+        <tbody id="sales-customer-table"></tbody>
+      </table>
+    </div>
+    <div class="table-container">
+      <h3>Material-wise Sales</h3>
+      <table>
+        <thead>
+          <tr><th>Material</th><th>Trips</th><th>Qty (MT)</th><th>Amount (₹)</th><th>Avg ₹/MT</th></tr>
+        </thead>
+        <tbody id="sales-material-table"></tbody>
+      </table>
+    </div>
+  </section>
+
   <div id="timeline-modal" class="timeline-modal" style="display: none;">
     <div class="timeline-modal-content">
       <div class="timeline-modal-header">
@@ -150,6 +220,6 @@
   </div>
 
   <footer class="footer-watermark">© Indus Silica Sand</footer>
-  <script src="dashboard.js?v=20260508-2"></script>
+  <script src="dashboard.js?v=20260512-1"></script>
 </body>
 </html>

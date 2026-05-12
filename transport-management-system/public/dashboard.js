@@ -1,5 +1,6 @@
 // Role-based access control with PIN authentication
 let userRole = null;
+let employeeSessionRoles = [];
 let refreshInterval;
 let taskNotificationPoll = null;
 let expenseNotificationPoll = null;
@@ -65,6 +66,18 @@ function getCurrentRole() {
     userRole = role;
   }
   return userRole;
+}
+
+function getEmployeeAuthSession() {
+  try {
+    const raw = localStorage.getItem('employeeAuth');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.roles)) return null;
+    return parsed;
+  } catch (_e) {
+    return null;
+  }
 }
 
 function getAuthHeaders() {
@@ -133,6 +146,13 @@ async function loadExpenseUnreadCount() {
 
 // Initialize role from localStorage
 function initializeRole() {
+  const employeeAuth = getEmployeeAuthSession();
+  if (employeeAuth && Array.isArray(employeeAuth.roles) && employeeAuth.roles.length) {
+    const storedRole = getStoredRole();
+    if (!storedRole || !employeeAuth.roles.includes(storedRole)) {
+      localStorage.setItem('userRole', employeeAuth.roles[0]);
+    }
+  }
   const storedRole = getStoredRole();
   if (storedRole) {
     userRole = storedRole;
@@ -174,6 +194,10 @@ function showAppContent() {
   panels.forEach(panel => {
     panel.style.display = 'block';
   });
+  const salesPanel = document.getElementById('sales-analytics-panel');
+  if (salesPanel && !['Accounts', 'Admin', 'Manager'].includes(userRole)) {
+    salesPanel.style.display = 'none';
+  }
   document.getElementById('logout-link').style.display = 'inline-block';
   const roleIndicator = document.getElementById('role-indicator');
   if (roleIndicator && userRole) {
@@ -184,8 +208,37 @@ function showAppContent() {
     taskNotificationsBtn.style.display = 'inline-block';
   }
   const expenseLink = document.getElementById('expense-link');
+  const expectedTrucksLink = document.getElementById('expected-trucks-link');
+  const customerPortalLink = document.getElementById('customer-portal-link');
+  const adminControlLink = document.getElementById('admin-control-link');
+  const canSeeExpense = ['Admin', 'Accounts', 'Manager'].includes(userRole);
+  const canSeeExpectedTrucks = ['Gate', 'Admin', 'Manager', 'Dispatch'].includes(userRole);
+  const canSeeCustomerPortal = ['Admin', 'Manager', 'Dispatch', 'Accounts'].includes(userRole);
+  const canSeeAdminControl = userRole === 'Admin';
   if (expenseLink) {
-    expenseLink.style.display = ['Admin', 'Accounts', 'Manager'].includes(userRole) ? 'inline-block' : 'none';
+    expenseLink.style.display = canSeeExpense ? 'inline-block' : 'none';
+  }
+  if (expectedTrucksLink) {
+    expectedTrucksLink.style.display = canSeeExpectedTrucks ? 'inline-block' : 'none';
+  }
+  if (customerPortalLink) {
+    customerPortalLink.style.display = canSeeCustomerPortal ? 'inline-block' : 'none';
+  }
+  if (adminControlLink) {
+    adminControlLink.style.display = canSeeAdminControl ? 'inline-block' : 'none';
+  }
+  const roleSwitcher = document.getElementById('role-switcher');
+  if (roleSwitcher) {
+    const auth = getEmployeeAuthSession();
+    employeeSessionRoles = Array.isArray(auth?.roles) ? auth.roles.filter((r) => VALID_ROLES.includes(r)) : [];
+    if (employeeSessionRoles.length > 1) {
+      roleSwitcher.innerHTML = employeeSessionRoles.map((r) => `<option value="${r}">Switch: ${r}</option>`).join('');
+      roleSwitcher.value = userRole && employeeSessionRoles.includes(userRole) ? userRole : employeeSessionRoles[0];
+      roleSwitcher.style.display = 'inline-block';
+    } else {
+      roleSwitcher.style.display = 'none';
+      roleSwitcher.innerHTML = '';
+    }
   }
 }
 
@@ -301,6 +354,14 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('logout-link').addEventListener('click', (e) => {
     e.preventDefault();
     logout();
+  });
+  document.getElementById('role-switcher')?.addEventListener('change', (event) => {
+    const selectedRole = event.target.value;
+    const auth = getEmployeeAuthSession();
+    const roles = Array.isArray(auth?.roles) ? auth.roles : [];
+    if (!selectedRole || !roles.includes(selectedRole)) return;
+    localStorage.setItem('userRole', selectedRole);
+    window.location.reload();
   });
   document.getElementById('expense-link')?.addEventListener('click', openExpenseWithSso);
   taskNotificationsBtn?.addEventListener('click', () => {
@@ -1170,6 +1231,96 @@ async function loadReportData() {
     console.error('Failed to load report data:', error);
   }
 }
+
+function formatCurrencyINR(value) {
+  const amount = Number(value || 0);
+  return amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function renderSalesKpis(summary = {}) {
+  const cardsEl = document.getElementById('sales-kpi-cards');
+  if (!cardsEl) return;
+  const cards = [
+    { label: 'Total Trips', value: Number(summary.total_trips || 0) },
+    { label: 'Total Qty (MT)', value: formatWeightMT(summary.total_qty_mt || 0) },
+    { label: 'Taxable (₹)', value: formatCurrencyINR(summary.total_taxable_amount || 0) },
+    { label: 'GST (₹)', value: formatCurrencyINR(summary.total_gst_amount || 0) },
+    { label: 'Total Sales (₹)', value: formatCurrencyINR(summary.total_sales_amount || 0) },
+    { label: 'Avg Realization (₹/MT)', value: formatCurrencyINR(summary.avg_realization_per_mt || 0) }
+  ];
+  cardsEl.innerHTML = cards
+    .map((card) => `<article class="summary-card card-light-blue"><h3>${escapeHtml(card.label)}</h3><p>${escapeHtml(String(card.value))}</p></article>`)
+    .join('');
+}
+
+function renderSimpleAggregateTable(tableId, rows, nameKey) {
+  const tableBody = document.getElementById(tableId);
+  if (!tableBody) return;
+  if (!Array.isArray(rows) || !rows.length) {
+    tableBody.innerHTML = '<tr><td colspan="5">No data</td></tr>';
+    return;
+  }
+  tableBody.innerHTML = rows.map((row) => `
+    <tr>
+      <td>${escapeHtml(row[nameKey] || row.key || '-')}</td>
+      <td>${Number(row.trips || 0)}</td>
+      <td>${formatWeightMT(row.qty_mt || 0)}</td>
+      <td>${formatCurrencyINR(row.total_amount || 0)}</td>
+      <td>${formatCurrencyINR(row.avg_rate_per_mt || 0)}</td>
+    </tr>
+  `).join('');
+}
+
+function renderTrendTable(rows = []) {
+  const tableBody = document.getElementById('sales-trend-table');
+  if (!tableBody) return;
+  if (!rows.length) {
+    tableBody.innerHTML = '<tr><td colspan="4">No data</td></tr>';
+    return;
+  }
+  tableBody.innerHTML = rows.map((row) => `
+    <tr>
+      <td>${escapeHtml(row.date || '-')}</td>
+      <td>${Number(row.trips || 0)}</td>
+      <td>${formatWeightMT(row.qty_mt || 0)}</td>
+      <td>${formatCurrencyINR(row.total_amount || 0)}</td>
+    </tr>
+  `).join('');
+}
+
+async function loadSalesAnalytics() {
+  if (!['Accounts', 'Admin', 'Manager'].includes(getCurrentRole())) return;
+  const fromDate = document.getElementById('sales-from-date')?.value || '';
+  const toDate = document.getElementById('sales-to-date')?.value || '';
+  const customer = document.getElementById('sales-customer-filter')?.value.trim() || '';
+  const grade = document.getElementById('sales-grade-filter')?.value.trim() || '';
+  const material = document.getElementById('sales-material-filter')?.value.trim() || '';
+  const statusScope = document.getElementById('sales-status-scope')?.value || 'BILLED_ONLY';
+  const query = new URLSearchParams();
+  if (fromDate) query.set('from_date', fromDate);
+  if (toDate) query.set('to_date', toDate);
+  if (customer) query.set('customer', customer);
+  if (grade) query.set('grade', grade);
+  if (material) query.set('material', material);
+  if (statusScope) query.set('status_scope', statusScope);
+  const loadBtn = document.getElementById('sales-load-btn');
+  if (loadBtn) loadBtn.disabled = true;
+  try {
+    const response = await fetch(`/accounts/sales-analytics?${query.toString()}`, { headers: getAuthHeaders() });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Failed to load sales analytics');
+    renderSalesKpis(payload.summary || {});
+    renderTrendTable(payload.trend || []);
+    renderSimpleAggregateTable('sales-grade-table', payload.grade_wise || [], 'key');
+    renderSimpleAggregateTable('sales-customer-table', payload.customer_wise || [], 'key');
+    renderSimpleAggregateTable('sales-material-table', payload.material_wise || [], 'key');
+  } catch (error) {
+    console.error('Failed to load sales analytics', error);
+  } finally {
+    if (loadBtn) loadBtn.disabled = false;
+  }
+}
+
 function updateTimeMetrics() {
   const totalTimeElements = document.querySelectorAll('[data-time-scope="active"][data-time-kind="total"]');
   totalTimeElements.forEach(element => {
@@ -1241,6 +1392,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   startAutoRefresh();
   loadReportData();
+  loadSalesAnalytics();
 
   // Report-only filters and actions (manual refresh, no 5s auto refresh).
   document.getElementById('report-from-date').addEventListener('change', applyReportFilters);
@@ -1249,6 +1401,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('report-search').addEventListener('input', applyReportFilters);
   document.getElementById('report-refresh-btn').addEventListener('click', loadReportData);
   document.getElementById('report-export-btn').addEventListener('click', exportReportCsv);
+  document.getElementById('sales-load-btn')?.addEventListener('click', loadSalesAnalytics);
 });
 
 // Clean up when page unloads
