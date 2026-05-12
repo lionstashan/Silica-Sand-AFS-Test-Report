@@ -233,8 +233,7 @@ function renderSalesKpis(summary = {}) {
     { label: 'Taxable (₹)', value: formatCurrencyINR(summary.total_taxable_amount || 0) },
     { label: 'GST (₹)', value: formatCurrencyINR(summary.total_gst_amount || 0) },
     { label: 'Total Sales (₹)', value: formatCurrencyINR(summary.total_sales_amount || 0) },
-    { label: 'Avg Realization (₹/MT)', value: formatCurrencyINR(summary.avg_realization_per_mt || 0) },
-    { label: 'AFS Missing Trips', value: Number(summary.afs_missing_count || 0) }
+    { label: 'Avg Realization (₹/MT)', value: formatCurrencyINR(summary.avg_realization_per_mt || 0) }
   ];
   cardsEl.innerHTML = cards
     .map((card) => `<article class="summary-card card-light-blue"><h3>${escapeHtml(card.label)}</h3><p>${escapeHtml(String(card.value))}</p></article>`)

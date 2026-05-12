@@ -56,6 +56,19 @@ function showMessage(msg, ok = true) {
   el.style.color = ok ? '#047857' : '#b91c1c';
 }
 
+function showErrorModal(message) {
+  const modal = document.getElementById('reports-error-modal');
+  const text = document.getElementById('reports-error-modal-text');
+  if (!modal || !text) return;
+  text.textContent = message || 'Something went wrong';
+  modal.style.display = 'flex';
+}
+
+function closeErrorModal() {
+  const modal = document.getElementById('reports-error-modal');
+  if (modal) modal.style.display = 'none';
+}
+
 function escapeHtml(value) {
   return String(value || '')
     .replace(/&/g, '&amp;')
@@ -225,7 +238,7 @@ async function submitReport() {
     return;
   }
   const payload = {
-    report_date: document.getElementById('r-date').value,
+    report_date: normalizeDateInputValue(document.getElementById('r-date').value) || new Date().toISOString().slice(0, 10),
     truck_number: document.getElementById('r-truck').value.trim(),
     trip_id: document.getElementById('r-trip-id').value ? Number(document.getElementById('r-trip-id').value) : null,
     is_generic: document.getElementById('r-generic').value === 'true',
@@ -392,6 +405,7 @@ async function init() {
       await submitReport();
     } catch (error) {
       showMessage(error.message, false);
+      showErrorModal(error.message);
     }
   });
   document.getElementById('load-reports-btn').addEventListener('click', async () => {
@@ -431,12 +445,18 @@ async function init() {
     }
   });
   document.getElementById('r-afs-mult').addEventListener('input', computeTotals);
+  document.getElementById('reports-error-ok-btn')?.addEventListener('click', closeErrorModal);
+  document.getElementById('reports-error-close-btn')?.addEventListener('click', closeErrorModal);
+  document.getElementById('reports-error-modal')?.addEventListener('click', (e) => {
+    if (e.target?.id === 'reports-error-modal') closeErrorModal();
+  });
   renderLineItems();
   try {
     await loadMeta();
     await loadReports();
   } catch (error) {
     showMessage(error.message, false);
+    showErrorModal(error.message);
   }
 }
 

@@ -146,6 +146,17 @@
     <p id="reports-message"></p>
   </section>
 
-  <script src="/reports.js?v=20260513-2"></script>
+  <div id="reports-error-modal" class="timeline-modal" style="display:none;">
+    <div class="timeline-modal-content" style="max-width: 520px;">
+      <h3 style="margin-top:0;">Action Required</h3>
+      <p id="reports-error-modal-text" style="margin-bottom:14px;"></p>
+      <div class="workflow-row" style="justify-content:flex-end;">
+        <button type="button" id="reports-error-ok-btn">OK</button>
+        <button type="button" id="reports-error-close-btn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/reports.js?v=20260513-3"></script>
 </body>
 </html>
