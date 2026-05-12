@@ -1744,6 +1744,9 @@ app.get('/accounts/sales-analytics', async (req, res) => {
   const customer = normalizeEmpty(req.query.customer);
   const grade = normalizeEmpty(req.query.grade);
   const material = normalizeEmpty(req.query.material);
+  const afsMinRaw = normalizeEmpty(req.query.afs_min);
+  const afsMaxRaw = normalizeEmpty(req.query.afs_max);
+  const afsBand = normalizeEmpty(req.query.afs_band);
   const statusScope = normalizeEmpty(req.query.status_scope) || 'BILLED_ONLY';
 
   let statuses = ['BILLING_COMPLETED'];
@@ -1777,6 +1780,16 @@ app.get('/accounts/sales-analytics', async (req, res) => {
     params.push(material);
     conditions.push(`lower(material_type) = lower($${params.length})`);
   }
+  const afsMin = toFiniteNumberOrNull(afsMinRaw);
+  const afsMax = toFiniteNumberOrNull(afsMaxRaw);
+  if (afsMin !== null) {
+    params.push(afsMin);
+    conditions.push(`COALESCE(afs_value_used, NULL) >= $${params.length}`);
+  }
+  if (afsMax !== null) {
+    params.push(afsMax);
+    conditions.push(`COALESCE(afs_value_used, NULL) <= $${params.length}`);
+  }
 
   const baseSql = `
     WITH filtered AS (
@@ -1791,6 +1804,7 @@ app.get('/accounts/sales-analytics', async (req, res) => {
         COALESCE(taxable_amount, 0)::numeric AS taxable_amount,
         COALESCE(gst_amount, 0)::numeric AS gst_amount,
         COALESCE(total_amount, 0)::numeric AS total_amount,
+        afs_value_used::numeric AS afs_value_used,
         status,
         COALESCE(billing_calculated_at, out_time, updated_at) AS metric_ts
       FROM trips
@@ -1802,23 +1816,27 @@ app.get('/accounts/sales-analytics', async (req, res) => {
   try {
     const filtered = await pool.query(baseSql, params);
     const rows = filtered.rows;
+    const scopedRows = afsBand
+      ? rows.filter((row) => toAfsBand(row.afs_value_used) === afsBand)
+      : rows;
 
     const toNum = (v) => Number(v || 0);
-    const summary = rows.reduce((acc, row) => {
+    const summary = scopedRows.reduce((acc, row) => {
       acc.total_trips += 1;
       acc.total_qty_mt += toNum(row.qty_mt);
       acc.total_taxable_amount += toNum(row.taxable_amount);
       acc.total_gst_amount += toNum(row.gst_amount);
       acc.total_sales_amount += toNum(row.total_amount);
+      if (toFiniteNumberOrNull(row.afs_value_used) === null) acc.afs_missing_count += 1;
       return acc;
-    }, { total_trips: 0, total_qty_mt: 0, total_taxable_amount: 0, total_gst_amount: 0, total_sales_amount: 0 });
+    }, { total_trips: 0, total_qty_mt: 0, total_taxable_amount: 0, total_gst_amount: 0, total_sales_amount: 0, afs_missing_count: 0 });
     summary.avg_realization_per_mt = summary.total_qty_mt > 0
       ? Number((summary.total_sales_amount / summary.total_qty_mt).toFixed(2))
       : 0;
 
     const aggregateBy = (key) => {
       const map = new Map();
-      rows.forEach((row) => {
+      scopedRows.forEach((row) => {
         const name = String(row[key] || 'Unspecified');
         const current = map.get(name) || { key: name, qty_mt: 0, total_amount: 0, trips: 0 };
         current.qty_mt += toNum(row.qty_mt);
@@ -1839,9 +1857,32 @@ app.get('/accounts/sales-analytics', async (req, res) => {
     const gradeWise = aggregateBy('grade');
     const customerWise = aggregateBy('customer_name');
     const materialWise = aggregateBy('material_type');
+    const afsWise = aggregateBy('afs_value_used').map((item) => ({
+      ...item,
+      key: item.key === 'Unspecified' ? 'Missing' : item.key
+    }));
+
+    const afsBandOrder = ['<30', '30-35', '35-40', '40-45', '45-50', '50-55', '55-60', '60-65', '65-70', '70-75', '75-80', '80-85', '>85', 'Missing'];
+    const afsBandMap = new Map();
+    scopedRows.forEach((row) => {
+      const band = toAfsBand(row.afs_value_used);
+      const current = afsBandMap.get(band) || { key: band, qty_mt: 0, total_amount: 0, trips: 0 };
+      current.qty_mt += toNum(row.qty_mt);
+      current.total_amount += toNum(row.total_amount);
+      current.trips += 1;
+      afsBandMap.set(band, current);
+    });
+    const afsBandWise = afsBandOrder
+      .map((band) => afsBandMap.get(band) || { key: band, qty_mt: 0, total_amount: 0, trips: 0 })
+      .map((item) => ({
+        ...item,
+        qty_mt: Number(item.qty_mt.toFixed(3)),
+        total_amount: Number(item.total_amount.toFixed(2)),
+        avg_rate_per_mt: item.qty_mt > 0 ? Number((item.total_amount / item.qty_mt).toFixed(2)) : 0
+      }));
 
     const trendMap = new Map();
-    rows.forEach((row) => {
+    scopedRows.forEach((row) => {
       const d = new Date(row.metric_ts);
       const key = Number.isNaN(d.getTime()) ? 'Unknown' : new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(d);
       const current = trendMap.get(key) || { date: key, qty_mt: 0, total_amount: 0, trips: 0 };
@@ -1860,7 +1901,7 @@ app.get('/accounts/sales-analytics', async (req, res) => {
 
     return res.json({
       scope: { status_scope: statusScope, statuses },
-      filters: { from_date: fromDate, to_date: toDate, customer, grade, material },
+      filters: { from_date: fromDate, to_date: toDate, customer, grade, material, afs_min: afsMinRaw, afs_max: afsMaxRaw, afs_band: afsBand },
       summary: {
         ...summary,
         total_qty_mt: Number(summary.total_qty_mt.toFixed(3)),
@@ -1871,7 +1912,9 @@ app.get('/accounts/sales-analytics', async (req, res) => {
       trend,
       grade_wise: gradeWise,
       customer_wise: customerWise,
-      material_wise: materialWise
+      material_wise: materialWise,
+      afs_wise: afsWise,
+      afs_band_wise: afsBandWise
     });
   } catch (error) {
     console.error('Failed to load sales analytics', error);
@@ -1942,6 +1985,9 @@ app.put('/trip/:id', async (req, res) => {
     'gst_amount',
     'total_amount',
     'net_weight_snapshot_mt',
+    'afs_value_used',
+    'afs_report_id',
+    'afs_linked_at',
     'billing_calculated_at',
     'billing_calculated_by',
     'gross_weight_attempts',
@@ -6043,6 +6089,21 @@ function canEditReports(role) {
   return ['LAB', 'Admin'].includes(role);
 }
 
+function toAfsBand(value) {
+  const n = toFiniteNumberOrNull(value);
+  if (n === null) return 'Missing';
+  if (n < 30) return '<30';
+  if (n > 85) return '>85';
+  const ranges = [30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85];
+  for (let i = 0; i < ranges.length - 1; i += 1) {
+    const min = ranges[i];
+    const max = ranges[i + 1];
+    if (n >= min && n < max) return `${min}-${max}`;
+  }
+  if (n === 85) return '80-85';
+  return 'Missing';
+}
+
 function normalizeReportDateValue(value) {
   if (!value) return null;
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
@@ -6174,6 +6235,23 @@ async function attachFinalizedReportSnapshot(client, reportRow) {
     ]
   );
   return insert.rows[0]?.id || null;
+}
+
+async function linkAfsSnapshotToTrip(client, reportRow) {
+  if (!reportRow || !reportRow.trip_id) return;
+  await client.query(
+    `UPDATE trips
+     SET afs_value_used = $2,
+         afs_report_id = $3,
+         afs_linked_at = NOW(),
+         updated_at = NOW()
+     WHERE id = $1`,
+    [
+      reportRow.trip_id,
+      toFiniteNumberOrNull(reportRow.total_afs),
+      reportRow.id
+    ]
+  );
 }
 
 function normalizeLabLineItems(value) {
@@ -6618,6 +6696,7 @@ app.post('/api/reports/:id/finalize', async (req, res) => {
        VALUES ($1,'FINALIZED',$2,$3,$4::jsonb,$5::jsonb,$6)`,
       [id, auth.role, auth.user?.full_name || auth.user?.username || null, JSON.stringify(row), JSON.stringify(result.rows[0]), req.requestId]
     );
+    await linkAfsSnapshotToTrip(client, result.rows[0]);
     await attachFinalizedReportSnapshot(client, result.rows[0]);
     await client.query('COMMIT');
     return res.json(result.rows[0]);

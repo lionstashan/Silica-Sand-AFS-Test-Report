@@ -137,6 +137,12 @@ async function initDb() {
     ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1
   `);
   await pool.query(`
+    ALTER TABLE trips
+    ADD COLUMN IF NOT EXISTS afs_value_used NUMERIC,
+    ADD COLUMN IF NOT EXISTS afs_report_id INTEGER,
+    ADD COLUMN IF NOT EXISTS afs_linked_at TIMESTAMPTZ
+  `);
+  await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_trips_status_updated_at
     ON trips(status, updated_at DESC)
   `);

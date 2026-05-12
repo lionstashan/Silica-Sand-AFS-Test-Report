@@ -233,7 +233,8 @@ function renderSalesKpis(summary = {}) {
     { label: 'Taxable (₹)', value: formatCurrencyINR(summary.total_taxable_amount || 0) },
     { label: 'GST (₹)', value: formatCurrencyINR(summary.total_gst_amount || 0) },
     { label: 'Total Sales (₹)', value: formatCurrencyINR(summary.total_sales_amount || 0) },
-    { label: 'Avg Realization (₹/MT)', value: formatCurrencyINR(summary.avg_realization_per_mt || 0) }
+    { label: 'Avg Realization (₹/MT)', value: formatCurrencyINR(summary.avg_realization_per_mt || 0) },
+    { label: 'AFS Missing Trips', value: Number(summary.afs_missing_count || 0) }
   ];
   cardsEl.innerHTML = cards
     .map((card) => `<article class="summary-card card-light-blue"><h3>${escapeHtml(card.label)}</h3><p>${escapeHtml(String(card.value))}</p></article>`)
@@ -304,6 +305,9 @@ async function loadSalesAnalytics() {
   const customer = document.getElementById('sales-customer-filter')?.value.trim() || '';
   const grade = document.getElementById('sales-grade-filter')?.value.trim() || '';
   const material = document.getElementById('sales-material-filter')?.value.trim() || '';
+  const afsMin = document.getElementById('sales-afs-min-filter')?.value.trim() || '';
+  const afsMax = document.getElementById('sales-afs-max-filter')?.value.trim() || '';
+  const afsBand = document.getElementById('sales-afs-band-filter')?.value || '';
   const statusScope = document.getElementById('sales-status-scope')?.value || 'BILLED_ONLY';
   const query = new URLSearchParams();
   if (fromDate) query.set('from_date', fromDate);
@@ -311,6 +315,9 @@ async function loadSalesAnalytics() {
   if (customer) query.set('customer', customer);
   if (grade) query.set('grade', grade);
   if (material) query.set('material', material);
+  if (afsMin) query.set('afs_min', afsMin);
+  if (afsMax) query.set('afs_max', afsMax);
+  if (afsBand) query.set('afs_band', afsBand);
   if (statusScope) query.set('status_scope', statusScope);
 
   const loadBtn = document.getElementById('sales-load-btn');
@@ -325,15 +332,19 @@ async function loadSalesAnalytics() {
     renderBarChart('sales-grade-chart', payload.grade_wise || [], 'key');
     renderBarChart('sales-customer-chart', payload.customer_wise || [], 'key');
     renderBarChart('sales-material-chart', payload.material_wise || [], 'key');
+    renderBarChart('sales-afs-band-chart', payload.afs_band_wise || [], 'key');
     renderSimpleAggregateTable('sales-grade-table', payload.grade_wise || [], 'key');
     renderSimpleAggregateTable('sales-customer-table', payload.customer_wise || [], 'key');
     renderSimpleAggregateTable('sales-material-table', payload.material_wise || [], 'key');
+    renderSimpleAggregateTable('sales-afs-band-table', payload.afs_band_wise || [], 'key');
   } catch (error) {
     alert(error.message || 'Failed to load sales analytics');
     renderBarChart('sales-trend-chart', [], 'date');
     renderBarChart('sales-grade-chart', [], 'key');
     renderBarChart('sales-customer-chart', [], 'key');
     renderBarChart('sales-material-chart', [], 'key');
+    renderBarChart('sales-afs-band-chart', [], 'key');
+    renderSimpleAggregateTable('sales-afs-band-table', [], 'key');
   } finally {
     if (loadBtn) loadBtn.disabled = false;
   }

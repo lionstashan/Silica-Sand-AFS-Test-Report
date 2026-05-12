@@ -40,6 +40,31 @@
         <label>Material:
           <input type="text" id="sales-material-filter" placeholder="Material" />
         </label>
+        <label>AFS Min:
+          <input type="number" id="sales-afs-min-filter" step="0.01" placeholder="e.g. 35" />
+        </label>
+        <label>AFS Max:
+          <input type="number" id="sales-afs-max-filter" step="0.01" placeholder="e.g. 60" />
+        </label>
+        <label>AFS Band:
+          <select id="sales-afs-band-filter">
+            <option value="">All</option>
+            <option value="<30">&lt;30</option>
+            <option value="30-35">30-35</option>
+            <option value="35-40">35-40</option>
+            <option value="40-45">40-45</option>
+            <option value="45-50">45-50</option>
+            <option value="50-55">50-55</option>
+            <option value="55-60">55-60</option>
+            <option value="60-65">60-65</option>
+            <option value="65-70">65-70</option>
+            <option value="70-75">70-75</option>
+            <option value="75-80">75-80</option>
+            <option value="80-85">80-85</option>
+            <option value=">85">&gt;85</option>
+            <option value="Missing">Missing</option>
+          </select>
+        </label>
         <label>Status Scope:
           <select id="sales-status-scope">
             <option value="BILLED_ONLY">Billing Completed</option>
@@ -190,9 +215,38 @@
           </table>
         </div>
       </article>
+
+      <article class="analytics-module" data-module="afs-band-chart" data-tab="operations">
+        <div class="analytics-module-header">
+          <h3>AFS Band-wise Total ₹</h3>
+          <div class="analytics-module-actions">
+            <button type="button" class="workflow-btn analytics-move-up">↑</button>
+            <button type="button" class="workflow-btn analytics-move-down">↓</button>
+          </div>
+        </div>
+        <div id="sales-afs-band-chart" class="sales-bar-chart"></div>
+      </article>
+
+      <article class="analytics-module" data-module="afs-band-table" data-tab="operations">
+        <div class="analytics-module-header">
+          <h3>AFS Band-wise Sales</h3>
+          <div class="analytics-module-actions">
+            <button type="button" class="workflow-btn analytics-move-up">↑</button>
+            <button type="button" class="workflow-btn analytics-move-down">↓</button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr><th>AFS Band</th><th>Trips</th><th>Qty (MT)</th><th>Amount (₹)</th><th>Avg ₹/MT</th></tr>
+            </thead>
+            <tbody id="sales-afs-band-table"></tbody>
+          </table>
+        </div>
+      </article>
     </div>
   </section>
 
-  <script src="accounts-analytics.js?v=20260513-2"></script>
+  <script src="accounts-analytics.js?v=20260513-3"></script>
 </body>
 </html>
