@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const { initDb, pool } = require('../db');
 
 const BCRYPT_COST = Number(process.env.BCRYPT_COST || 10);
+const REQUIRED_APP_ENV = 'staging';
 
 function isoHoursAgo(hours) {
   return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
@@ -370,8 +371,33 @@ async function printSummary() {
 }
 
 async function run() {
+  const appEnv = String(process.env.APP_ENV || '').trim().toLowerCase();
+  const nodeEnv = String(process.env.NODE_ENV || '').trim().toLowerCase();
+  const dbUrl = String(process.env.DATABASE_URL || '');
+  const dbUrlLc = dbUrl.toLowerCase();
+
+  if (appEnv !== REQUIRED_APP_ENV) {
+    console.error(`Refusing to seed. APP_ENV must be '${REQUIRED_APP_ENV}'. Current APP_ENV='${process.env.APP_ENV || ''}'`);
+    process.exit(1);
+  }
+  if (nodeEnv === 'production') {
+    console.error('Refusing to seed. NODE_ENV=production is blocked for this script.');
+    process.exit(1);
+  }
+  if (!dbUrl) {
+    console.error('Refusing to seed. DATABASE_URL is missing.');
+    process.exit(1);
+  }
+  if (dbUrlLc.includes('prod') || dbUrlLc.includes('production')) {
+    console.error('Refusing to seed. DATABASE_URL appears to target production.');
+    process.exit(1);
+  }
   if (process.env.CONFIRM_UAT_SEED !== 'YES') {
-    console.error('Refusing to seed. Set CONFIRM_UAT_SEED=YES to run.');
+    console.error("Refusing to seed. Set CONFIRM_UAT_SEED=YES and APP_ENV=staging to run.");
+    process.exit(1);
+  }
+  if (process.env.CONFIRM_DB_TARGET !== 'STAGING_DB') {
+    console.error("Refusing to seed. Set CONFIRM_DB_TARGET=STAGING_DB after verifying 'npm run db:whereami'.");
     process.exit(1);
   }
   await initDb();

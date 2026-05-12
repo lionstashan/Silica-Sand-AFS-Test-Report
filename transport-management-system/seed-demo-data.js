@@ -55,6 +55,27 @@ function withDefaults(trip) {
 }
 
 async function run() {
+  const appEnv = String(process.env.APP_ENV || '').trim().toLowerCase();
+  const nodeEnv = String(process.env.NODE_ENV || '').trim().toLowerCase();
+  const dbUrl = String(process.env.DATABASE_URL || '');
+  const dbUrlLc = dbUrl.toLowerCase();
+
+  if (appEnv !== 'staging' && appEnv !== 'local') {
+    throw new Error(`Safety check failed: APP_ENV must be 'staging' or 'local'. Current APP_ENV='${process.env.APP_ENV || ''}'`);
+  }
+  if (nodeEnv === 'production') {
+    throw new Error('Safety check failed: NODE_ENV=production is blocked for seed-demo-data.');
+  }
+  if (!dbUrl) {
+    throw new Error('Safety check failed: DATABASE_URL is missing.');
+  }
+  if (dbUrlLc.includes('prod') || dbUrlLc.includes('production')) {
+    throw new Error('Safety check failed: DATABASE_URL appears to target production.');
+  }
+  if (process.env.CONFIRM_DEMO_SEED !== 'YES') {
+    throw new Error("Safety check failed: set CONFIRM_DEMO_SEED=YES after verifying target with 'npm run db:whereami'.");
+  }
+
   await initDb();
   const now = new Date();
   const trips = [

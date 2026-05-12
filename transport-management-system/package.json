@@ -8,7 +8,8 @@
     "dev": "nodemon server.js",
     "seed:demo": "node seed-demo-data.js",
     "seed:uat": "node scripts/seed-uat-data.js",
-    "validate:staging": "node scripts/validate-staging-readiness.js"
+    "validate:staging": "node scripts/validate-staging-readiness.js",
+    "db:whereami": "node scripts/db-whereami.js"
   },
   "author": "",
   "license": "MIT",

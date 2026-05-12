@@ -21,6 +21,18 @@ Last updated: 2026-05-12
 3. Reduced hardcoded transporter dependency:
 - Transport UI and Customer UI now default to master-driven transporter options.
 
+4. Added DB target safety guardrails:
+- `npm run db:whereami` to print DB target fingerprint/host/db before any write script.
+- `seed:uat` now requires:
+  - `APP_ENV=staging`
+  - `CONFIRM_UAT_SEED=YES`
+  - `CONFIRM_DB_TARGET=STAGING_DB`
+  - blocks when `NODE_ENV=production` or DB URL appears production-like.
+- `seed:demo` now requires:
+  - `APP_ENV=staging` or `APP_ENV=local`
+  - `CONFIRM_DEMO_SEED=YES`
+  - blocks when `NODE_ENV=production` or DB URL appears production-like.
+
 ## Pending execution checks
 
 1. Run on staging:
@@ -35,4 +47,3 @@ Last updated: 2026-05-12
 
 3. Confirm no regression in production-only data:
 - Use staging DB/service only for seeding.
-

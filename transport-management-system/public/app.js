@@ -1227,12 +1227,14 @@ function applyRoleUI() {
   const customerPortalLink = document.getElementById('customer-portal-link');
   const expenseLink = document.getElementById('expense-link');
   const expectedTrucksLink = document.getElementById('expected-trucks-link');
+  const analyticsLink = document.getElementById('accounts-analytics-link');
   const adminControlLink = document.getElementById('admin-control-link');
   const canSeeTasks = !!role;
   const canSeeDashboard = ['Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Manager', 'Admin'].includes(role);
   const canSeeCustomerPortal = ['Admin', 'Manager', 'Dispatch', 'Accounts'].includes(role);
   const canSeeExpectedTrucks = ['Gate', 'Admin', 'Manager', 'Dispatch'].includes(role);
   const canSeeExpense = ['Admin', 'Accounts', 'Manager'].includes(role);
+  const canSeeAnalytics = ['Admin', 'Accounts', 'Manager'].includes(role);
   const canSeeAdminControl = role === 'Admin';
 
   if (gatePanel && !canCreate) {
@@ -1250,6 +1252,9 @@ function applyRoleUI() {
   }
   if (expectedTrucksLink) {
     expectedTrucksLink.style.display = canSeeExpectedTrucks ? 'inline-block' : 'none';
+  }
+  if (analyticsLink) {
+    analyticsLink.style.display = canSeeAnalytics ? 'inline-block' : 'none';
   }
   if (adminControlLink) {
     adminControlLink.style.display = canSeeAdminControl ? 'inline-block' : 'none';
@@ -3914,6 +3919,14 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', () => {
       showPINEntry(btn.getAttribute('data-role'));
     });
+  });
+  document.getElementById('show-legacy-login-btn')?.addEventListener('click', () => {
+    const legacyWrap = document.getElementById('legacy-role-buttons');
+    const toggleBtn = document.getElementById('show-legacy-login-btn');
+    if (!legacyWrap || !toggleBtn) return;
+    const isHidden = legacyWrap.style.display === 'none';
+    legacyWrap.style.display = isHidden ? 'grid' : 'none';
+    toggleBtn.textContent = isHidden ? 'Hide Legacy PIN Login' : 'Use Legacy PIN Login';
   });
 
   document.getElementById('pin-submit-btn').addEventListener('click', () => {

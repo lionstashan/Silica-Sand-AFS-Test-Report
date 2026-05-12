@@ -195,9 +195,7 @@ function showAppContent() {
     panel.style.display = 'block';
   });
   const salesPanel = document.getElementById('sales-analytics-panel');
-  if (salesPanel && !['Accounts', 'Admin', 'Manager'].includes(userRole)) {
-    salesPanel.style.display = 'none';
-  }
+  if (salesPanel) salesPanel.style.display = 'none';
   document.getElementById('logout-link').style.display = 'inline-block';
   const roleIndicator = document.getElementById('role-indicator');
   if (roleIndicator && userRole) {
@@ -208,15 +206,20 @@ function showAppContent() {
     taskNotificationsBtn.style.display = 'inline-block';
   }
   const expenseLink = document.getElementById('expense-link');
+  const analyticsLink = document.getElementById('accounts-analytics-link');
   const expectedTrucksLink = document.getElementById('expected-trucks-link');
   const customerPortalLink = document.getElementById('customer-portal-link');
   const adminControlLink = document.getElementById('admin-control-link');
   const canSeeExpense = ['Admin', 'Accounts', 'Manager'].includes(userRole);
+  const canSeeAnalytics = ['Admin', 'Accounts', 'Manager'].includes(userRole);
   const canSeeExpectedTrucks = ['Gate', 'Admin', 'Manager', 'Dispatch'].includes(userRole);
   const canSeeCustomerPortal = ['Admin', 'Manager', 'Dispatch', 'Accounts'].includes(userRole);
   const canSeeAdminControl = userRole === 'Admin';
   if (expenseLink) {
     expenseLink.style.display = canSeeExpense ? 'inline-block' : 'none';
+  }
+  if (analyticsLink) {
+    analyticsLink.style.display = canSeeAnalytics ? 'inline-block' : 'none';
   }
   if (expectedTrucksLink) {
     expectedTrucksLink.style.display = canSeeExpectedTrucks ? 'inline-block' : 'none';
@@ -1423,7 +1426,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   startAutoRefresh();
   loadReportData();
-  loadSalesAnalytics();
 
   // Report-only filters and actions (manual refresh, no 5s auto refresh).
   document.getElementById('report-from-date').addEventListener('change', applyReportFilters);
@@ -1432,7 +1434,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('report-search').addEventListener('input', applyReportFilters);
   document.getElementById('report-refresh-btn').addEventListener('click', loadReportData);
   document.getElementById('report-export-btn').addEventListener('click', exportReportCsv);
-  document.getElementById('sales-load-btn')?.addEventListener('click', loadSalesAnalytics);
 });
 
 // Clean up when page unloads
