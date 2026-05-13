@@ -36,11 +36,10 @@
   function getAuthHeaders() {
     const role = getCurrentRole();
     const token = getEmployeeToken();
-    if (!role || !token) return {};
-    return {
-      'x-user-role': role,
-      'x-user-token': token
-    };
+    if (!token) return {};
+    const headers = { 'x-user-token': token };
+    if (role) headers['x-user-role'] = role;
+    return headers;
   }
 
   function getNextParam(pathname) {
@@ -54,9 +53,8 @@
   }
 
   function requireEmployeeSession(pathname) {
-    const role = getCurrentRole();
     const token = getEmployeeToken();
-    if (!role || !token) {
+    if (!token) {
       redirectToEmployeeLogin(pathname);
       return false;
     }

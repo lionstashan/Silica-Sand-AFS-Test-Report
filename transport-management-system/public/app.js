@@ -218,13 +218,15 @@ function getAuthHeaders() {
   if (shared && typeof shared === 'object' && Object.keys(shared).length) return shared;
   const role = getCurrentRole();
   const token = localStorage.getItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
-  if (!role || !token) return {};
-  return { 'x-user-role': role, 'x-user-token': token };
+  if (!token) return {};
+  const headers = { 'x-user-token': token };
+  if (role) headers['x-user-role'] = role;
+  return headers;
 }
 
 function hasEmployeeAuth() {
   const headers = getAuthHeaders();
-  return !!headers['x-user-token'] && !!headers['x-user-role'];
+  return !!headers['x-user-token'];
 }
 
 async function ensureExpenseTokenForRole() {
@@ -1405,6 +1407,16 @@ async function autoOpenTasksFromQuery() {
 
 function initializeRole() {
   const employeeAuth = getEmployeeAuthSession();
+  const token = localStorage.getItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
+  if (!token) {
+    localStorage.removeItem('userRole');
+    localStorage.removeItem('employeeAuth');
+    userRole = null;
+    hideAppContent();
+    showLoginModal();
+    showEmployeeLoginMessage('Please login to continue');
+    return;
+  }
   if (employeeAuth && Array.isArray(employeeAuth.roles) && employeeAuth.roles.length) {
     const storedRole = getStoredRole();
     if (!storedRole || !employeeAuth.roles.includes(storedRole)) {
