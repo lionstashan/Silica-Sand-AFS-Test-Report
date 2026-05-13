@@ -647,7 +647,8 @@ async function buildPermissionsByRole(roles) {
     });
     normalizedRoles.forEach((role) => {
       if (grouped[role] && grouped[role].size) {
-        matrix[role] = Array.from(grouped[role]);
+        const merged = new Set([...(matrix[role] || []), ...Array.from(grouped[role])]);
+        matrix[role] = Array.from(merged);
       }
     });
   } catch (error) {
@@ -2002,6 +2003,8 @@ app.post('/trip', async (req, res) => {
 });
 
 app.get('/trips', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
   try {
     const result = await pool.query('SELECT * FROM trips ORDER BY updated_at DESC, id DESC');
     res.json(result.rows);
