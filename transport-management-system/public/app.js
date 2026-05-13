@@ -1412,8 +1412,12 @@ function initializeRole() {
     localStorage.removeItem('userRole');
     localStorage.removeItem('employeeAuth');
     userRole = null;
-    hideAppContent();
-    showLoginModal();
+    const panels = document.querySelectorAll('.panel');
+    panels.forEach((panel) => {
+      panel.style.display = 'none';
+    });
+    document.getElementById('logout-link').style.display = 'none';
+    showRoleSelection();
     showEmployeeLoginMessage('Please login to continue');
     return;
   }
