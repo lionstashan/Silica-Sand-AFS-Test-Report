@@ -3376,15 +3376,25 @@ function applyFilters() {
 }
 
 async function loadTrips() {
+  const headers = getAuthHeaders();
+  if (!headers['x-user-token']) {
+    allTrips = [];
+    applyFilters();
+    return;
+  }
   try {
-    const response = await fetch('/trips');
+    const response = await fetch('/trips', { headers });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || 'Failed to load trips');
+    }
     allTrips = await response.json();
     refreshTransporterOptions();
     refreshLocationOptionsFromTrips();
     applyFilters();
   } catch (error) {
     console.error('Failed to load trips:', error);
-    showMessage('Failed to load trips', false);
+    showMessage(error.message || 'Failed to load trips', false);
   }
 }
 
