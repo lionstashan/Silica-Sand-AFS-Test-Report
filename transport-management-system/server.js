@@ -83,6 +83,7 @@ const ROLE_PERMISSION_FALLBACK = {
     'transport.trip.update',
     'transport.documents.upload',
     'transport.documents.view',
+    'transport.reports.view',
     'transport.tasks.view',
     'transport.tasks.update',
     'transport.dashboard.view',
@@ -102,6 +103,7 @@ const ROLE_PERMISSION_FALLBACK = {
     'transport.trip.update',
     'transport.documents.upload',
     'transport.documents.view',
+    'transport.reports.view',
     'transport.tasks.view',
     'transport.tasks.update',
     'transport.dashboard.view'
@@ -109,6 +111,7 @@ const ROLE_PERMISSION_FALLBACK = {
   LAB: new Set([
     'transport.reports.view',
     'transport.reports.edit',
+    'transport.reports.finalize',
     'transport.tasks.view',
     'transport.tasks.update'
   ]),
@@ -120,6 +123,7 @@ const ROLE_PERMISSION_FALLBACK = {
     'transport.trip.update',
     'transport.documents.upload',
     'transport.documents.view',
+    'transport.reports.view',
     'transport.tasks.view',
     'transport.tasks.update',
     'transport.dashboard.view',
@@ -173,7 +177,10 @@ const ROUTE_PERMISSION_RULES = [
   { method: 'DELETE', pattern: /^\/trip\/\d+\/documents\/\d+$/, permission: 'transport.documents.delete' },
   { method: 'GET', pattern: /^\/documents\/\d+\/download$/, permission: 'transport.documents.view' },
   { method: 'GET', pattern: /^\/tasks$/, permission: 'transport.tasks.view' },
+  { method: 'GET', pattern: /^\/tasks\/assignees$/, permission: 'transport.tasks.view' },
   { method: 'GET', pattern: /^\/tasks\/\d+$/, permission: 'transport.tasks.view' },
+  { method: 'GET', pattern: /^\/tasks\/comments\/\d+\/download$/, permission: 'transport.tasks.view' },
+  { method: 'GET', pattern: /^\/assignees\/by-role$/, permission: 'transport.tasks.view' },
   { method: 'POST', pattern: /^\/tasks$/, permission: 'transport.tasks.create' },
   { method: 'PUT', pattern: /^\/tasks\/\d+\/status$/, permission: 'transport.tasks.update' },
   { method: 'PUT', pattern: /^\/tasks\/\d+\/reassign$/, permission: 'transport.tasks.update' },
@@ -186,7 +193,7 @@ const ROUTE_PERMISSION_RULES = [
   { method: 'GET', pattern: /^\/accounts\/sales-analytics$/, permission: 'transport.analytics.view' },
   { method: 'GET', pattern: /^\/admin\/control\//, permission: 'transport.admin.control' },
   { method: 'POST', pattern: /^\/admin\/control\//, permission: 'transport.admin.control' },
-  { method: 'GET', pattern: /^\/admin\/customer-portal\//, permission: 'transport.customer_portal.view' },
+  { method: 'GET', pattern: /^\/admin\/customer-portal\//, permission: 'transport.admin.control' },
   { method: 'GET', pattern: /^\/admin\/customer-users$/, permission: 'transport.customer_users.manage' },
   { method: 'POST', pattern: /^\/admin\/customer-users$/, permission: 'transport.customer_users.manage' },
   { method: 'POST', pattern: /^\/expense\/sso/, permission: 'transport.expense.sso' },
@@ -214,7 +221,7 @@ const EXPENSE_STATUSES = [
 const EXPENSE_FINAL_STATUSES = new Set(['PAYMENT_COMPLETED', 'REJECTED']);
 const EXPENSE_DOC_TYPES = new Set(['BILL', 'PAYMENT_PROOF', 'SUPPORTING']);
 const DOC_UPLOAD_ROLES = new Set(['Dispatch', 'Weighbridge', 'Accounts', 'Admin']);
-const DOC_VIEW_ROLES = new Set(['Dispatch', 'Weighbridge', 'Accounts', 'Admin']);
+const DOC_VIEW_ROLES = new Set(['Dispatch', 'Weighbridge', 'Accounts', 'Manager', 'Admin']);
 const DOC_ALLOWED_EXTENSIONS = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.xlsx', '.xls']);
 const DOC_ALLOWED_MIME_TYPES = new Set([
   'application/pdf',
@@ -246,6 +253,8 @@ const EXPENSE_LOGIN_WINDOW_MINUTES = 15;
 const EXPENSE_LOGIN_LOCK_MINUTES = 15;
 const BCRYPT_COST = Number.parseInt(process.env.BCRYPT_COST || '10', 10);
 const revokedTransportTokenHashes = new Set();
+const REPORT_VIEW_ROLES = ['LAB', 'Dispatch', 'Weighbridge', 'Accounts', 'Manager', 'Admin'];
+const REPORT_EDIT_ROLES = ['LAB', 'Admin'];
 fs.mkdirSync(DOC_UPLOAD_DIR, { recursive: true });
 
 const documentStorage = multer.diskStorage({
@@ -589,6 +598,28 @@ function hasPermissionForRole(role, permission, permissionsByRole = null) {
   }
   const fallback = ROLE_PERMISSION_FALLBACK[role];
   return !!fallback && fallback.has(permission);
+}
+
+function validatePermissionConsistency() {
+  const issues = [];
+  const ensureRolePermission = (roles, permission, label) => {
+    roles.forEach((role) => {
+      const fallback = ROLE_PERMISSION_FALLBACK[role];
+      if (!fallback || !fallback.has(permission)) {
+        issues.push(`${label}: role "${role}" missing "${permission}" in ROLE_PERMISSION_FALLBACK`);
+      }
+    });
+  };
+
+  ensureRolePermission(REPORT_VIEW_ROLES, 'transport.reports.view', 'Report view');
+  ensureRolePermission(REPORT_EDIT_ROLES, 'transport.reports.edit', 'Report edit');
+  ensureRolePermission(REPORT_EDIT_ROLES, 'transport.reports.finalize', 'Report finalize');
+  ensureRolePermission(Array.from(DOC_VIEW_ROLES), 'transport.documents.view', 'Trip document view');
+  ensureRolePermission(Array.from(DOC_UPLOAD_ROLES), 'transport.documents.upload', 'Trip document upload');
+
+  if (issues.length) {
+    throw new Error(`Permission consistency validation failed:\n- ${issues.join('\n- ')}`);
+  }
 }
 
 async function buildPermissionsByRole(roles) {
@@ -6482,11 +6513,11 @@ app.post('/admin/control/settings', async (req, res) => {
 });
 
 function canViewReports(role) {
-  return ['LAB', 'Dispatch', 'Weighbridge', 'Accounts', 'Manager', 'Admin'].includes(role);
+  return REPORT_VIEW_ROLES.includes(role);
 }
 
 function canEditReports(role) {
-  return ['LAB', 'Admin'].includes(role);
+  return REPORT_EDIT_ROLES.includes(role);
 }
 
 function toAfsBand(value) {
@@ -7116,6 +7147,7 @@ app.get('/health', (req, res) => {
 });
 
 validateProductionConfig();
+validatePermissionConsistency();
 
 initDb()
   .then(async () => {

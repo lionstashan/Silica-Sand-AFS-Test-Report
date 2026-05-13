@@ -658,12 +658,12 @@ async function initDb() {
   }
   const rolePermissionDefaults = {
     Gate: ['transport.trip.create', 'transport.trip.read', 'transport.trip.update', 'transport.expected_trucks.view', 'transport.tasks.view', 'transport.tasks.update'],
-    Dispatch: ['transport.trip.read', 'transport.trip.update', 'transport.documents.upload', 'transport.documents.view', 'transport.tasks.view', 'transport.tasks.update', 'transport.dashboard.view', 'transport.expected_trucks.view', 'transport.expected_trucks.manage', 'transport.customer_portal.view'],
+    Dispatch: ['transport.trip.read', 'transport.trip.update', 'transport.documents.upload', 'transport.documents.view', 'transport.reports.view', 'transport.tasks.view', 'transport.tasks.update', 'transport.dashboard.view', 'transport.expected_trucks.view', 'transport.expected_trucks.manage', 'transport.customer_portal.view'],
     Loading: ['transport.trip.read', 'transport.trip.update', 'transport.tasks.view', 'transport.tasks.update', 'transport.dashboard.view'],
-    Weighbridge: ['transport.trip.read', 'transport.trip.update', 'transport.documents.upload', 'transport.documents.view', 'transport.tasks.view', 'transport.tasks.update', 'transport.dashboard.view'],
-    LAB: ['transport.reports.view', 'transport.reports.edit', 'transport.tasks.view', 'transport.tasks.update'],
+    Weighbridge: ['transport.trip.read', 'transport.trip.update', 'transport.documents.upload', 'transport.documents.view', 'transport.reports.view', 'transport.tasks.view', 'transport.tasks.update', 'transport.dashboard.view'],
+    LAB: ['transport.reports.view', 'transport.reports.edit', 'transport.reports.finalize', 'transport.tasks.view', 'transport.tasks.update'],
     Expense: ['transport.expense.sso'],
-    Accounts: ['transport.trip.read', 'transport.trip.update', 'transport.documents.upload', 'transport.documents.view', 'transport.tasks.view', 'transport.tasks.update', 'transport.dashboard.view', 'transport.analytics.view', 'transport.customer_portal.view', 'transport.expense.sso'],
+    Accounts: ['transport.trip.read', 'transport.trip.update', 'transport.documents.upload', 'transport.documents.view', 'transport.reports.view', 'transport.tasks.view', 'transport.tasks.update', 'transport.dashboard.view', 'transport.analytics.view', 'transport.customer_portal.view', 'transport.expense.sso'],
     Manager: ['transport.trip.read', 'transport.dashboard.view', 'transport.analytics.view', 'transport.customer_portal.view', 'transport.expected_trucks.view', 'transport.documents.view', 'transport.reports.view', 'transport.tasks.view', 'transport.tasks.update', 'transport.expense.sso'],
     Admin: ['transport.trip.create', 'transport.trip.read', 'transport.trip.update', 'transport.trip.delete', 'transport.documents.upload', 'transport.documents.view', 'transport.documents.delete', 'transport.tasks.view', 'transport.tasks.update', 'transport.tasks.create', 'transport.dashboard.view', 'transport.analytics.view', 'transport.customer_portal.view', 'transport.expected_trucks.view', 'transport.expected_trucks.manage', 'transport.reports.view', 'transport.reports.edit', 'transport.reports.finalize', 'transport.admin.control', 'transport.customer_users.manage', 'transport.expense.sso']
   };
