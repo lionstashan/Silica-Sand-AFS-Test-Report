@@ -51,13 +51,12 @@ function getEmployeeAuthSession() {
 }
 
 function getAuthHeaders() {
+  const shared = window.AppPermissions?.getAuthHeaders?.();
+  if (shared && typeof shared === 'object' && Object.keys(shared).length) return shared;
   const role = getStoredRole();
   const token = localStorage.getItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
   if (!role || !token) return {};
-  return {
-    'x-user-role': role,
-    'x-user-token': token
-  };
+  return { 'x-user-role': role, 'x-user-token': token };
 }
 
 function showMessage(text, success = true) {
@@ -152,8 +151,7 @@ function initializeRole() {
     showAppContent();
     return;
   }
-  const next = encodeURIComponent(window.location.pathname + (window.location.search || ''));
-  window.location.replace(`/?next=${next}`);
+  window.AppPermissions?.redirectToEmployeeLogin?.(window.location.pathname + (window.location.search || ''));
 }
 
 function logout() {

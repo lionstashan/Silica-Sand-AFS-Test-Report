@@ -14,7 +14,9 @@ const TRANSPORTER_STORAGE_VERSION = '2026-05-12-master-source';
 const LOCATION_STORAGE_KEY = 'locationOptions';
 const EMPLOYEE_TRANSPORT_TOKEN_KEY = 'employeeTransportToken';
 const BASE_TRANSPORTER_OPTIONS = [];
-const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Expense', 'Accounts', 'Manager', 'Admin'];
+const VALID_ROLES = Array.isArray(window.AppPermissions?.VALID_EMPLOYEE_ROLES)
+  ? window.AppPermissions.VALID_EMPLOYEE_ROLES
+  : ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Expense', 'Accounts', 'Manager', 'Admin'];
 const TASK_STATUSES = ['OPEN', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED'];
 
 const STATUS_FLOW = [
@@ -212,14 +214,12 @@ function hasRoleAccess(allowedRoles) {
 }
 
 function getAuthHeaders() {
+  const shared = window.AppPermissions?.getAuthHeaders?.();
+  if (shared && typeof shared === 'object' && Object.keys(shared).length) return shared;
   const role = getCurrentRole();
-  if (!role) return {};
   const token = localStorage.getItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
-  if (!token) return {};
-  return {
-    'x-user-role': role,
-    'x-user-token': token
-  };
+  if (!role || !token) return {};
+  return { 'x-user-role': role, 'x-user-token': token };
 }
 
 async function ensureExpenseTokenForRole() {
@@ -1266,8 +1266,8 @@ function applyRoleUI() {
 async function openExpenseWithSso(event) {
   if (event) event.preventDefault();
   const role = getCurrentRole();
-  if (!['Expense', 'Admin', 'Accounts', 'Manager'].includes(role)) {
-    alert('You are not authorized for Expense access.');
+  if (!window.AppPermissions?.hasExpenseAccess?.()) {
+    window.AppPermissions?.showNoAccess?.('You do not have Expense access. Contact Admin.');
     return;
   }
   try {
@@ -1290,7 +1290,7 @@ async function openExpenseWithSso(event) {
     localStorage.setItem('expenseUser', JSON.stringify(data.user || {}));
     window.location.href = '/expense';
   } catch (error) {
-    alert(error.message || 'You are not authorized for Expense access.');
+    window.AppPermissions?.showModal?.('Access Required', error.message || 'You are not authorized for Expense access.');
   }
 }
 

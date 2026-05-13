@@ -114,6 +114,9 @@ function renderSieveChart(items) {
 }
 
 async function init() {
+  if (!window.AppPermissions?.requireEmployeeSession?.(window.location.pathname + (window.location.search || ''))) {
+    return;
+  }
   const id = getReportId();
   if (!id) return;
   document.getElementById('rv-print-btn').addEventListener('click', () => window.print());

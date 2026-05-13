@@ -1,12 +1,35 @@
 # Pending Tasks Tracker
 
-Last updated: 2026-05-12
+Last updated: 2026-05-13
 
 ## In Progress
 
 1. IAM unification (single username/password + access-based permissions with controlled legacy PIN fallback).
 2. Accounts sales analytics UI polish (chart-first presentable dashboard).
 3. Master-data centralization cleanup (remove remaining hardcoded option sources).
+
+## Current UI/Flow Hardening (May 13)
+
+1. Feedback consistency hardening:
+- Added shared frontend helpers in `public/permissions.js` (`showModal`, `showToast`, `setBusy`, `setPageLoading`, `parseApiError`).
+- Started replacing page-specific alerts with shared modal flow.
+
+2. Loading-state consistency:
+- Added global page-loading overlay and feedback modal styles in `public/style.css`.
+- Applied to core async reviewer flows in expense module.
+
+3. Header/nav consistency:
+- Added shared responsive behavior for header action stacks (mobile/tablet overlap fixes).
+- Wired shared permissions loader into major pages.
+
+4. Expense reviewer UX:
+- Added quick queue filters and “Last 5 acted claims” panel.
+- Improved empty-state handling and navigation behavior.
+
+5. Analytics usability:
+- Implemented filter persistence (`accountsAnalyticsFiltersV1`).
+- Implemented saved views (`accountsAnalyticsSavedViewsV1`) with save/apply flow.
+- Implemented “Export Current View” CSV from current loaded dataset.
 
 ## Completed in this pass
 

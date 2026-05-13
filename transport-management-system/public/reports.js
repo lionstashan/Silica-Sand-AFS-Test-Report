@@ -381,9 +381,13 @@ function logout() {
 }
 
 async function init() {
+  if (!window.AppPermissions?.requireEmployeeSession?.(window.location.pathname + (window.location.search || ''))) {
+    return;
+  }
   const role = localStorage.getItem('userRole');
   currentRole = role;
   if (!role || !VIEW_ROLES.includes(role)) {
+    window.AppPermissions?.showNoAccess?.('You do not have access to Reports Portal.');
     window.location.href = '/';
     return;
   }

@@ -484,10 +484,17 @@ async function initDb() {
       to_status TEXT,
       actor_user_id INTEGER REFERENCES expense_users(id) ON DELETE SET NULL,
       actor_role TEXT NOT NULL,
+      actor_transport_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      actor_transport_role TEXT,
       remarks TEXT,
       field_changes_json JSONB DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
+  `);
+  await pool.query(`
+    ALTER TABLE expense_claim_history
+    ADD COLUMN IF NOT EXISTS actor_transport_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS actor_transport_role TEXT
   `);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_expense_claim_history_claim ON expense_claim_history(claim_id, created_at ASC)

@@ -39,7 +39,8 @@ const appConfig = {
   flags: {
     enableUserAuthV2: toBoolean(process.env.ENABLE_USER_AUTH_V2, false),
     enableAdminPanelV2: toBoolean(process.env.ENABLE_ADMIN_PANEL_V2, false),
-    enableLegacyPinAuth: toBoolean(process.env.ENABLE_LEGACY_PIN_AUTH, true)
+    enableLegacyPinAuth: toBoolean(process.env.ENABLE_LEGACY_PIN_AUTH, false),
+    enableExpenseDirectLogin: toBoolean(process.env.ENABLE_EXPENSE_DIRECT_LOGIN, false)
   },
   secrets: {
     customerTokenSecret: String(process.env.CUSTOMER_TOKEN_SECRET || DEFAULTS.CUSTOMER_TOKEN_SECRET),
@@ -66,11 +67,13 @@ function validateProductionConfig() {
     errors.push('TRANSPORT_TOKEN_SECRET is using default value.');
   }
 
-  Object.entries(appConfig.rolePins).forEach(([role, pin]) => {
-    if (pin === DEFAULT_ROLE_PINS[role]) {
-      errors.push(`ROLE_PIN_${role.toUpperCase()} is using default value.`);
-    }
-  });
+  if (appConfig.flags.enableLegacyPinAuth) {
+    Object.entries(appConfig.rolePins).forEach(([role, pin]) => {
+      if (pin === DEFAULT_ROLE_PINS[role]) {
+        errors.push(`ROLE_PIN_${role.toUpperCase()} is using default value.`);
+      }
+    });
+  }
 
   if (errors.length) {
     throw new Error(`Production configuration validation failed:\n- ${errors.join('\n- ')}`);

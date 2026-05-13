@@ -1,4 +1,6 @@
-const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Expense', 'Accounts', 'Manager', 'Admin'];
+const VALID_ROLES = Array.isArray(window.AppPermissions?.VALID_EMPLOYEE_ROLES)
+  ? window.AppPermissions.VALID_EMPLOYEE_ROLES
+  : ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Expense', 'Accounts', 'Manager', 'Admin'];
 const EMPLOYEE_TRANSPORT_TOKEN_KEY = 'employeeTransportToken';
 let globalToastTimer = null;
 
@@ -380,6 +382,9 @@ function closeEmployeeModal() {
 }
 
 async function init() {
+  if (!window.AppPermissions?.requireEmployeeSession?.(window.location.pathname + (window.location.search || ''))) {
+    return;
+  }
   const role = localStorage.getItem('userRole');
   document.getElementById('role-indicator').textContent = `Role: ${role || '-'}`;
   const roleSwitcher = document.getElementById('role-switcher');
@@ -406,6 +411,7 @@ async function init() {
     });
   }
   if (role !== 'Admin') {
+    window.AppPermissions?.showNoAccess?.('You do not have access to Control Panel.');
     showMessage('Admin login required. Please login from main page as Admin first.', false);
     return;
   }

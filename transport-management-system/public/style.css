@@ -161,6 +161,83 @@ button.is-busy::after {
 .global-toast.success { background: #0a7a2f; }
 .global-toast.error { background: #b91c1c; }
 
+.global-feedback-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 11000;
+  padding: 16px;
+}
+
+.global-feedback-modal-card {
+  width: min(460px, 100%);
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 18px 36px rgba(2, 6, 23, 0.25);
+  padding: 16px;
+}
+
+.global-feedback-modal-card h3 {
+  margin: 0 0 8px;
+  color: #0f4c81;
+}
+
+.global-feedback-modal-card p {
+  margin: 0;
+  color: #334155;
+}
+
+.global-feedback-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.global-feedback-actions button {
+  border: none;
+  border-radius: 8px;
+  background: #0f4c81;
+  color: #fff;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.global-page-loading {
+  position: fixed;
+  inset: 0;
+  background: rgba(248, 250, 252, 0.75);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 10900;
+}
+
+.global-page-loading-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 10px;
+  border: 1px solid #dbe5f0;
+  background: #fff;
+  padding: 10px 14px;
+  color: #0f4c81;
+  font-weight: 600;
+  box-shadow: 0 10px 24px rgba(15, 76, 129, 0.16);
+}
+
+.global-page-loading .spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(15, 76, 129, 0.3);
+  border-top-color: #0f4c81;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
@@ -229,6 +306,20 @@ button.is-busy::after {
 @media (max-width: 900px) {
   .report-graph-grid {
     grid-template-columns: 1fr;
+  }
+
+  .header-actions {
+    position: static;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+
+  header nav {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
   }
 }
 

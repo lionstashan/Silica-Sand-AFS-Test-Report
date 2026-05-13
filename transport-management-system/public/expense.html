@@ -141,7 +141,28 @@
               <strong>Open Expense Queue</strong>
               <button id="refresh-queue-btn" class="expense-secondary">Refresh</button>
             </div>
+            <div class="expense-fields" style="margin-top:8px;grid-template-columns:1fr 1fr;">
+              <div>
+                <label class="field-label">Search Claim/Employee</label>
+                <input id="queue-search-input" type="text" placeholder="EXP-000001 or name">
+              </div>
+              <div>
+                <label class="field-label">Status</label>
+                <select id="queue-status-filter">
+                  <option value="">All</option>
+                  <option value="ACCOUNTS_REVIEW">ACCOUNTS_REVIEW</option>
+                  <option value="MANAGER_REVIEW">MANAGER_REVIEW</option>
+                  <option value="ADMIN_REVIEW">ADMIN_REVIEW</option>
+                  <option value="PAYMENT_PENDING">PAYMENT_PENDING</option>
+                  <option value="PAYMENT_INITIATED">PAYMENT_INITIATED</option>
+                </select>
+              </div>
+            </div>
             <div id="queue-list" class="expense-list"></div>
+            <div style="margin-top:10px;">
+              <strong class="mini">Last 5 Acted Claims</strong>
+              <div id="recent-acted-list" class="mini" style="margin-top:6px;">No recent actions yet.</div>
+            </div>
           </div>
           <div class="expense-panel">
             <div id="claim-detail">Select a claim from queue.</div>
@@ -189,6 +210,7 @@
       <div id="expense-notification-list" class="mini"></div>
     </div>
   </div>
-  <script src="/expense.js?v=20260513-1"></script>
+  <script src="/permissions.js?v=20260513-1"></script>
+  <script src="/expense.js?v=20260513-2"></script>
 </body>
 </html>

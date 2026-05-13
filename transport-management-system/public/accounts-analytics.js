@@ -1,9 +1,14 @@
 let userRole = null;
-const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Expense', 'Accounts', 'Manager', 'Admin'];
+const VALID_ROLES = Array.isArray(window.AppPermissions?.VALID_EMPLOYEE_ROLES)
+  ? window.AppPermissions.VALID_EMPLOYEE_ROLES
+  : ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Expense', 'Accounts', 'Manager', 'Admin'];
 const EMPLOYEE_TRANSPORT_TOKEN_KEY = 'employeeTransportToken';
 const ANALYTICS_LAYOUT_KEY = 'accountsAnalyticsLayoutV1';
+const ANALYTICS_FILTERS_KEY = 'accountsAnalyticsFiltersV1';
+const ANALYTICS_SAVED_VIEWS_KEY = 'accountsAnalyticsSavedViewsV1';
 let activeAnalyticsTab = 'overview';
 let analyticsLayout = { hidden: {}, order: {} };
+let lastAnalyticsPayload = null;
 
 function escapeHtml(value) {
   return String(value || '')
@@ -70,6 +75,72 @@ function formatWeightMT(value) {
 function formatCurrencyINR(value) {
   const amount = Number(value || 0);
   return amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function getCurrentFilterState() {
+  return {
+    from_date: document.getElementById('sales-from-date')?.value || '',
+    to_date: document.getElementById('sales-to-date')?.value || '',
+    customer: document.getElementById('sales-customer-filter')?.value.trim() || '',
+    grade: document.getElementById('sales-grade-filter')?.value.trim() || '',
+    material: document.getElementById('sales-material-filter')?.value.trim() || '',
+    afs_min: document.getElementById('sales-afs-min-filter')?.value.trim() || '',
+    afs_max: document.getElementById('sales-afs-max-filter')?.value.trim() || '',
+    afs_band: document.getElementById('sales-afs-band-filter')?.value || '',
+    status_scope: document.getElementById('sales-status-scope')?.value || 'BILLED_ONLY'
+  };
+}
+
+function applyFilterState(filters = {}) {
+  const setValue = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.value = value || '';
+  };
+  setValue('sales-from-date', filters.from_date);
+  setValue('sales-to-date', filters.to_date);
+  setValue('sales-customer-filter', filters.customer);
+  setValue('sales-grade-filter', filters.grade);
+  setValue('sales-material-filter', filters.material);
+  setValue('sales-afs-min-filter', filters.afs_min);
+  setValue('sales-afs-max-filter', filters.afs_max);
+  setValue('sales-afs-band-filter', filters.afs_band);
+  setValue('sales-status-scope', filters.status_scope || 'BILLED_ONLY');
+}
+
+function saveCurrentFilters() {
+  localStorage.setItem(ANALYTICS_FILTERS_KEY, JSON.stringify(getCurrentFilterState()));
+}
+
+function loadSavedFilters() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ANALYTICS_FILTERS_KEY) || '{}');
+    if (parsed && typeof parsed === 'object') applyFilterState(parsed);
+  } catch (_e) {
+    // ignore parse failures
+  }
+}
+
+function getSavedViews() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ANALYTICS_SAVED_VIEWS_KEY) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item) => item && typeof item.name === 'string' && item.filters);
+  } catch (_e) {
+    return [];
+  }
+}
+
+function persistSavedViews(views) {
+  localStorage.setItem(ANALYTICS_SAVED_VIEWS_KEY, JSON.stringify(views));
+}
+
+function refreshSavedViewsDropdown() {
+  const select = document.getElementById('analytics-view-select');
+  if (!select) return;
+  const views = getSavedViews();
+  const options = ['<option value="">Saved Views</option>']
+    .concat(views.map((view, index) => `<option value="${index}">${escapeHtml(view.name)}</option>`));
+  select.innerHTML = options.join('');
 }
 
 function loadAnalyticsLayout() {
@@ -298,6 +369,7 @@ async function loadSalesAnalytics() {
   const afsMax = document.getElementById('sales-afs-max-filter')?.value.trim() || '';
   const afsBand = document.getElementById('sales-afs-band-filter')?.value || '';
   const statusScope = document.getElementById('sales-status-scope')?.value || 'BILLED_ONLY';
+  saveCurrentFilters();
   const query = new URLSearchParams();
   if (fromDate) query.set('from_date', fromDate);
   if (toDate) query.set('to_date', toDate);
@@ -315,6 +387,7 @@ async function loadSalesAnalytics() {
     const response = await fetch(`/accounts/sales-analytics?${query.toString()}`, { headers: getAuthHeaders() });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || 'Failed to load sales analytics');
+    lastAnalyticsPayload = payload;
     renderSalesKpis(payload.summary || {});
     renderTrendTable(payload.trend || []);
     renderBarChart('sales-trend-chart', payload.trend || [], 'date');
@@ -327,7 +400,8 @@ async function loadSalesAnalytics() {
     renderSimpleAggregateTable('sales-material-table', payload.material_wise || [], 'key');
     renderSimpleAggregateTable('sales-afs-band-table', payload.afs_band_wise || [], 'key');
   } catch (error) {
-    alert(error.message || 'Failed to load sales analytics');
+    lastAnalyticsPayload = null;
+    window.AppPermissions?.showModal?.('Action Required', error.message || 'Failed to load sales analytics');
     renderBarChart('sales-trend-chart', [], 'date');
     renderBarChart('sales-grade-chart', [], 'key');
     renderBarChart('sales-customer-chart', [], 'key');
@@ -339,7 +413,90 @@ async function loadSalesAnalytics() {
   }
 }
 
+function csvEscape(value) {
+  const input = String(value ?? '');
+  const hardened = /^[=+\-@]/.test(input) ? `'${input}` : input;
+  return `"${hardened.replace(/"/g, '""')}"`;
+}
+
+function downloadCsv(filename, rows) {
+  const csvContent = rows.map((row) => row.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function exportCurrentViewCsv() {
+  if (!lastAnalyticsPayload) {
+    window.AppPermissions?.showModal?.('Action Required', 'Load analytics data first, then export.');
+    return;
+  }
+  const summary = lastAnalyticsPayload.summary || {};
+  const trend = Array.isArray(lastAnalyticsPayload.trend) ? lastAnalyticsPayload.trend : [];
+  const gradeWise = Array.isArray(lastAnalyticsPayload.grade_wise) ? lastAnalyticsPayload.grade_wise : [];
+  const customerWise = Array.isArray(lastAnalyticsPayload.customer_wise) ? lastAnalyticsPayload.customer_wise : [];
+  const materialWise = Array.isArray(lastAnalyticsPayload.material_wise) ? lastAnalyticsPayload.material_wise : [];
+  const afsWise = Array.isArray(lastAnalyticsPayload.afs_band_wise) ? lastAnalyticsPayload.afs_band_wise : [];
+  const filters = getCurrentFilterState();
+
+  const rows = [
+    ['Report', 'Accounts Sales Analytics Export'],
+    ['Generated At (IST)', new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })],
+    [],
+    ['Filters'],
+    ['From Date', filters.from_date || ''],
+    ['To Date', filters.to_date || ''],
+    ['Customer', filters.customer || ''],
+    ['Grade', filters.grade || ''],
+    ['Material', filters.material || ''],
+    ['AFS Min', filters.afs_min || ''],
+    ['AFS Max', filters.afs_max || ''],
+    ['AFS Band', filters.afs_band || ''],
+    ['Status Scope', filters.status_scope || ''],
+    [],
+    ['Executive Summary'],
+    ['Total Trips', summary.total_trips || 0],
+    ['Total Qty (MT)', summary.total_qty_mt || 0],
+    ['Taxable (INR)', summary.total_taxable_amount || 0],
+    ['GST (INR)', summary.total_gst_amount || 0],
+    ['Total Sales (INR)', summary.total_sales_amount || 0],
+    ['Avg Realization (INR/MT)', summary.avg_realization_per_mt || 0],
+    [],
+    ['Trend'],
+    ['Date', 'Trips', 'Qty (MT)', 'Amount (INR)'],
+    ...trend.map((row) => [row.date || '', row.trips || 0, row.qty_mt || 0, row.total_amount || 0]),
+    [],
+    ['Grade-wise'],
+    ['Grade', 'Trips', 'Qty (MT)', 'Amount (INR)', 'Avg Rate (INR/MT)'],
+    ...gradeWise.map((row) => [row.key || '', row.trips || 0, row.qty_mt || 0, row.total_amount || 0, row.avg_rate_per_mt || 0]),
+    [],
+    ['Customer-wise'],
+    ['Customer', 'Trips', 'Qty (MT)', 'Amount (INR)', 'Avg Rate (INR/MT)'],
+    ...customerWise.map((row) => [row.key || '', row.trips || 0, row.qty_mt || 0, row.total_amount || 0, row.avg_rate_per_mt || 0]),
+    [],
+    ['Material-wise'],
+    ['Material', 'Trips', 'Qty (MT)', 'Amount (INR)', 'Avg Rate (INR/MT)'],
+    ...materialWise.map((row) => [row.key || '', row.trips || 0, row.qty_mt || 0, row.total_amount || 0, row.avg_rate_per_mt || 0]),
+    [],
+    ['AFS Band-wise'],
+    ['AFS Band', 'Trips', 'Qty (MT)', 'Amount (INR)', 'Avg Rate (INR/MT)'],
+    ...afsWise.map((row) => [row.key || '', row.trips || 0, row.qty_mt || 0, row.total_amount || 0, row.avg_rate_per_mt || 0])
+  ];
+
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  downloadCsv(`accounts-sales-analytics-${dateStamp}.csv`, rows);
+}
+
 function initializeAccess() {
+  if (!window.AppPermissions?.requireEmployeeSession?.(window.location.pathname + (window.location.search || ''))) {
+    return false;
+  }
   const employeeAuth = getEmployeeAuthSession();
   if (employeeAuth && Array.isArray(employeeAuth.roles) && employeeAuth.roles.length) {
     const storedRole = getStoredRole();
@@ -349,10 +506,11 @@ function initializeAccess() {
   }
   const role = getCurrentRole();
   if (!role) {
-    window.location.href = '/';
+    window.AppPermissions?.redirectToEmployeeLogin?.(window.location.pathname + (window.location.search || ''));
     return false;
   }
   if (!['Accounts', 'Admin', 'Manager'].includes(role)) {
+    window.AppPermissions?.showNoAccess?.('You do not have access to Sales Analytics.');
     window.location.href = '/dashboard';
     return false;
   }
@@ -380,7 +538,9 @@ function initializeAccess() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   if (!initializeAccess()) return;
+  loadSavedFilters();
   loadAnalyticsLayout();
+  refreshSavedViewsDropdown();
   bindAnalyticsTabs();
   bindAnalyticsModuleActions();
   applyAnalyticsModuleOrder();
@@ -402,5 +562,46 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
   document.getElementById('sales-load-btn')?.addEventListener('click', loadSalesAnalytics);
+  document.getElementById('analytics-export-current')?.addEventListener('click', exportCurrentViewCsv);
+  document.getElementById('analytics-save-view')?.addEventListener('click', () => {
+    const name = window.prompt('Saved view name');
+    if (!name || !name.trim()) return;
+    const cleanName = name.trim().slice(0, 60);
+    const views = getSavedViews();
+    const existingIndex = views.findIndex((view) => view.name.toLowerCase() === cleanName.toLowerCase());
+    const payload = { name: cleanName, filters: getCurrentFilterState(), updated_at: new Date().toISOString() };
+    if (existingIndex >= 0) {
+      views[existingIndex] = payload;
+    } else {
+      views.unshift(payload);
+    }
+    persistSavedViews(views.slice(0, 20));
+    refreshSavedViewsDropdown();
+    window.AppPermissions?.showToast?.(`Saved view: ${cleanName}`, 'success');
+  });
+  document.getElementById('analytics-view-select')?.addEventListener('change', async (event) => {
+    const value = event.target.value;
+    if (value === '') return;
+    const views = getSavedViews();
+    const picked = views[Number(value)];
+    if (!picked) return;
+    applyFilterState(picked.filters);
+    saveCurrentFilters();
+    await loadSalesAnalytics();
+  });
+  [
+    'sales-from-date',
+    'sales-to-date',
+    'sales-customer-filter',
+    'sales-grade-filter',
+    'sales-material-filter',
+    'sales-afs-min-filter',
+    'sales-afs-max-filter',
+    'sales-afs-band-filter',
+    'sales-status-scope'
+  ].forEach((id) => {
+    document.getElementById(id)?.addEventListener('change', saveCurrentFilters);
+    document.getElementById(id)?.addEventListener('blur', saveCurrentFilters);
+  });
   await loadSalesAnalytics();
 });

@@ -9,6 +9,8 @@ let activeClaim = null;
 let expenseNotifications = [];
 let expenseNotifPoll = null;
 let toastTimer = null;
+let queueFiltered = [];
+const RECENT_ACTED_KEY = 'expenseRecentActedClaims';
 
 const $ = (id) => document.getElementById(id);
 
@@ -17,6 +19,7 @@ function setMessage(msg, isError = false) {
   el.textContent = msg || '';
   el.style.color = isError ? '#b00020' : '#666';
   if (msg) showToast(msg, isError);
+  if (isError && msg) window.AppPermissions?.showModal?.('Action Required', msg);
 }
 
 function showToast(msg, isError = false) {
@@ -192,12 +195,18 @@ async function api(path, options = {}) {
   const response = await fetch(path, options);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.error || 'Request failed');
+    const requestId = response.headers.get('x-request-id') || '';
+    const message = data.error || 'Request failed';
+    throw new Error(requestId ? `${message} (Ref: ${requestId})` : message);
   }
   return data;
 }
 
 function redirectToMainLogin() {
+  if (window.AppPermissions?.redirectToEmployeeLogin) {
+    window.AppPermissions.redirectToEmployeeLogin('/expense');
+    return;
+  }
   const next = encodeURIComponent('/expense');
   window.location.replace(`/?next=${next}`);
 }
@@ -242,7 +251,7 @@ async function ensureExpenseSessionFromTransport() {
   } catch (error) {
     const msg = error.message || 'Expense SSO failed';
     if (/not authorized|permission denied|forbidden/i.test(msg)) {
-      alert('You do not have Expense access. Contact Admin.');
+      window.AppPermissions?.showNoAccess?.('You do not have Expense access. Contact Admin.');
     }
     $('login-msg').textContent = msg;
     redirectToMainLogin();
@@ -359,16 +368,40 @@ async function viewClaim(id) {
 }
 
 async function loadQueue() {
-  const data = await api('/expenses/pending', { headers: getHeaders() });
-  queue = data.rows || [];
-  queueIndex = queue.length ? 0 : -1;
-  $('queue-list').innerHTML = queue.map((q, i) =>
+  window.AppPermissions?.setPageLoading?.(true, 'Loading expense queue...');
+  try {
+    const data = await api('/expenses/pending', { headers: getHeaders() });
+    queue = data.rows || [];
+    applyQueueFilters();
+    queueIndex = queueFiltered.length ? 0 : -1;
+    renderQueueList();
+    await renderActiveClaim();
+  } finally {
+    window.AppPermissions?.setPageLoading?.(false);
+  }
+}
+
+function applyQueueFilters() {
+  const search = String($('queue-search-input')?.value || '').trim().toLowerCase();
+  const status = String($('queue-status-filter')?.value || '').trim();
+  queueFiltered = queue.filter((q) => {
+    const matchesSearch = !search
+      || String(q.claim_number || '').toLowerCase().includes(search)
+      || String(q.employee_name || '').toLowerCase().includes(search);
+    const matchesStatus = !status || String(q.status || '') === status;
+    return matchesSearch && matchesStatus;
+  });
+}
+
+function renderQueueList() {
+  $('queue-list').innerHTML = queueFiltered.map((q, i) =>
     `<button data-idx="${i}"><strong>${q.claim_number}</strong><br>${q.employee_name} • ${q.status}<br><span class="mini">${q.amount}</span></button>`
   ).join('') || `
     <div class="mini">
-      No claims pending for your role.
+      No claims pending for your role with current filters.
       <div style="margin-top:8px;">
         <button type="button" id="queue-refresh-btn">Refresh Queue</button>
+        <button type="button" id="queue-clear-filters-btn">Clear Filters</button>
       </div>
     </div>
   `;
@@ -377,6 +410,14 @@ async function loadQueue() {
       queueIndex = Number(btn.getAttribute('data-idx'));
       await renderActiveClaim();
     });
+  });
+  $('queue-clear-filters-btn')?.addEventListener('click', () => {
+    $('queue-search-input').value = '';
+    $('queue-status-filter').value = '';
+    applyQueueFilters();
+    queueIndex = queueFiltered.length ? 0 : -1;
+    renderQueueList();
+    renderActiveClaim();
   });
   const queueRefreshBtn = $('queue-refresh-btn');
   if (queueRefreshBtn) {
@@ -388,7 +429,6 @@ async function loadQueue() {
       }
     });
   }
-  await renderActiveClaim();
 }
 
 async function downloadDoc(docId) {
@@ -408,7 +448,7 @@ async function downloadDoc(docId) {
 }
 
 async function renderActiveClaim() {
-  if (queueIndex < 0 || queueIndex >= queue.length) {
+  if (queueIndex < 0 || queueIndex >= queueFiltered.length) {
     $('claim-detail').innerHTML = `
       <div class="mini">
         No claim selected. When a claim is available in your review queue, details will appear here.
@@ -417,7 +457,7 @@ async function renderActiveClaim() {
     updateActionButtons(null);
     return;
   }
-  const row = queue[queueIndex];
+  const row = queueFiltered[queueIndex];
   $('claim-detail').innerHTML = '<div class="mini">Loading claim details...</div>';
   try {
     const data = await api(`/expenses/${row.id}`, { headers: getHeaders() });
@@ -425,7 +465,7 @@ async function renderActiveClaim() {
     activeClaim = claim;
     const docs = (data.documents || []).map((d) => `<a href="#" data-doc="${d.id}">${d.doc_type} - ${d.file_name}</a>`).join('') || '<div class="mini">No documents.</div>';
     $('claim-detail').innerHTML = `
-      <div><strong>${claim.claim_number}</strong> (${queueIndex + 1}/${queue.length})</div>
+      <div><strong>${claim.claim_number}</strong> (${queueIndex + 1}/${queueFiltered.length})</div>
       <div>Status: ${badge(claim.status)} (v${claim.version})</div>
       <div>Employee: ${claim.employee_name} (${claim.employee_code || '-'})</div>
       <div>Pay To: ${claim.pay_to || '-'}</div>
@@ -524,7 +564,7 @@ function updateActionButtons(claim) {
   }
 
   enable('prev-btn', queueIndex > 0);
-  enable('next-btn', queueIndex >= 0 && queueIndex < (queue.length - 1));
+  enable('next-btn', queueIndex >= 0 && queueIndex < (queueFiltered.length - 1));
   enable('approve-btn', (role === 'Accounts' && status === 'ACCOUNTS_REVIEW') || (role === 'Manager' && status === 'MANAGER_REVIEW') || (role === 'Admin' && status === 'ADMIN_REVIEW'));
   enable('need-info-btn', (role === 'Accounts' && status === 'ACCOUNTS_REVIEW') || (role === 'Manager' && status === 'MANAGER_REVIEW') || (role === 'Admin' && status === 'ADMIN_REVIEW'));
   enable('reject-btn', (role === 'Accounts' && status === 'ACCOUNTS_REVIEW') || (role === 'Manager' && status === 'MANAGER_REVIEW') || (role === 'Admin' && status === 'ADMIN_REVIEW'));
@@ -534,8 +574,8 @@ function updateActionButtons(claim) {
 }
 
 async function runReviewAction(kind) {
-  if (queueIndex < 0 || queueIndex >= queue.length) return;
-  const claim = queue[queueIndex];
+  if (queueIndex < 0 || queueIndex >= queueFiltered.length) return;
+  const claim = queueFiltered[queueIndex];
   if (!claim || !claim.id) {
     setMessage('Invalid claim selection. Please refresh queue.', true);
     return;
@@ -581,8 +621,10 @@ async function runReviewAction(kind) {
       });
     }
     setMessage(`Action applied on ${claim.claim_number}`);
-    queue.splice(queueIndex, 1);
-    if (queueIndex >= queue.length) queueIndex = queue.length - 1;
+    addRecentActed(claim, kind);
+    queue = queue.filter((item) => Number(item.id) !== Number(claim.id));
+    applyQueueFilters();
+    if (queueIndex >= queueFiltered.length) queueIndex = queueFiltered.length - 1;
     await loadQueue();
   } catch (error) {
     setMessage(error.message, true);
@@ -606,8 +648,8 @@ async function uploadDoc(claimId, file, docType) {
 }
 
 async function uploadReviewDoc() {
-  if (queueIndex < 0 || queueIndex >= queue.length) return;
-  const claim = queue[queueIndex];
+  if (queueIndex < 0 || queueIndex >= queueFiltered.length) return;
+  const claim = queueFiltered[queueIndex];
   if (!claim || !claim.id) {
     setMessage('Invalid claim selection. Please refresh queue.', true);
     return;
@@ -628,6 +670,18 @@ async function uploadReviewDoc() {
 }
 
 function bindReviewerActions() {
+  $('queue-search-input')?.addEventListener('input', () => {
+    applyQueueFilters();
+    queueIndex = queueFiltered.length ? 0 : -1;
+    renderQueueList();
+    renderActiveClaim();
+  });
+  $('queue-status-filter')?.addEventListener('change', () => {
+    applyQueueFilters();
+    queueIndex = queueFiltered.length ? 0 : -1;
+    renderQueueList();
+    renderActiveClaim();
+  });
   $('prev-btn').addEventListener('click', async (event) => {
     if (queueIndex > 0) {
       setButtonBusy(event.currentTarget, true, 'Loading...');
@@ -640,7 +694,7 @@ function bindReviewerActions() {
     }
   });
   $('next-btn').addEventListener('click', async (event) => {
-    if (queueIndex < queue.length - 1) {
+    if (queueIndex < queueFiltered.length - 1) {
       setButtonBusy(event.currentTarget, true, 'Loading...');
       queueIndex += 1;
       try {
@@ -672,6 +726,44 @@ function bindReviewerActions() {
       setButtonBusy(event.currentTarget, false);
     }
   });
+}
+
+function getRecentActed() {
+  try {
+    const rows = JSON.parse(localStorage.getItem(RECENT_ACTED_KEY) || '[]');
+    return Array.isArray(rows) ? rows : [];
+  } catch (_e) {
+    return [];
+  }
+}
+
+function renderRecentActed() {
+  const rows = getRecentActed();
+  const container = $('recent-acted-list');
+  if (!container) return;
+  if (!rows.length) {
+    container.textContent = 'No recent actions yet.';
+    return;
+  }
+  container.innerHTML = rows.map((row) => `<div>${row.claim_number} • ${row.action} • ${fmt(row.at)}</div>`).join('');
+}
+
+function addRecentActed(claim, actionKind) {
+  const labelMap = {
+    approve: 'Approved',
+    'need-info': 'Need Info',
+    reject: 'Rejected',
+    'payment-init': 'Payment Initiated',
+    'payment-complete': 'Payment Completed'
+  };
+  const rows = getRecentActed();
+  rows.unshift({
+    claim_number: claim.claim_number || `#${claim.id}`,
+    action: labelMap[actionKind] || actionKind,
+    at: new Date().toISOString()
+  });
+  localStorage.setItem(RECENT_ACTED_KEY, JSON.stringify(rows.slice(0, 5)));
+  renderRecentActed();
 }
 
 function getDashboardQuery() {
@@ -836,6 +928,7 @@ function setup() {
       $('login-panel').style.display = '';
       $('login-msg').textContent = error.message || 'Expense login failed';
     });
+  renderRecentActed();
 }
 
 document.addEventListener('DOMContentLoaded', setup);

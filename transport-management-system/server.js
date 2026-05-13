@@ -861,12 +861,14 @@ function getExpenseReviewStageFromStatus(status) {
   return null;
 }
 
-function createExpenseToken(user) {
+function createExpenseToken(user, context = {}) {
   const now = Math.floor(Date.now() / 1000);
   const payload = {
     sub: user.id,
     role: user.role,
     username: user.username,
+    transport_user_id: context.transportUserId || null,
+    transport_role_at_auth: context.transportRole || null,
     iat: now,
     exp: now + EXPENSE_TOKEN_TTL_SECONDS
   };
@@ -1060,7 +1062,13 @@ async function readExpenseUserFromRequest(req) {
     if (fromDb.user.username !== verified.payload.username || fromDb.user.role !== verified.payload.role) {
       return { error: 'Expense user token mismatch', status: 401 };
     }
-    return fromDb;
+    return {
+      user: {
+        ...fromDb.user,
+        transport_user_id: parsePositiveId(verified.payload.transport_user_id),
+        transport_role_at_auth: normalizeEmpty(verified.payload.transport_role_at_auth) || null
+      }
+    };
   }
   const username = String(req.header('x-expense-username') || '').trim();
   const password = String(req.header('x-expense-password') || '').trim();
@@ -1076,14 +1084,34 @@ function canExpenseRoleReview(role, status) {
 }
 
 async function addExpenseHistory(client, {
-  claimId, actionType, fromStatus = null, toStatus = null, actorUserId, actorRole, remarks = null, fieldChanges = {}
+  claimId,
+  actionType,
+  fromStatus = null,
+  toStatus = null,
+  actorUserId,
+  actorRole,
+  actorTransportUserId = null,
+  actorTransportRole = null,
+  remarks = null,
+  fieldChanges = {}
 }) {
   const changes = fieldChanges && typeof fieldChanges === 'object' ? { ...fieldChanges } : {};
   await client.query(
     `INSERT INTO expense_claim_history (
-      claim_id, action_type, from_status, to_status, actor_user_id, actor_role, remarks, field_changes_json
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-    [claimId, actionType, fromStatus, toStatus, actorUserId, actorRole, remarks, JSON.stringify(changes)]
+      claim_id, action_type, from_status, to_status, actor_user_id, actor_role, actor_transport_user_id, actor_transport_role, remarks, field_changes_json
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [
+      claimId,
+      actionType,
+      fromStatus,
+      toStatus,
+      actorUserId,
+      actorRole,
+      parsePositiveId(actorTransportUserId),
+      normalizeEmpty(actorTransportRole),
+      remarks,
+      JSON.stringify(changes)
+    ]
   );
 }
 
@@ -4108,6 +4136,9 @@ function makeClaimNumber(id) {
 }
 
 app.post('/expense/login', async (req, res) => {
+  if (!appConfig.flags.enableExpenseDirectLogin) {
+    return res.status(403).json({ error: 'Direct expense login is disabled. Please login from main employee portal.' });
+  }
   const username = String(req.body.username || '').trim();
   const password = String(req.body.password || '').trim();
   const ipAddress = getRequestIp(req);
@@ -4138,7 +4169,7 @@ app.post('/expense/login', async (req, res) => {
       return res.status(403).json({ error: 'Use Transport login and open Expense via SSO for this role.' });
     }
     await recordExpenseLoginAttempt({ username, ipAddress, success: true, failureReason: null, userAgent });
-    const token = createExpenseToken(auth.user);
+    const token = createExpenseToken(auth.user, {});
     console.log(`[expense][${req.expenseRequestId}] login success username=${username}`);
     return res.json({ ok: true, token, user: auth.user, request_id: req.expenseRequestId });
   } catch (error) {
@@ -4266,7 +4297,10 @@ app.post('/expense/sso', async (req, res) => {
       userAgent
     });
 
-    const token = createExpenseToken(expenseUser);
+    const token = createExpenseToken(expenseUser, {
+      transportUserId: auth.user?.id || null,
+      transportRole: transportRole
+    });
     console.log(`[expense][${req.expenseRequestId}] transport sso success role=${transportRole} expense_user=${expenseUser.username}`);
     return res.json({
       ok: true,
@@ -4581,6 +4615,8 @@ app.post('/expenses', async (req, res) => {
       toStatus: 'DRAFT',
       actorUserId: auth.user.id,
       actorRole: auth.user.role,
+      actorTransportUserId: auth.user.transport_user_id,
+      actorTransportRole: auth.user.transport_role_at_auth,
       remarks: 'Claim created',
       fieldChanges: { ...payload, request_id: req.expenseRequestId }
     });
@@ -4681,9 +4717,10 @@ app.get('/expenses/:id(\\d+)', async (req, res) => {
         [claimId]
       ),
       pool.query(
-        `SELECT h.*, u.full_name AS actor_name
+        `SELECT h.*, u.full_name AS actor_name, tu.full_name AS actor_transport_name, tu.username AS actor_transport_username
          FROM expense_claim_history h
          LEFT JOIN expense_users u ON u.id = h.actor_user_id
+         LEFT JOIN users tu ON tu.id = h.actor_transport_user_id
          WHERE h.claim_id = $1
          ORDER BY h.created_at ASC, h.id ASC`,
         [claimId]
@@ -4780,6 +4817,8 @@ app.put('/expenses/:id(\\d+)', async (req, res) => {
         toStatus: existing.status,
         actorUserId: auth.user.id,
         actorRole: auth.user.role,
+        actorTransportUserId: auth.user.transport_user_id,
+        actorTransportRole: auth.user.transport_role_at_auth,
         remarks: normalizeEmpty(req.body.remarks) || 'Claim edited',
         fieldChanges: { ...fieldChanges, request_id: req.expenseRequestId }
       });
@@ -4867,6 +4906,8 @@ app.post('/expenses/:id(\\d+)/submit', async (req, res) => {
       toStatus,
       actorUserId: auth.user.id,
       actorRole: auth.user.role,
+      actorTransportUserId: auth.user.transport_user_id,
+      actorTransportRole: auth.user.transport_role_at_auth,
       remarks: normalizeEmpty(req.body.remarks) || null,
       fieldChanges: { request_id: req.expenseRequestId }
     });
@@ -5007,6 +5048,8 @@ async function handleExpenseReviewAction(req, res, reviewerRole) {
       toStatus: nextStatus,
       actorUserId: auth.user.id,
       actorRole: auth.user.role,
+      actorTransportUserId: auth.user.transport_user_id,
+      actorTransportRole: auth.user.transport_role_at_auth,
       remarks,
       fieldChanges: { request_id: req.expenseRequestId }
     });
@@ -5087,6 +5130,8 @@ app.post('/expenses/:id(\\d+)/payment-initiated', async (req, res) => {
       toStatus: 'PAYMENT_INITIATED',
       actorUserId: auth.user.id,
       actorRole: auth.user.role,
+      actorTransportUserId: auth.user.transport_user_id,
+      actorTransportRole: auth.user.transport_role_at_auth,
       remarks: normalizeEmpty(req.body.remarks) || null,
       fieldChanges: { request_id: req.expenseRequestId }
     });
@@ -5159,6 +5204,8 @@ app.post('/expenses/:id(\\d+)/payment-completed', async (req, res) => {
       toStatus: 'PAYMENT_COMPLETED',
       actorUserId: auth.user.id,
       actorRole: auth.user.role,
+      actorTransportUserId: auth.user.transport_user_id,
+      actorTransportRole: auth.user.transport_role_at_auth,
       remarks,
       fieldChanges: { request_id: req.expenseRequestId }
     });
@@ -5233,6 +5280,8 @@ app.post('/expenses/:id(\\d+)/documents', async (req, res) => {
         toStatus: claim.status,
         actorUserId: auth.user.id,
         actorRole: auth.user.role,
+        actorTransportUserId: auth.user.transport_user_id,
+        actorTransportRole: auth.user.transport_role_at_auth,
         remarks: `${docType} uploaded`,
         fieldChanges: { request_id: req.expenseRequestId, doc_type: docType }
       });

@@ -10,7 +10,9 @@ const timelineModalBody = document.getElementById('timeline-modal-body');
 const taskNotificationsBtn = document.getElementById('task-notifications-btn');
 const taskNotificationBadge = document.getElementById('task-notification-badge');
 const IST_TIMEZONE = 'Asia/Kolkata';
-const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Expense', 'Accounts', 'Manager', 'Admin'];
+const VALID_ROLES = Array.isArray(window.AppPermissions?.VALID_EMPLOYEE_ROLES)
+  ? window.AppPermissions.VALID_EMPLOYEE_ROLES
+  : ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Expense', 'Accounts', 'Manager', 'Admin'];
 const DISPATCH_ZONE_STATUSES = [
   'AT_DISPATCH',
   'WAITING'
@@ -72,13 +74,12 @@ function getEmployeeAuthSession() {
 }
 
 function getAuthHeaders() {
+  const shared = window.AppPermissions?.getAuthHeaders?.();
+  if (shared && typeof shared === 'object' && Object.keys(shared).length) return shared;
   const role = getCurrentRole();
   const token = localStorage.getItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
   if (!role || !token) return {};
-  return {
-    'x-user-role': role,
-    'x-user-token': token
-  };
+  return { 'x-user-role': role, 'x-user-token': token };
 }
 
 async function ensureExpenseTokenForRole() {
@@ -153,8 +154,7 @@ function initializeRole() {
     }
     showAppContent();
   } else {
-    const next = encodeURIComponent(window.location.pathname + (window.location.search || ''));
-    window.location.replace(`/?next=${next}`);
+    window.AppPermissions?.redirectToEmployeeLogin?.(window.location.pathname + (window.location.search || ''));
   }
 }
 
@@ -222,8 +222,8 @@ function showAppContent() {
 async function openExpenseWithSso(event) {
   if (event) event.preventDefault();
   const role = getCurrentRole();
-  if (!['Expense', 'Admin', 'Accounts', 'Manager'].includes(role)) {
-    alert('You are not authorized for Expense access.');
+  if (!window.AppPermissions?.hasExpenseAccess?.()) {
+    window.AppPermissions?.showNoAccess?.('You do not have Expense access. Contact Admin.');
     return;
   }
   try {
@@ -246,7 +246,7 @@ async function openExpenseWithSso(event) {
     localStorage.setItem('expenseUser', JSON.stringify(data.user || {}));
     window.location.href = '/expense';
   } catch (error) {
-    alert(error.message || 'You are not authorized for Expense access.');
+    window.AppPermissions?.showModal?.('Access Required', error.message || 'You are not authorized for Expense access.');
   }
 }
 
