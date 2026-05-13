@@ -1,4 +1,4 @@
-const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Accounts', 'Manager', 'Admin'];
+const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Expense', 'Accounts', 'Manager', 'Admin'];
 const EMPLOYEE_TRANSPORT_TOKEN_KEY = 'employeeTransportToken';
 let globalToastTimer = null;
 

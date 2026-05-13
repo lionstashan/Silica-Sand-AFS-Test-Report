@@ -14,7 +14,7 @@ const TRANSPORTER_STORAGE_VERSION = '2026-05-12-master-source';
 const LOCATION_STORAGE_KEY = 'locationOptions';
 const EMPLOYEE_TRANSPORT_TOKEN_KEY = 'employeeTransportToken';
 const BASE_TRANSPORTER_OPTIONS = [];
-const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Accounts', 'Manager', 'Admin'];
+const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Expense', 'Accounts', 'Manager', 'Admin'];
 const TASK_STATUSES = ['OPEN', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED'];
 
 const STATUS_FLOW = [
@@ -224,7 +224,7 @@ function getAuthHeaders() {
 
 async function ensureExpenseTokenForRole() {
   const role = getCurrentRole();
-  if (!['Admin', 'Accounts', 'Manager'].includes(role)) return null;
+  if (!['Expense', 'Admin', 'Accounts', 'Manager'].includes(role)) return null;
   const existing = localStorage.getItem('expenseToken');
   if (existing) return existing;
   try {
@@ -243,7 +243,7 @@ function renderExpenseUnreadBadge(unreadCount) {
   const expenseLink = document.getElementById('expense-link');
   if (!expenseLink) return;
   const role = getCurrentRole();
-  if (!['Admin', 'Accounts', 'Manager'].includes(role)) return;
+  if (!['Expense', 'Admin', 'Accounts', 'Manager'].includes(role)) return;
   let badge = document.getElementById('expense-unread-badge');
   if (!badge) {
     badge = document.createElement('span');
@@ -264,7 +264,7 @@ function renderExpenseUnreadBadge(unreadCount) {
 
 async function loadExpenseUnreadCount() {
   const role = getCurrentRole();
-  if (!['Admin', 'Accounts', 'Manager'].includes(role)) return;
+  if (!['Expense', 'Admin', 'Accounts', 'Manager'].includes(role)) return;
   const token = await ensureExpenseTokenForRole();
   if (!token) return;
   try {
@@ -1206,7 +1206,7 @@ function applyRoleUI() {
   const canSeeDashboard = ['Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Manager', 'Admin'].includes(role);
   const canSeeCustomerPortal = ['Admin', 'Manager', 'Dispatch', 'Accounts'].includes(role);
   const canSeeExpectedTrucks = ['Gate', 'Admin', 'Manager', 'Dispatch'].includes(role);
-  const canSeeExpense = ['Admin', 'Accounts', 'Manager'].includes(role);
+  const canSeeExpense = ['Expense', 'Admin', 'Accounts', 'Manager'].includes(role);
   const canSeeAnalytics = ['Admin', 'Accounts', 'Manager'].includes(role);
   const canSeeReports = ['LAB', 'Dispatch', 'Weighbridge', 'Accounts', 'Manager', 'Admin'].includes(role);
   const canSeeAdminControl = role === 'Admin';
@@ -1266,7 +1266,7 @@ function applyRoleUI() {
 async function openExpenseWithSso(event) {
   if (event) event.preventDefault();
   const role = getCurrentRole();
-  if (!['Admin', 'Accounts', 'Manager'].includes(role)) {
+  if (!['Expense', 'Admin', 'Accounts', 'Manager'].includes(role)) {
     alert('You are not authorized for Expense access.');
     return;
   }
@@ -4003,7 +4003,11 @@ document.addEventListener('DOMContentLoaded', () => {
     renderCustomerOptions();
     renderGateOperatorOptions();
     refreshTransporterOptions();
-    loadTrips();
+    if (getCurrentRole() !== 'Expense') {
+      loadTrips();
+    } else {
+      showMessage('You are logged in successfully. Open Expense Portal from top menu.');
+    }
   });
   loadTaskAssignees();
   loadTaskNotifications();

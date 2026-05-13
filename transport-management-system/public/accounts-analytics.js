@@ -1,5 +1,5 @@
 let userRole = null;
-const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Accounts', 'Manager', 'Admin'];
+const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Expense', 'Accounts', 'Manager', 'Admin'];
 const EMPLOYEE_TRANSPORT_TOKEN_KEY = 'employeeTransportToken';
 const ANALYTICS_LAYOUT_KEY = 'accountsAnalyticsLayoutV1';
 let activeAnalyticsTab = 'overview';

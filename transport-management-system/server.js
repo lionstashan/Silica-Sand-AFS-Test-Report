@@ -10,7 +10,7 @@ const { appConfig, validateProductionConfig } = require('./config');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Accounts', 'Manager', 'Admin'];
+const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Expense', 'Accounts', 'Manager', 'Admin'];
 const ROLE_PINS = appConfig.rolePins;
 
 const STATUS_FLOW = [
@@ -111,6 +111,9 @@ const ROLE_PERMISSION_FALLBACK = {
     'transport.reports.edit',
     'transport.tasks.view',
     'transport.tasks.update'
+  ]),
+  Expense: new Set([
+    'transport.expense.sso'
   ]),
   Accounts: new Set([
     'transport.trip.read',
@@ -2953,7 +2956,7 @@ app.get('/assignees/by-role', async (req, res) => {
          AND u.full_name IS NOT NULL
          AND length(trim(u.full_name)) > 0
        ORDER BY ur.role_name, u.full_name`,
-      [['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Accounts', 'Manager', 'Admin']]
+      [['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Expense', 'Accounts', 'Manager', 'Admin']]
     );
     const byRole = {
       Gate: [],
@@ -4030,7 +4033,7 @@ function mapTransportRoleToExpenseRole(transportRole) {
   if (transportRole === 'Admin') return 'Admin';
   if (transportRole === 'Accounts') return 'Accounts';
   if (transportRole === 'Manager') return 'Manager';
-  if (['Gate', 'Dispatch', 'Loading', 'Weighbridge'].includes(transportRole)) return 'Employee';
+  if (transportRole === 'Expense') return 'Employee';
   return null;
 }
 

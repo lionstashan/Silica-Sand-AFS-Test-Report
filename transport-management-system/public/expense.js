@@ -240,7 +240,11 @@ async function ensureExpenseSessionFromTransport() {
     me = data.user;
     return true;
   } catch (error) {
-    $('login-msg').textContent = error.message || 'Expense SSO failed';
+    const msg = error.message || 'Expense SSO failed';
+    if (/not authorized|permission denied|forbidden/i.test(msg)) {
+      alert('You do not have Expense access. Contact Admin.');
+    }
+    $('login-msg').textContent = msg;
     redirectToMainLogin();
     return false;
   }

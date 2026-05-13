@@ -10,7 +10,7 @@ const timelineModalBody = document.getElementById('timeline-modal-body');
 const taskNotificationsBtn = document.getElementById('task-notifications-btn');
 const taskNotificationBadge = document.getElementById('task-notification-badge');
 const IST_TIMEZONE = 'Asia/Kolkata';
-const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Accounts', 'Manager', 'Admin'];
+const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Expense', 'Accounts', 'Manager', 'Admin'];
 const DISPATCH_ZONE_STATUSES = [
   'AT_DISPATCH',
   'WAITING'
@@ -83,7 +83,7 @@ function getAuthHeaders() {
 
 async function ensureExpenseTokenForRole() {
   const role = getCurrentRole();
-  if (!['Admin', 'Accounts', 'Manager'].includes(role)) return null;
+  if (!['Expense', 'Admin', 'Accounts', 'Manager'].includes(role)) return null;
   const existing = localStorage.getItem('expenseToken');
   if (existing) return existing;
   try {
@@ -102,7 +102,7 @@ function renderExpenseUnreadBadge(unreadCount) {
   const expenseLink = document.getElementById('expense-link');
   if (!expenseLink) return;
   const role = getCurrentRole();
-  if (!['Admin', 'Accounts', 'Manager'].includes(role)) return;
+  if (!['Expense', 'Admin', 'Accounts', 'Manager'].includes(role)) return;
   let badge = document.getElementById('expense-unread-badge');
   if (!badge) {
     badge = document.createElement('span');
@@ -123,7 +123,7 @@ function renderExpenseUnreadBadge(unreadCount) {
 
 async function loadExpenseUnreadCount() {
   const role = getCurrentRole();
-  if (!['Admin', 'Accounts', 'Manager'].includes(role)) return;
+  if (!['Expense', 'Admin', 'Accounts', 'Manager'].includes(role)) return;
   const token = await ensureExpenseTokenForRole();
   if (!token) return;
   try {
@@ -180,7 +180,7 @@ function showAppContent() {
   const customerPortalLink = document.getElementById('customer-portal-link');
   const adminControlLink = document.getElementById('admin-control-link');
   const reportsLink = document.getElementById('reports-link');
-  const canSeeExpense = ['Admin', 'Accounts', 'Manager'].includes(userRole);
+  const canSeeExpense = ['Expense', 'Admin', 'Accounts', 'Manager'].includes(userRole);
   const canSeeAnalytics = ['Admin', 'Accounts', 'Manager'].includes(userRole);
   const canSeeReports = ['LAB', 'Dispatch', 'Weighbridge', 'Accounts', 'Manager', 'Admin'].includes(userRole);
   const canSeeExpectedTrucks = ['Gate', 'Admin', 'Manager', 'Dispatch'].includes(userRole);
@@ -222,7 +222,7 @@ function showAppContent() {
 async function openExpenseWithSso(event) {
   if (event) event.preventDefault();
   const role = getCurrentRole();
-  if (!['Admin', 'Accounts', 'Manager'].includes(role)) {
+  if (!['Expense', 'Admin', 'Accounts', 'Manager'].includes(role)) {
     alert('You are not authorized for Expense access.');
     return;
   }
