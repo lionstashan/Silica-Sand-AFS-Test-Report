@@ -1,23 +1,14 @@
-const ROLE_PINS = {
-  Gate: 'G8P2',
-  Weighbridge: 'W3K7',
-  Dispatch: 'D9M4',
-  Loading: 'L5Q8',
-  LAB: 'L4B9',
-  Accounts: 'A6R1',
-  Manager: 'M2N6',
-  Admin: '2802'
-};
 const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Accounts', 'Manager', 'Admin'];
+const EMPLOYEE_TRANSPORT_TOKEN_KEY = 'employeeTransportToken';
 let globalToastTimer = null;
 
 function getAuthHeaders() {
   const role = localStorage.getItem('userRole');
-  const pin = role ? ROLE_PINS[role] : null;
+  const token = localStorage.getItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
   return {
     'Content-Type': 'application/json',
     'x-user-role': role || '',
-    'x-user-pin': pin || ''
+    'x-user-token': token || ''
   };
 }
 
@@ -142,7 +133,7 @@ async function loadOverview() {
     <div class="summary-card"><h3>Active Customer Users</h3><p>${data.counts.customer_users_active || 0}</p></div>
   `;
   document.getElementById('overview-flags').textContent =
-    `Flags: ENABLE_USER_AUTH_V2=${data.flags.enableUserAuthV2} | ENABLE_ADMIN_PANEL_V2=${data.flags.enableAdminPanelV2}`;
+    `Flags: ENABLE_USER_AUTH_V2=${data.flags.enableUserAuthV2} | ENABLE_ADMIN_PANEL_V2=${data.flags.enableAdminPanelV2} | ENABLE_LEGACY_PIN_AUTH=${data.flags.enableLegacyPinAuth}`;
   document.getElementById('overview-pins').textContent =
     `Current Role PINs: ${Object.entries(data.role_pins || {}).map(([k, v]) => `${k}=${v}`).join(' | ')}`;
 }

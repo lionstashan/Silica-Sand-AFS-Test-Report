@@ -1,15 +1,5 @@
 let userRole = null;
 const VALID_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Accounts', 'Manager', 'Admin'];
-const rolePINs = {
-  Gate: 'G8P2',
-  Weighbridge: 'W3K7',
-  Dispatch: 'D9M4',
-  Loading: 'L5Q8',
-  LAB: 'L4B9',
-  Accounts: 'A6R1',
-  Manager: 'M2N6',
-  Admin: '2802'
-};
 const EMPLOYEE_TRANSPORT_TOKEN_KEY = 'employeeTransportToken';
 const ANALYTICS_LAYOUT_KEY = 'accountsAnalyticsLayoutV1';
 let activeAnalyticsTab = 'overview';
@@ -51,15 +41,15 @@ function getAuthHeaders() {
   const role = getCurrentRole();
   if (!role) return {};
   const token = localStorage.getItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
-  if (token) {
-    return { 'x-user-role': role, 'x-user-token': token };
-  }
-  const pin = rolePINs[role];
-  if (!pin) return {};
-  return { 'x-user-role': role, 'x-user-pin': pin };
+  if (!token) return {};
+  return { 'x-user-role': role, 'x-user-token': token };
 }
 
 function logout() {
+  const token = localStorage.getItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
+  if (token) {
+    fetch('/auth/logout', { method: 'POST', headers: { 'x-user-token': token } }).catch(() => {});
+  }
   localStorage.removeItem('userRole');
   localStorage.removeItem('employeeAuth');
   localStorage.removeItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);

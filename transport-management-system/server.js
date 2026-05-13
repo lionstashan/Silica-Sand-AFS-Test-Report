@@ -69,6 +69,129 @@ const ROLE_ALLOWED_TARGETS = {
   Manager: [],
   Admin: STATUS_FLOW
 };
+const ROLE_PERMISSION_FALLBACK = {
+  Gate: new Set([
+    'transport.trip.create',
+    'transport.trip.read',
+    'transport.trip.update',
+    'transport.expected_trucks.view',
+    'transport.tasks.view',
+    'transport.tasks.update'
+  ]),
+  Dispatch: new Set([
+    'transport.trip.read',
+    'transport.trip.update',
+    'transport.documents.upload',
+    'transport.documents.view',
+    'transport.tasks.view',
+    'transport.tasks.update',
+    'transport.dashboard.view',
+    'transport.expected_trucks.view',
+    'transport.expected_trucks.manage',
+    'transport.customer_portal.view'
+  ]),
+  Loading: new Set([
+    'transport.trip.read',
+    'transport.trip.update',
+    'transport.tasks.view',
+    'transport.tasks.update',
+    'transport.dashboard.view'
+  ]),
+  Weighbridge: new Set([
+    'transport.trip.read',
+    'transport.trip.update',
+    'transport.documents.upload',
+    'transport.documents.view',
+    'transport.tasks.view',
+    'transport.tasks.update',
+    'transport.dashboard.view'
+  ]),
+  LAB: new Set([
+    'transport.reports.view',
+    'transport.reports.edit',
+    'transport.tasks.view',
+    'transport.tasks.update'
+  ]),
+  Accounts: new Set([
+    'transport.trip.read',
+    'transport.trip.update',
+    'transport.documents.upload',
+    'transport.documents.view',
+    'transport.tasks.view',
+    'transport.tasks.update',
+    'transport.dashboard.view',
+    'transport.analytics.view',
+    'transport.customer_portal.view',
+    'transport.expense.sso'
+  ]),
+  Manager: new Set([
+    'transport.trip.read',
+    'transport.dashboard.view',
+    'transport.analytics.view',
+    'transport.customer_portal.view',
+    'transport.expected_trucks.view',
+    'transport.documents.view',
+    'transport.reports.view',
+    'transport.tasks.view',
+    'transport.tasks.update',
+    'transport.expense.sso'
+  ]),
+  Admin: new Set([
+    'transport.trip.create',
+    'transport.trip.read',
+    'transport.trip.update',
+    'transport.trip.delete',
+    'transport.documents.upload',
+    'transport.documents.view',
+    'transport.documents.delete',
+    'transport.tasks.view',
+    'transport.tasks.update',
+    'transport.tasks.create',
+    'transport.dashboard.view',
+    'transport.analytics.view',
+    'transport.customer_portal.view',
+    'transport.expected_trucks.view',
+    'transport.expected_trucks.manage',
+    'transport.reports.view',
+    'transport.reports.edit',
+    'transport.reports.finalize',
+    'transport.admin.control',
+    'transport.customer_users.manage',
+    'transport.expense.sso'
+  ])
+};
+const ROUTE_PERMISSION_RULES = [
+  { method: 'GET', pattern: /^\/trips$/, permission: 'transport.trip.read' },
+  { method: 'POST', pattern: /^\/trip$/, permission: 'transport.trip.create' },
+  { method: 'PUT', pattern: /^\/trip\/\d+$/, permission: 'transport.trip.update' },
+  { method: 'DELETE', pattern: /^\/trip\/\d+$/, permission: 'transport.trip.delete' },
+  { method: 'GET', pattern: /^\/trip\/\d+\/documents$/, permission: 'transport.documents.view' },
+  { method: 'POST', pattern: /^\/trip\/\d+\/documents$/, permission: 'transport.documents.upload' },
+  { method: 'DELETE', pattern: /^\/trip\/\d+\/documents\/\d+$/, permission: 'transport.documents.delete' },
+  { method: 'GET', pattern: /^\/documents\/\d+\/download$/, permission: 'transport.documents.view' },
+  { method: 'GET', pattern: /^\/tasks$/, permission: 'transport.tasks.view' },
+  { method: 'GET', pattern: /^\/tasks\/\d+$/, permission: 'transport.tasks.view' },
+  { method: 'POST', pattern: /^\/tasks$/, permission: 'transport.tasks.create' },
+  { method: 'PUT', pattern: /^\/tasks\/\d+\/status$/, permission: 'transport.tasks.update' },
+  { method: 'PUT', pattern: /^\/tasks\/\d+\/reassign$/, permission: 'transport.tasks.update' },
+  { method: 'POST', pattern: /^\/tasks\/\d+\/comments$/, permission: 'transport.tasks.update' },
+  { method: 'GET', pattern: /^\/task-notifications$/, permission: 'transport.tasks.view' },
+  { method: 'POST', pattern: /^\/task-notifications\/mark-read$/, permission: 'transport.tasks.view' },
+  { method: 'GET', pattern: /^\/expected-trucks$/, permission: 'transport.expected_trucks.view' },
+  { method: 'PUT', pattern: /^\/expected-trucks\/\d+\/status$/, permission: 'transport.expected_trucks.manage' },
+  { method: 'POST', pattern: /^\/expected-trucks\/\d+\/mark-gate-in$/, permission: 'transport.expected_trucks.manage' },
+  { method: 'GET', pattern: /^\/accounts\/sales-analytics$/, permission: 'transport.analytics.view' },
+  { method: 'GET', pattern: /^\/admin\/control\//, permission: 'transport.admin.control' },
+  { method: 'POST', pattern: /^\/admin\/control\//, permission: 'transport.admin.control' },
+  { method: 'GET', pattern: /^\/admin\/customer-portal\//, permission: 'transport.customer_portal.view' },
+  { method: 'GET', pattern: /^\/admin\/customer-users$/, permission: 'transport.customer_users.manage' },
+  { method: 'POST', pattern: /^\/admin\/customer-users$/, permission: 'transport.customer_users.manage' },
+  { method: 'POST', pattern: /^\/expense\/sso/, permission: 'transport.expense.sso' },
+  { method: 'GET', pattern: /^\/api\/reports/, permission: 'transport.reports.view' },
+  { method: 'POST', pattern: /^\/api\/reports$/, permission: 'transport.reports.edit' },
+  { method: 'PUT', pattern: /^\/api\/reports\/\d+$/, permission: 'transport.reports.edit' },
+  { method: 'POST', pattern: /^\/api\/reports\/\d+\/finalize$/, permission: 'transport.reports.finalize' }
+];
 
 const FINAL_STATUSES = new Set(['COMPLETED', 'CANCELLED', 'EXITED']);
 const EXPECTED_TRUCK_STATUSES = ['SUBMITTED', 'REVIEW_PENDING', 'APPROVED', 'CANCELLED', 'EXPIRED', 'GATE_IN_DONE'];
@@ -119,6 +242,7 @@ const EXPENSE_LOGIN_MAX_ATTEMPTS = 5;
 const EXPENSE_LOGIN_WINDOW_MINUTES = 15;
 const EXPENSE_LOGIN_LOCK_MINUTES = 15;
 const BCRYPT_COST = Number.parseInt(process.env.BCRYPT_COST || '10', 10);
+const revokedTransportTokenHashes = new Set();
 fs.mkdirSync(DOC_UPLOAD_DIR, { recursive: true });
 
 const documentStorage = multer.diskStorage({
@@ -402,16 +526,24 @@ function readRoleFromRequest(req) {
   const token = tokenHeader || (bearer.toLowerCase().startsWith('bearer ') ? bearer.slice(7).trim() : '');
 
   if (token) {
-    if (!role) return { error: 'Missing role for token-authenticated request', status: 401 };
-    if (!VALID_ROLES.includes(role)) return { error: 'Invalid role', status: 403 };
     const verified = verifyTransportToken(token);
     if (verified.error) return { error: verified.error, status: verified.status };
-    const tokenRoles = Array.isArray(verified.payload.roles) ? verified.payload.roles : [];
-    if (!tokenRoles.includes(role)) {
+    const tokenRoles = Array.isArray(verified.payload.roles) ? verified.payload.roles.filter((r) => VALID_ROLES.includes(r)) : [];
+    const requestedRole = role || verified.payload.active_role || tokenRoles[0] || null;
+    if (!requestedRole) return { error: 'No active role assigned for token-authenticated request', status: 403 };
+    if (!VALID_ROLES.includes(requestedRole)) return { error: 'Invalid role', status: 403 };
+    if (!tokenRoles.includes(requestedRole)) {
       return { error: 'Role not assigned to authenticated user', status: 403 };
     }
+    const requiredPermission = getRequiredPermissionForRequest(req);
+    const permissionsByRole = verified.payload.permissions_by_role && typeof verified.payload.permissions_by_role === 'object'
+      ? verified.payload.permissions_by_role
+      : null;
+    if (requiredPermission && !hasPermissionForRole(requestedRole, requiredPermission, permissionsByRole)) {
+      return { error: `Permission denied (${requiredPermission})`, status: 403 };
+    }
     return {
-      role,
+      role: requestedRole,
       user: {
         id: verified.payload.sub,
         username: verified.payload.username,
@@ -424,13 +556,70 @@ function readRoleFromRequest(req) {
   if (!role || !pin) {
     return { error: 'Missing role credentials', status: 401 };
   }
+  if (!appConfig.flags.enableLegacyPinAuth) {
+    return { error: 'Legacy PIN auth is disabled. Please login with username/password.', status: 401 };
+  }
   if (!VALID_ROLES.includes(role)) {
     return { error: 'Invalid role', status: 403 };
   }
   if (ROLE_PINS[role] !== pin) {
     return { error: 'Invalid role PIN', status: 403 };
   }
+  const requiredPermission = getRequiredPermissionForRequest(req);
+  if (requiredPermission && !hasPermissionForRole(role, requiredPermission, null)) {
+    return { error: `Permission denied (${requiredPermission})`, status: 403 };
+  }
   return { role, auth_mode: 'pin' };
+}
+
+function getRequiredPermissionForRequest(req) {
+  const method = String(req.method || '').toUpperCase();
+  const requestPath = String(req.path || '');
+  const match = ROUTE_PERMISSION_RULES.find((rule) => rule.method === method && rule.pattern.test(requestPath));
+  return match ? match.permission : null;
+}
+
+function hasPermissionForRole(role, permission, permissionsByRole = null) {
+  if (!role || !permission) return true;
+  if (permissionsByRole && Array.isArray(permissionsByRole[role])) {
+    return permissionsByRole[role].includes(permission);
+  }
+  const fallback = ROLE_PERMISSION_FALLBACK[role];
+  return !!fallback && fallback.has(permission);
+}
+
+async function buildPermissionsByRole(roles) {
+  const normalizedRoles = Array.isArray(roles) ? roles.filter((role) => VALID_ROLES.includes(role)) : [];
+  const matrix = {};
+  normalizedRoles.forEach((role) => {
+    matrix[role] = Array.from(ROLE_PERMISSION_FALLBACK[role] || []);
+  });
+  if (!normalizedRoles.length) return matrix;
+  try {
+    const result = await pool.query(
+      `SELECT rp.role_name, p.permission_key
+       FROM role_permissions rp
+       JOIN permissions p ON p.id = rp.permission_id
+       WHERE rp.role_name = ANY($1::text[])`,
+      [normalizedRoles]
+    );
+    const grouped = {};
+    result.rows.forEach((row) => {
+      const roleName = String(row.role_name || '');
+      const permissionKey = String(row.permission_key || '');
+      if (!roleName || !permissionKey) return;
+      if (!grouped[roleName]) grouped[roleName] = new Set();
+      grouped[roleName].add(permissionKey);
+    });
+    normalizedRoles.forEach((role) => {
+      if (grouped[role] && grouped[role].size) {
+        matrix[role] = Array.from(grouped[role]);
+      }
+    });
+  } catch (error) {
+    console.error('Failed to load role permissions, using fallback matrix', error);
+  }
+  return matrix;
 }
 
 async function authenticateTransportV2WithPassword(username, password) {
@@ -689,13 +878,19 @@ function createExpenseToken(user) {
   return `${headerPart}.${payloadPart}.${signaturePart}`;
 }
 
-function createTransportToken(user, roles) {
+function createTransportToken(user, roles, activeRole = null, permissionsByRole = null) {
+  const normalizedRoles = Array.isArray(roles) ? roles : [];
+  const resolvedActiveRole = activeRole && normalizedRoles.includes(activeRole)
+    ? activeRole
+    : (normalizedRoles[0] || null);
   const now = Math.floor(Date.now() / 1000);
   const payload = {
     sub: user.id,
     username: user.username,
     full_name: user.full_name,
-    roles: Array.isArray(roles) ? roles : [],
+    roles: normalizedRoles,
+    active_role: resolvedActiveRole,
+    permissions_by_role: permissionsByRole && typeof permissionsByRole === 'object' ? permissionsByRole : undefined,
     iat: now,
     exp: now + TRANSPORT_TOKEN_TTL_SECONDS
   };
@@ -711,6 +906,10 @@ function createTransportToken(user, roles) {
 }
 
 function verifyTransportToken(token) {
+  const tokenHash = hashTransportToken(token);
+  if (revokedTransportTokenHashes.has(tokenHash)) {
+    return { error: 'Transport token revoked', status: 401 };
+  }
   const parts = String(token || '').split('.');
   if (parts.length !== 3) return { error: 'Invalid transport token format', status: 401 };
   const [headerPart, payloadPart, signaturePart] = parts;
@@ -735,6 +934,20 @@ function verifyTransportToken(token) {
     return { payload };
   } catch (_err) {
     return { error: 'Invalid transport token payload', status: 401 };
+  }
+}
+
+async function refreshRevokedTransportTokenHashes() {
+  try {
+    const result = await pool.query(
+      `SELECT token_hash FROM transport_token_revocations WHERE expires_at > NOW()`
+    );
+    revokedTransportTokenHashes.clear();
+    result.rows.forEach((row) => {
+      if (row.token_hash) revokedTransportTokenHashes.add(String(row.token_hash));
+    });
+  } catch (error) {
+    console.error('Failed to refresh transport token revocations', error);
   }
 }
 
@@ -930,6 +1143,10 @@ function getPaginationMeta({ page, limit, total }) {
 }
 
 function hashExpenseToken(token) {
+  return crypto.createHash('sha256').update(String(token || ''), 'utf8').digest('hex');
+}
+
+function hashTransportToken(token) {
   return crypto.createHash('sha256').update(String(token || ''), 'utf8').digest('hex');
 }
 
@@ -3800,8 +4017,10 @@ async function runExpectedTruckAutomation() {
 async function runExpenseSecurityCleanup() {
   try {
     await pool.query(`DELETE FROM expense_token_revocations WHERE expires_at <= NOW()`);
+    await pool.query(`DELETE FROM transport_token_revocations WHERE expires_at <= NOW()`);
     await pool.query(`DELETE FROM expense_login_attempts WHERE created_at < NOW() - INTERVAL '90 days'`);
     await pool.query(`DELETE FROM expense_sso_nonces WHERE expires_at <= NOW() OR used_at IS NOT NULL`);
+    await refreshRevokedTransportTokenHashes();
   } catch (error) {
     console.error('Expense security cleanup failed', error);
   }
@@ -3949,6 +4168,9 @@ app.post('/expense/logout', async (req, res) => {
 app.post('/expense/sso/challenge', async (req, res) => {
   const auth = readRoleFromRequest(req);
   if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.auth_mode !== 'token') {
+    return res.status(401).json({ error: 'Expense SSO requires employee token auth' });
+  }
   const expenseRole = mapTransportRoleToExpenseRole(auth.role);
   if (!expenseRole) return res.status(403).json({ error: 'You are not authorized for Expense access.' });
 
@@ -3974,15 +4196,15 @@ app.post('/expense/sso', async (req, res) => {
   const transportRole = auth.error ? null : auth.role;
   const expenseRole = mapTransportRoleToExpenseRole(transportRole);
 
-  if (auth.error || !expenseRole) {
+  if (auth.error || auth.auth_mode !== 'token' || !expenseRole) {
     await recordExpenseLoginAttempt({
       username: transportRole || 'unknown',
       ipAddress,
       success: false,
-      failureReason: auth.error || 'transport_role_not_allowed_for_expense_sso',
+      failureReason: auth.error || (auth.auth_mode !== 'token' ? 'transport_token_required_for_expense_sso' : 'transport_role_not_allowed_for_expense_sso'),
       userAgent
     });
-    return res.status(403).json({ error: 'You are not authorized for Expense access.' });
+    return res.status(403).json({ error: auth.auth_mode !== 'token' ? 'Expense SSO requires employee token auth' : 'You are not authorized for Expense access.' });
   }
 
   const nonce = String(req.header('x-sso-nonce') || '').trim();
@@ -4077,7 +4299,8 @@ app.post('/auth/v2/login', async (req, res) => {
   try {
     const auth = await authenticateTransportV2WithPassword(username, password);
     if (auth.error) return res.status(auth.status).json({ error: auth.error });
-    const token = createTransportToken(auth.user, auth.user.roles);
+    const permissionsByRole = await buildPermissionsByRole(auth.user.roles);
+    const token = createTransportToken(auth.user, auth.user.roles, auth.user.roles[0] || null, permissionsByRole);
     return res.json({ ok: true, token, user: auth.user, request_id: req.requestId });
   } catch (error) {
     console.error('Transport v2 login failed', error);
@@ -4094,7 +4317,8 @@ app.post('/auth/employee-login', async (req, res) => {
   try {
     const auth = await authenticateTransportV2WithPassword(username, password);
     if (auth.error) return res.status(auth.status).json({ error: auth.error });
-    const token = createTransportToken(auth.user, auth.user.roles);
+    const permissionsByRole = await buildPermissionsByRole(auth.user.roles);
+    const token = createTransportToken(auth.user, auth.user.roles, auth.user.roles[0] || null, permissionsByRole);
     return res.json({
       ok: true,
       token,
@@ -4110,6 +4334,130 @@ app.post('/auth/employee-login', async (req, res) => {
     console.error('Employee login failed', error);
     return res.status(500).json({ error: 'Failed to login' });
   }
+});
+
+app.post('/auth/login', async (req, res) => {
+  const username = String(req.body.username || '').trim();
+  const password = String(req.body.password || '').trim();
+  const requestedRole = normalizeEmpty(req.body.active_role);
+  if (!username || !password) {
+    return res.status(400).json({ error: 'username and password are required' });
+  }
+  try {
+    const auth = await authenticateTransportV2WithPassword(username, password);
+    if (auth.error) return res.status(auth.status).json({ error: auth.error });
+    const roles = Array.isArray(auth.user.roles) ? auth.user.roles : [];
+    const activeRole = requestedRole && roles.includes(requestedRole) ? requestedRole : (roles[0] || null);
+    const permissionsByRole = await buildPermissionsByRole(roles);
+    const token = createTransportToken(auth.user, roles, activeRole, permissionsByRole);
+    return res.json({
+      ok: true,
+      token,
+      user: {
+        id: auth.user.id,
+        username: auth.user.username,
+        full_name: auth.user.full_name,
+        roles,
+        active_role: activeRole
+      },
+      request_id: req.requestId
+    });
+  } catch (error) {
+    console.error('Unified auth login failed', error);
+    return res.status(500).json({ error: 'Failed to login' });
+  }
+});
+
+app.get('/auth/me', async (req, res) => {
+  const bearer = String(req.header('authorization') || '').trim();
+  const tokenHeader = String(req.header('x-user-token') || '').trim();
+  const token = tokenHeader || (bearer.toLowerCase().startsWith('bearer ') ? bearer.slice(7).trim() : '');
+  if (!token) return res.status(401).json({ error: 'Missing transport token' });
+  const verified = verifyTransportToken(token);
+  if (verified.error) return res.status(verified.status).json({ error: verified.error });
+  try {
+    const result = await pool.query(
+      `SELECT id, username, full_name, is_active FROM users WHERE id = $1 LIMIT 1`,
+      [verified.payload.sub]
+    );
+    if (!result.rows.length) return res.status(403).json({ error: 'User not found' });
+    const user = result.rows[0];
+    if (!user.is_active) return res.status(403).json({ error: 'User inactive' });
+    const rolesRes = await pool.query(
+      `SELECT role_name FROM user_roles WHERE user_id = $1 AND is_active = true ORDER BY role_name ASC`,
+      [user.id]
+    );
+    const roles = rolesRes.rows.map((row) => row.role_name).filter((role) => VALID_ROLES.includes(role));
+    const activeRole = normalizeEmpty(String(req.header('x-user-role') || '').trim())
+      || verified.payload.active_role
+      || roles[0]
+      || null;
+    return res.json({
+      id: user.id,
+      username: user.username,
+      full_name: user.full_name,
+      roles,
+      permissions_by_role: verified.payload.permissions_by_role || {},
+      active_role: roles.includes(activeRole) ? activeRole : (roles[0] || null)
+    });
+  } catch (error) {
+    console.error('Unified auth me failed', error);
+    return res.status(500).json({ error: 'Failed to fetch user profile' });
+  }
+});
+
+app.post('/auth/switch-role', async (req, res) => {
+  const bearer = String(req.header('authorization') || '').trim();
+  const tokenHeader = String(req.header('x-user-token') || '').trim();
+  const token = tokenHeader || (bearer.toLowerCase().startsWith('bearer ') ? bearer.slice(7).trim() : '');
+  if (!token) return res.status(401).json({ error: 'Missing transport token' });
+  const verified = verifyTransportToken(token);
+  if (verified.error) return res.status(verified.status).json({ error: verified.error });
+
+  const nextRole = String(req.body.active_role || '').trim();
+  const roles = Array.isArray(verified.payload.roles) ? verified.payload.roles.filter((r) => VALID_ROLES.includes(r)) : [];
+  if (!nextRole || !roles.includes(nextRole)) {
+    return res.status(403).json({ error: 'Requested role is not assigned to this user' });
+  }
+  const user = {
+    id: verified.payload.sub,
+    username: verified.payload.username,
+    full_name: verified.payload.full_name || null
+  };
+  const permissionsByRole = verified.payload.permissions_by_role || await buildPermissionsByRole(roles);
+  const refreshedToken = createTransportToken(user, roles, nextRole, permissionsByRole);
+  return res.json({
+    ok: true,
+    token: refreshedToken,
+    active_role: nextRole,
+    roles,
+    request_id: req.requestId
+  });
+});
+
+app.post('/auth/logout', async (req, res) => {
+  const bearer = String(req.header('authorization') || '').trim();
+  const tokenHeader = String(req.header('x-user-token') || '').trim();
+  const token = tokenHeader || (bearer.toLowerCase().startsWith('bearer ') ? bearer.slice(7).trim() : '');
+  if (!token) return res.status(401).json({ error: 'Missing transport token' });
+  const verified = verifyTransportToken(token);
+  if (verified.error) return res.status(401).json({ error: 'Invalid transport token for logout' });
+  const tokenHash = hashTransportToken(token);
+  const userId = parsePositiveId(verified.payload.sub);
+  const exp = new Date(Number(verified.payload.exp) * 1000);
+  try {
+    await pool.query(
+      `INSERT INTO transport_token_revocations(token_hash, user_id, expires_at)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (token_hash) DO NOTHING`,
+      [tokenHash, userId, exp]
+    );
+    revokedTransportTokenHashes.add(tokenHash);
+  } catch (error) {
+    console.error('Failed to revoke transport token during logout', error);
+    return res.status(500).json({ error: 'Failed to logout' });
+  }
+  return res.json({ ok: true, request_id: req.requestId });
 });
 
 app.get('/auth/v2/me', async (req, res) => {
@@ -6663,9 +7011,10 @@ app.post('/api/reports/:id/finalize', async (req, res) => {
   const existing = await pool.query(`SELECT * FROM lab_reports WHERE id = $1 LIMIT 1`, [id]);
   if (!existing.rows.length) return res.status(404).json({ error: 'Report not found' });
   const row = existing.rows[0];
+  const normalizedFinalizeDate = normalizeReportDateValue(row.report_date) || new Date().toISOString().slice(0, 10);
   const finalizedValidation = validateReportPayload(
     {
-      report_date: row.report_date,
+      report_date: normalizedFinalizeDate,
       truck_number: row.truck_number,
       trip_id: row.trip_id,
       is_generic: row.is_generic,
@@ -6683,13 +7032,14 @@ app.post('/api/reports/:id/finalize', async (req, res) => {
     const result = await client.query(
       `UPDATE lab_reports
        SET status = 'FINALIZED',
+           report_date = COALESCE(report_date, $4::date),
            finalized_by_role = $2,
            finalized_by_name = $3,
            finalized_at = NOW(),
            updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
-      [id, auth.role, auth.user?.full_name || auth.user?.username || auth.role]
+      [id, auth.role, auth.user?.full_name || auth.user?.username || auth.role, normalizedFinalizeDate]
     );
     await client.query(
       `INSERT INTO lab_report_history(report_id, action_type, actor_role, actor_name, old_values_json, new_values_json, request_id)
@@ -6718,6 +7068,7 @@ validateProductionConfig();
 initDb()
   .then(async () => {
     await migratePlainExpensePasswords();
+    await refreshRevokedTransportTokenHashes();
     runExpectedTruckAutomation();
     runExpenseSecurityCleanup();
     setInterval(runExpectedTruckAutomation, 5 * 60 * 1000);

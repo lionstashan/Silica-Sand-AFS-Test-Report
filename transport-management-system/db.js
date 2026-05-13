@@ -539,6 +539,19 @@ async function initDb() {
     ON expense_token_revocations(expires_at)
   `);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS transport_token_revocations (
+      id SERIAL PRIMARY KEY,
+      token_hash TEXT NOT NULL UNIQUE,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      revoked_at TIMESTAMPTZ DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_transport_token_revocations_expires_at
+    ON transport_token_revocations(expires_at)
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS transport_expense_user_map (
       id SERIAL PRIMARY KEY,
       transport_username TEXT,
@@ -605,6 +618,59 @@ async function initDb() {
       UNIQUE(role_name, permission_id)
     )
   `);
+  const defaultPermissions = [
+    ['transport.trip.create', 'Create transport trips'],
+    ['transport.trip.read', 'Read transport trips'],
+    ['transport.trip.update', 'Update transport trip state/details'],
+    ['transport.trip.delete', 'Delete transport trips'],
+    ['transport.documents.upload', 'Upload transport documents'],
+    ['transport.documents.view', 'View transport documents'],
+    ['transport.documents.delete', 'Delete transport documents'],
+    ['transport.tasks.view', 'View task board'],
+    ['transport.tasks.update', 'Update/reassign/comment task'],
+    ['transport.tasks.create', 'Create task'],
+    ['transport.dashboard.view', 'View transport dashboard'],
+    ['transport.analytics.view', 'View accounts analytics'],
+    ['transport.customer_portal.view', 'View customer portal admin data'],
+    ['transport.expected_trucks.view', 'View expected trucks'],
+    ['transport.expected_trucks.manage', 'Manage expected trucks'],
+    ['transport.reports.view', 'View lab reports'],
+    ['transport.reports.edit', 'Create or edit lab reports'],
+    ['transport.reports.finalize', 'Finalize lab reports'],
+    ['transport.admin.control', 'Manage admin control panel'],
+    ['transport.customer_users.manage', 'Manage customer portal users'],
+    ['transport.expense.sso', 'Access expense via transport SSO']
+  ];
+  for (const [permissionKey, description] of defaultPermissions) {
+    await pool.query(
+      `INSERT INTO permissions(permission_key, description)
+       VALUES ($1, $2)
+       ON CONFLICT (permission_key) DO NOTHING`,
+      [permissionKey, description]
+    );
+  }
+  const rolePermissionDefaults = {
+    Gate: ['transport.trip.create', 'transport.trip.read', 'transport.trip.update', 'transport.expected_trucks.view', 'transport.tasks.view', 'transport.tasks.update'],
+    Dispatch: ['transport.trip.read', 'transport.trip.update', 'transport.documents.upload', 'transport.documents.view', 'transport.tasks.view', 'transport.tasks.update', 'transport.dashboard.view', 'transport.expected_trucks.view', 'transport.expected_trucks.manage', 'transport.customer_portal.view'],
+    Loading: ['transport.trip.read', 'transport.trip.update', 'transport.tasks.view', 'transport.tasks.update', 'transport.dashboard.view'],
+    Weighbridge: ['transport.trip.read', 'transport.trip.update', 'transport.documents.upload', 'transport.documents.view', 'transport.tasks.view', 'transport.tasks.update', 'transport.dashboard.view'],
+    LAB: ['transport.reports.view', 'transport.reports.edit', 'transport.tasks.view', 'transport.tasks.update'],
+    Accounts: ['transport.trip.read', 'transport.trip.update', 'transport.documents.upload', 'transport.documents.view', 'transport.tasks.view', 'transport.tasks.update', 'transport.dashboard.view', 'transport.analytics.view', 'transport.customer_portal.view', 'transport.expense.sso'],
+    Manager: ['transport.trip.read', 'transport.dashboard.view', 'transport.analytics.view', 'transport.customer_portal.view', 'transport.expected_trucks.view', 'transport.documents.view', 'transport.reports.view', 'transport.tasks.view', 'transport.tasks.update', 'transport.expense.sso'],
+    Admin: ['transport.trip.create', 'transport.trip.read', 'transport.trip.update', 'transport.trip.delete', 'transport.documents.upload', 'transport.documents.view', 'transport.documents.delete', 'transport.tasks.view', 'transport.tasks.update', 'transport.tasks.create', 'transport.dashboard.view', 'transport.analytics.view', 'transport.customer_portal.view', 'transport.expected_trucks.view', 'transport.expected_trucks.manage', 'transport.reports.view', 'transport.reports.edit', 'transport.reports.finalize', 'transport.admin.control', 'transport.customer_users.manage', 'transport.expense.sso']
+  };
+  for (const [roleName, keys] of Object.entries(rolePermissionDefaults)) {
+    for (const permissionKey of keys) {
+      await pool.query(
+        `INSERT INTO role_permissions(role_name, permission_id)
+         SELECT $1, p.id
+         FROM permissions p
+         WHERE p.permission_key = $2
+         ON CONFLICT (role_name, permission_id) DO NOTHING`,
+        [roleName, permissionKey]
+      );
+    }
+  }
   await pool.query(`
     CREATE TABLE IF NOT EXISTS admin_master_values (
       id SERIAL PRIMARY KEY,

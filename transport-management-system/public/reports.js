@@ -1,15 +1,6 @@
-const ROLE_PINS = {
-  Gate: 'G8P2',
-  Weighbridge: 'W3K7',
-  Dispatch: 'D9M4',
-  Loading: 'L5Q8',
-  LAB: 'L4B9',
-  Accounts: 'A6R1',
-  Manager: 'M2N6',
-  Admin: '2802'
-};
 const VIEW_ROLES = ['LAB', 'Dispatch', 'Weighbridge', 'Accounts', 'Manager', 'Admin'];
 const EDIT_ROLES = ['LAB', 'Admin'];
+const EMPLOYEE_TRANSPORT_TOKEN_KEY = 'employeeTransportToken';
 const SIEVE_DEFAULTS = [
   [1, '10', '1700', 0, 5],
   [2, '20', '850', 0, 10],
@@ -44,10 +35,10 @@ function setButtonBusy(button, busy, busyText = 'Working...') {
 function getAuthHeaders() {
   const role = localStorage.getItem('userRole');
   currentRole = role;
-  const token = localStorage.getItem('employeeTransportToken');
+  const token = localStorage.getItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
   if (!role) return {};
-  if (token) return { 'x-user-role': role, 'x-user-token': token };
-  return { 'x-user-role': role, 'x-user-pin': ROLE_PINS[role] || '' };
+  if (!token) return {};
+  return { 'x-user-role': role, 'x-user-token': token };
 }
 
 function showMessage(msg, ok = true) {
@@ -373,6 +364,10 @@ async function loadReports() {
 }
 
 function logout() {
+  const token = localStorage.getItem('employeeTransportToken');
+  if (token) {
+    fetch('/auth/logout', { method: 'POST', headers: { 'x-user-token': token } }).catch(() => {});
+  }
   localStorage.removeItem('userRole');
   localStorage.removeItem('employeeAuth');
   localStorage.removeItem('employeeTransportToken');
@@ -446,7 +441,6 @@ async function init() {
   });
   document.getElementById('r-afs-mult').addEventListener('input', computeTotals);
   document.getElementById('reports-error-ok-btn')?.addEventListener('click', closeErrorModal);
-  document.getElementById('reports-error-close-btn')?.addEventListener('click', closeErrorModal);
   document.getElementById('reports-error-modal')?.addEventListener('click', (e) => {
     if (e.target?.id === 'reports-error-modal') closeErrorModal();
   });

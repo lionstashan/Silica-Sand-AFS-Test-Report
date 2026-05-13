@@ -62,17 +62,6 @@ const AUTO_STATUS_TRANSITIONS = {
   BILLING_COMPLETED: 'COMPLETED'
 };
 
-const ROLE_PINS = {
-  Gate: 'G8P2',
-  Weighbridge: 'W3K7',
-  Dispatch: 'D9M4',
-  Loading: 'L5Q8',
-  LAB: 'L4B9',
-  Accounts: 'A6R1',
-  Manager: 'M2N6',
-  Admin: '2802'
-};
-
 const ROLE_ALLOWED_TARGETS = {
   Gate: ['EXITED'],
   Dispatch: ['AT_DISPATCH', 'WAITING', 'READY_FOR_LOADING', 'CANCELLED'],
@@ -226,17 +215,10 @@ function getAuthHeaders() {
   const role = getCurrentRole();
   if (!role) return {};
   const token = localStorage.getItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
-  if (token) {
-    return {
-      'x-user-role': role,
-      'x-user-token': token
-    };
-  }
-  const pin = ROLE_PINS[role];
-  if (!pin) return {};
+  if (!token) return {};
   return {
     'x-user-role': role,
-    'x-user-pin': pin
+    'x-user-token': token
   };
 }
 
@@ -1182,25 +1164,13 @@ async function markAllTaskNotificationsRead() {
 
 function showRoleSelection() {
   document.getElementById('role-modal').style.display = 'flex';
-  document.getElementById('pin-modal').style.display = 'none';
   const employeeRoleSelectModal = document.getElementById('employee-role-select-modal');
   if (employeeRoleSelectModal) employeeRoleSelectModal.style.display = 'none';
   document.body.style.overflow = 'hidden';
 }
 
-function showPINEntry(selectedRole) {
-  document.getElementById('role-modal').style.display = 'none';
-  document.getElementById('pin-modal').style.display = 'flex';
-  document.getElementById('pin-role-label').textContent = `Enter PIN for ${selectedRole}`;
-  document.getElementById('pin-input').value = '';
-  document.getElementById('pin-error-message').style.display = 'none';
-  document.getElementById('pin-input').focus();
-  window.currentSelectedRole = selectedRole;
-}
-
 function hideModals() {
   document.getElementById('role-modal').style.display = 'none';
-  document.getElementById('pin-modal').style.display = 'none';
   const employeeRoleSelectModal = document.getElementById('employee-role-select-modal');
   if (employeeRoleSelectModal) employeeRoleSelectModal.style.display = 'none';
   document.body.style.overflow = 'auto';
@@ -1333,11 +1303,14 @@ function showAppContent() {
   applyRoleUI();
 }
 
-function validatePIN(role, pin) {
-  return ROLE_PINS[role] === pin;
-}
-
 function logout() {
+  const token = localStorage.getItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
+  if (token) {
+    fetch('/auth/logout', {
+      method: 'POST',
+      headers: { 'x-user-token': token }
+    }).catch(() => {});
+  }
   localStorage.removeItem('userRole');
   localStorage.removeItem('employeeAuth');
   localStorage.removeItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
@@ -1373,7 +1346,7 @@ async function loginEmployee() {
   loginBtn.disabled = true;
   showEmployeeLoginMessage('');
   try {
-    const response = await fetch('/auth/employee-login', {
+    const response = await fetch('/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password })
@@ -1390,7 +1363,8 @@ async function loginEmployee() {
       id: data.user.id,
       username: data.user.username,
       full_name: data.user.full_name,
-      roles
+      roles,
+      active_role: data.user.active_role || null
     }));
     if (data.token) {
       localStorage.setItem(EMPLOYEE_TRANSPORT_TOKEN_KEY, data.token);
@@ -3939,56 +3913,6 @@ document.addEventListener('DOMContentLoaded', () => {
       closeAdminWorkflowModal();
       closeTaskDetailModal();
       closeTasksModal();
-    }
-  });
-
-  document.querySelectorAll('.role-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      showPINEntry(btn.getAttribute('data-role'));
-    });
-  });
-  document.getElementById('show-legacy-login-btn')?.addEventListener('click', () => {
-    const legacyWrap = document.getElementById('legacy-role-buttons');
-    const toggleBtn = document.getElementById('show-legacy-login-btn');
-    if (!legacyWrap || !toggleBtn) return;
-    const isHidden = legacyWrap.style.display === 'none';
-    legacyWrap.style.display = isHidden ? 'grid' : 'none';
-    toggleBtn.textContent = isHidden ? 'Hide Legacy PIN Login' : 'Use Legacy PIN Login';
-  });
-
-  document.getElementById('pin-submit-btn').addEventListener('click', () => {
-    const pin = document.getElementById('pin-input').value;
-    const selectedRole = window.currentSelectedRole;
-
-    if (!pin || pin.length !== 4) {
-      document.getElementById('pin-error-message').textContent = 'PIN must be 4 characters';
-      document.getElementById('pin-error-message').style.display = 'block';
-      return;
-    }
-
-    if (validatePIN(selectedRole, pin)) {
-      localStorage.removeItem('employeeAuth');
-      localStorage.removeItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
-      userRole = selectedRole;
-      localStorage.setItem('userRole', userRole);
-      window.location.reload();
-      return;
-    }
-
-    document.getElementById('pin-error-message').textContent = 'Invalid PIN';
-    document.getElementById('pin-error-message').style.display = 'block';
-    document.getElementById('pin-input').value = '';
-    document.getElementById('pin-input').focus();
-  });
-
-  document.getElementById('pin-cancel-btn').addEventListener('click', () => {
-    window.currentSelectedRole = null;
-    showRoleSelection();
-  });
-
-  document.getElementById('pin-input').addEventListener('keypress', (event) => {
-    if (event.key === 'Enter') {
-      document.getElementById('pin-submit-btn').click();
     }
   });
 

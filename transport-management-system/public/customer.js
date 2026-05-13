@@ -7,9 +7,7 @@ const TRANSPORTER_STORAGE_KEY = 'transporterOptions';
 const TRANSPORTER_STORAGE_VERSION_KEY = 'transporterOptionsVersion';
 const TRANSPORTER_STORAGE_VERSION = '2026-05-12-master-source';
 const LOCATION_STORAGE_KEY = 'locationOptions';
-const ROLE_PINS = {
-  Admin: '2802'
-};
+const EMPLOYEE_TRANSPORT_TOKEN_KEY = 'employeeTransportToken';
 
 const BASE_TRANSPORTER_OPTIONS = [];
 
@@ -374,9 +372,11 @@ function isAdminSession() {
 
 function getAdminAuthHeaders() {
   if (!isAdminSession()) return {};
+  const token = localStorage.getItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
+  if (!token) return {};
   return {
     'x-user-role': 'Admin',
-    'x-user-pin': ROLE_PINS.Admin
+    'x-user-token': token
   };
 }
 

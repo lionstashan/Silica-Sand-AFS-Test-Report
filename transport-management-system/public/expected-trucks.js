@@ -1,14 +1,6 @@
-const ROLE_PINS = {
-  Gate: 'G8P2',
-  Weighbridge: 'W3K7',
-  Dispatch: 'D9M4',
-  Loading: 'L5Q8',
-  Accounts: 'A6R1',
-  Manager: 'M2N6',
-  Admin: '2802'
-};
 const ALLOWED_ROLES = ['Gate', 'Dispatch', 'Manager', 'Admin'];
 const IST_TIMEZONE = 'Asia/Kolkata';
+const EMPLOYEE_TRANSPORT_TOKEN_KEY = 'employeeTransportToken';
 
 let userRole = null;
 let employeeSessionRoles = [];
@@ -60,11 +52,11 @@ function getEmployeeAuthSession() {
 
 function getAuthHeaders() {
   const role = getStoredRole();
-  const pin = role ? ROLE_PINS[role] : null;
-  if (!role || !pin) return {};
+  const token = localStorage.getItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
+  if (!role || !token) return {};
   return {
     'x-user-role': role,
-    'x-user-pin': pin
+    'x-user-token': token
   };
 }
 
@@ -96,27 +88,6 @@ function showGlobalToast(text, success = true) {
       if (wrap.contains(toast)) wrap.removeChild(toast);
     }, 200);
   }, success ? 2600 : 5000);
-}
-
-function showRoleSelection() {
-  document.getElementById('role-modal').style.display = 'flex';
-  document.getElementById('pin-modal').style.display = 'none';
-  document.body.style.overflow = 'hidden';
-}
-
-function showPINEntry(role) {
-  window.currentSelectedRole = role;
-  document.getElementById('role-modal').style.display = 'none';
-  document.getElementById('pin-modal').style.display = 'flex';
-  document.getElementById('pin-role-label').textContent = `Enter PIN for ${role}`;
-  document.getElementById('pin-input').value = '';
-  document.getElementById('pin-error-message').style.display = 'none';
-}
-
-function hideModals() {
-  document.getElementById('role-modal').style.display = 'none';
-  document.getElementById('pin-modal').style.display = 'none';
-  document.body.style.overflow = 'auto';
 }
 
 function showAppContent() {
@@ -178,14 +149,18 @@ function initializeRole() {
   const role = getStoredRole();
   if (role) {
     userRole = role;
-    hideModals();
     showAppContent();
     return;
   }
-  showRoleSelection();
+  const next = encodeURIComponent(window.location.pathname + (window.location.search || ''));
+  window.location.replace(`/?next=${next}`);
 }
 
 function logout() {
+  const token = localStorage.getItem('employeeTransportToken');
+  if (token) {
+    fetch('/auth/logout', { method: 'POST', headers: { 'x-user-token': token } }).catch(() => {});
+  }
   localStorage.removeItem('userRole');
   localStorage.removeItem('employeeAuth');
   localStorage.removeItem('employeeTransportToken');
@@ -348,28 +323,6 @@ function startAutoRefresh() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('.role-btn').forEach((button) => {
-    button.addEventListener('click', () => showPINEntry(button.dataset.role));
-  });
-
-  document.getElementById('pin-submit-btn').addEventListener('click', () => {
-    const role = window.currentSelectedRole;
-    const pin = document.getElementById('pin-input').value;
-    if (!role || ROLE_PINS[role] !== pin) {
-      const msg = document.getElementById('pin-error-message');
-      msg.textContent = 'Invalid PIN';
-      msg.style.display = 'block';
-      return;
-    }
-    localStorage.setItem('userRole', role);
-    userRole = role;
-    hideModals();
-    showAppContent();
-    loadExpectedTrucks();
-    startAutoRefresh();
-  });
-  document.getElementById('pin-cancel-btn').addEventListener('click', showRoleSelection);
-
   document.getElementById('logout-link').addEventListener('click', (event) => {
     event.preventDefault();
     logout();

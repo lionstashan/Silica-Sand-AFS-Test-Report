@@ -42,17 +42,7 @@ const istDatePartsFormatter = new Intl.DateTimeFormat('en-CA', {
   day: '2-digit'
 });
 
-// Hardcoded PINs for each role
-const rolePINs = {
-  'Gate': 'G8P2',
-  'Weighbridge': 'W3K7',
-  'Dispatch': 'D9M4',
-  'Loading': 'L5Q8',
-  'LAB': 'L4B9',
-  'Accounts': 'A6R1',
-  'Manager': 'M2N6',
-  'Admin': '2802'
-};
+const EMPLOYEE_TRANSPORT_TOKEN_KEY = 'employeeTransportToken';
 
 function getStoredRole() {
   const storedRole = localStorage.getItem('userRole');
@@ -83,11 +73,11 @@ function getEmployeeAuthSession() {
 
 function getAuthHeaders() {
   const role = getCurrentRole();
-  const pin = role ? rolePINs[role] : null;
-  if (!role || !pin) return {};
+  const token = localStorage.getItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
+  if (!role || !token) return {};
   return {
     'x-user-role': role,
-    'x-user-pin': pin
+    'x-user-token': token
   };
 }
 
@@ -161,33 +151,11 @@ function initializeRole() {
       window.location.replace('/');
       return;
     }
-    hideModals();
     showAppContent();
   } else {
-    showRoleSelection();
+    const next = encodeURIComponent(window.location.pathname + (window.location.search || ''));
+    window.location.replace(`/?next=${next}`);
   }
-}
-
-function showRoleSelection() {
-  document.getElementById('role-modal').style.display = 'flex';
-  document.getElementById('pin-modal').style.display = 'none';
-  document.body.style.overflow = 'hidden';
-}
-
-function showPINEntry(selectedRole) {
-  document.getElementById('role-modal').style.display = 'none';
-  document.getElementById('pin-modal').style.display = 'flex';
-  document.getElementById('pin-role-label').textContent = `Enter PIN for ${selectedRole}`;
-  document.getElementById('pin-input').value = '';
-  document.getElementById('pin-error-message').style.display = 'none';
-  document.getElementById('pin-input').focus();
-  window.currentSelectedRole = selectedRole;
-}
-
-function hideModals() {
-  document.getElementById('role-modal').style.display = 'none';
-  document.getElementById('pin-modal').style.display = 'none';
-  document.body.style.overflow = 'auto';
 }
 
 function showAppContent() {
@@ -303,11 +271,11 @@ async function loadTaskNotifications() {
   } catch (_error) {}
 }
 
-function validatePIN(role, pin) {
-  return rolePINs[role] === pin;
-}
-
 function logout() {
+  const token = localStorage.getItem('employeeTransportToken');
+  if (token) {
+    fetch('/auth/logout', { method: 'POST', headers: { 'x-user-token': token } }).catch(() => {});
+  }
   localStorage.removeItem('userRole');
   localStorage.removeItem('employeeAuth');
   localStorage.removeItem('employeeTransportToken');
@@ -324,49 +292,6 @@ function logout() {
 
 // Setup event listeners for role selection
 document.addEventListener('DOMContentLoaded', () => {
-  // Role selection buttons
-  document.querySelectorAll('.role-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      showPINEntry(btn.getAttribute('data-role'));
-    });
-  });
-
-  // PIN submission
-  document.getElementById('pin-submit-btn').addEventListener('click', () => {
-    const pin = document.getElementById('pin-input').value;
-    const selectedRole = window.currentSelectedRole;
-
-    if (!pin || pin.length !== 4) {
-      document.getElementById('pin-error-message').textContent = 'PIN must be 4 characters';
-      document.getElementById('pin-error-message').style.display = 'block';
-      return;
-    }
-
-    if (validatePIN(selectedRole, pin)) {
-      userRole = selectedRole;
-      localStorage.setItem('userRole', userRole);
-      window.location.reload();
-    } else {
-      document.getElementById('pin-error-message').textContent = 'Invalid PIN';
-      document.getElementById('pin-error-message').style.display = 'block';
-      document.getElementById('pin-input').value = '';
-      document.getElementById('pin-input').focus();
-    }
-  });
-
-  // PIN cancel button
-  document.getElementById('pin-cancel-btn').addEventListener('click', () => {
-    window.currentSelectedRole = null;
-    showRoleSelection();
-  });
-
-  // PIN input enter key
-  document.getElementById('pin-input').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-      document.getElementById('pin-submit-btn').click();
-    }
-  });
-
   // Logout link
   document.getElementById('logout-link').addEventListener('click', (e) => {
     e.preventDefault();

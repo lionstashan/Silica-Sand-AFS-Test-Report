@@ -1,20 +1,11 @@
-const ROLE_PINS = {
-  Gate: 'G8P2',
-  Weighbridge: 'W3K7',
-  Dispatch: 'D9M4',
-  Loading: 'L5Q8',
-  LAB: 'L4B9',
-  Accounts: 'A6R1',
-  Manager: 'M2N6',
-  Admin: '2802'
-};
+const EMPLOYEE_TRANSPORT_TOKEN_KEY = 'employeeTransportToken';
 
 function getAuthHeaders() {
   const role = localStorage.getItem('userRole');
-  const token = localStorage.getItem('employeeTransportToken');
+  const token = localStorage.getItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
   if (!role) return {};
-  if (token) return { 'x-user-role': role, 'x-user-token': token };
-  return { 'x-user-role': role, 'x-user-pin': ROLE_PINS[role] || '' };
+  if (!token) return {};
+  return { 'x-user-role': role, 'x-user-token': token };
 }
 
 function escapeHtml(value) {

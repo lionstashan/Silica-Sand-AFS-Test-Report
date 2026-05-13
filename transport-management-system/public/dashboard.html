@@ -7,42 +7,6 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <!-- Role Selection Modal -->
-  <div id="role-modal" style="display: none;">
-    <div class="role-modal-content">
-      <h2>Select Your Role</h2>
-      <div class="role-buttons">
-        <button class="role-btn" data-role="Gate">Gate</button>
-        <button class="role-btn" data-role="Weighbridge">Weighbridge</button>
-        <button class="role-btn" data-role="Dispatch">Dispatch</button>
-        <button class="role-btn" data-role="Loading">Loading</button>
-        <button class="role-btn" data-role="LAB">LAB</button>
-        <button class="role-btn" data-role="Accounts">Accounts</button>
-        <button class="role-btn" data-role="Manager">Manager</button>
-        <button class="role-btn" data-role="Admin">Admin</button>
-      </div>
-      <div class="public-portal-links">
-        <p>Portal Access</p>
-        <div class="public-portal-links-row">
-          <a href="/expense" class="public-portal-link">Expense Portal</a>
-          <a href="/customer" class="public-portal-link">Customer Portal</a>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- PIN Entry Modal -->
-  <div id="pin-modal" style="display: none;">
-    <div class="pin-modal-content">
-      <h2>Enter PIN</h2>
-      <p id="pin-role-label"></p>
-      <input type="password" id="pin-input" placeholder="Enter 4-character PIN" maxlength="4" />
-      <button id="pin-submit-btn">Submit</button>
-      <button id="pin-cancel-btn">Back</button>
-      <p id="pin-error-message" style="color: #b91c1c; display: none;"></p>
-    </div>
-  </div>
-
   <header>
     <h1>Indus Silica Sand - Transport Management Dashboard</h1>
     <p>Real-time overview of transport operations.</p>

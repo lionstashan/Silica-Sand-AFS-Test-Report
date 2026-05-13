@@ -10,18 +10,7 @@
   <!-- Role Selection Modal -->
   <div id="role-modal" style="display: none;">
     <div class="role-modal-content">
-      <h2>Select Your Role</h2>
-      <button type="button" id="show-legacy-login-btn" class="workflow-btn" style="margin-bottom:10px;">Use Legacy PIN Login</button>
-      <div class="role-buttons" id="legacy-role-buttons" style="display:none;">
-        <button class="role-btn" data-role="Gate">Gate</button>
-        <button class="role-btn" data-role="Weighbridge">Weighbridge</button>
-        <button class="role-btn" data-role="Dispatch">Dispatch</button>
-        <button class="role-btn" data-role="Loading">Loading</button>
-        <button class="role-btn" data-role="Accounts">Accounts</button>
-        <button class="role-btn" data-role="LAB">LAB</button>
-        <button class="role-btn" data-role="Manager">Manager</button>
-        <button class="role-btn" data-role="Admin">Admin</button>
-      </div>
+      <h2>Employee Login</h2>
       <div class="public-portal-links">
         <p>Portal Access</p>
         <div class="public-portal-links-row">
@@ -52,18 +41,6 @@
       <select id="employee-role-select"></select>
       <button id="employee-role-submit-btn">Continue</button>
       <button id="employee-role-cancel-btn">Back</button>
-    </div>
-  </div>
-
-  <!-- PIN Entry Modal -->
-  <div id="pin-modal" style="display: none;">
-    <div class="pin-modal-content">
-      <h2>Enter PIN</h2>
-      <p id="pin-role-label"></p>
-      <input type="password" id="pin-input" placeholder="Enter 4-character PIN" maxlength="4" />
-      <button id="pin-submit-btn">Submit</button>
-      <button id="pin-cancel-btn">Back</button>
-      <p id="pin-error-message" style="color: #b91c1c; display: none;"></p>
     </div>
   </div>
 

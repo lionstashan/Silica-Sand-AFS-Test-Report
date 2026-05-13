@@ -38,7 +38,8 @@ function getRolePins() {
 const appConfig = {
   flags: {
     enableUserAuthV2: toBoolean(process.env.ENABLE_USER_AUTH_V2, false),
-    enableAdminPanelV2: toBoolean(process.env.ENABLE_ADMIN_PANEL_V2, false)
+    enableAdminPanelV2: toBoolean(process.env.ENABLE_ADMIN_PANEL_V2, false),
+    enableLegacyPinAuth: toBoolean(process.env.ENABLE_LEGACY_PIN_AUTH, true)
   },
   secrets: {
     customerTokenSecret: String(process.env.CUSTOMER_TOKEN_SECRET || DEFAULTS.CUSTOMER_TOKEN_SECRET),
