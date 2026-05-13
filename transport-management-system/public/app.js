@@ -222,6 +222,11 @@ function getAuthHeaders() {
   return { 'x-user-role': role, 'x-user-token': token };
 }
 
+function hasEmployeeAuth() {
+  const headers = getAuthHeaders();
+  return !!headers['x-user-token'] && !!headers['x-user-role'];
+}
+
 async function ensureExpenseTokenForRole() {
   const role = getCurrentRole();
   if (!['Expense', 'Admin', 'Accounts', 'Manager'].includes(role)) return null;
@@ -3999,31 +4004,35 @@ document.addEventListener('DOMContentLoaded', () => {
   initializeRole();
   syncTripsTableHeader();
   refreshStatusFilterOptions();
-  Promise.all([loadMasterDropdownOptions(), loadRoleBasedPersonDropdowns(), loadPricingDefaults(), loadCustomerOptions()]).finally(() => {
+  if (hasEmployeeAuth()) {
+    Promise.all([loadMasterDropdownOptions(), loadRoleBasedPersonDropdowns(), loadPricingDefaults(), loadCustomerOptions()]).finally(() => {
+      renderCustomerOptions();
+      renderGateOperatorOptions();
+      refreshTransporterOptions();
+      if (getCurrentRole() !== 'Expense') {
+        loadTrips();
+      } else {
+        showMessage('You are logged in successfully. Open Expense Portal from top menu.');
+      }
+    });
+    loadTaskAssignees();
+    loadTaskNotifications();
+    autoOpenTasksFromQuery();
+    loadExpenseUnreadCount();
+  } else {
     renderCustomerOptions();
     renderGateOperatorOptions();
     refreshTransporterOptions();
-    if (getCurrentRole() !== 'Expense') {
-      loadTrips();
-    } else {
-      showMessage('You are logged in successfully. Open Expense Portal from top menu.');
-    }
-  });
-  loadTaskAssignees();
-  loadTaskNotifications();
-  autoOpenTasksFromQuery();
-  loadExpenseUnreadCount();
+  }
 
   if (tasksNotificationPoll) clearInterval(tasksNotificationPoll);
   if (expenseNotificationPoll) clearInterval(expenseNotificationPoll);
   tasksNotificationPoll = setInterval(() => {
-    const role = getCurrentRole();
-    if (!role) return;
+    if (!hasEmployeeAuth()) return;
     loadTaskNotifications();
   }, 15000);
   expenseNotificationPoll = setInterval(() => {
-    const role = getCurrentRole();
-    if (!role) return;
+    if (!hasEmployeeAuth()) return;
     loadExpenseUnreadCount();
   }, 15000);
 
