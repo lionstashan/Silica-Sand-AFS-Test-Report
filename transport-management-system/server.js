@@ -6257,7 +6257,11 @@ function resolveStoredFilePath(storagePath) {
     candidates.push(path.resolve(raw));
   }
   candidates.push(path.resolve(__dirname, raw));
-  if (!raw.startsWith('uploads/')) {
+  if (raw.startsWith('uploads/')) {
+    const withoutUploadsPrefix = raw.slice('uploads/'.length);
+    candidates.push(path.resolve(UPLOADS_ROOT_DIR, withoutUploadsPrefix));
+    candidates.push(path.resolve(DOC_UPLOAD_DIR, withoutUploadsPrefix));
+  } else {
     candidates.push(path.resolve(UPLOADS_ROOT_DIR, raw));
     candidates.push(path.resolve(DOC_UPLOAD_DIR, raw));
   }
@@ -6573,8 +6577,9 @@ async function attachFinalizedReportSnapshot(client, reportRow) {
   const now = new Date().toISOString().replace(/[:.]/g, '-');
   const safeReportNo = String(reportRow.report_number || `report-${reportRow.id}`).replace(/[^A-Za-z0-9_-]/g, '_');
   const fileName = `${safeReportNo}.html`;
-  const relativePath = path.join('uploads', 'docs', 'reports', `${safeReportNo}-${now}.html`);
-  const absolutePath = path.resolve(__dirname, relativePath);
+  const reportStorageName = `${safeReportNo}-${now}.html`;
+  const absolutePath = path.join(DOC_UPLOAD_DIR, 'reports', reportStorageName);
+  const relativePath = path.relative(__dirname, absolutePath);
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
 
   const html = `<!DOCTYPE html>
