@@ -368,8 +368,6 @@ async function submitReport() {
     sample_type: document.getElementById('r-sample-type').value || null,
     sample_point: document.getElementById('r-sample-point').value || null,
     sample_point_other: document.getElementById('r-sample-point-other').value.trim() || null,
-    sieve_size: document.getElementById('r-sieve-size').value.trim(),
-    afs_reference: document.getElementById('r-afs-ref').value.trim(),
     afs_multiplier: Number(document.getElementById('r-afs-mult').value || 1),
     lab_user_name: document.getElementById('r-lab-user').value,
     notes: document.getElementById('r-notes').value.trim(),
@@ -416,8 +414,6 @@ async function loadReportForEdit(id) {
   document.getElementById('r-sample-point').value = r.sample_point || '';
   refreshSamplePointOptions();
   document.getElementById('r-sample-point-other').value = r.sample_point_other || '';
-  document.getElementById('r-sieve-size').value = r.sieve_size || '';
-  document.getElementById('r-afs-ref').value = r.afs_reference || '';
   document.getElementById('r-afs-mult').value = Number(r.afs_multiplier || 1);
   document.getElementById('r-notes').value = r.notes || '';
   renderLineItems(Array.isArray(r.line_items_json) && r.line_items_json.length ? r.line_items_json : SIEVE_DEFAULTS);

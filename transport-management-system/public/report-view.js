@@ -132,6 +132,33 @@ function renderSieveChart(items) {
   `;
 }
 
+function buildMetaItems(report) {
+  const sampleType = String(report?.sample_type || '').trim();
+  const samplePoint = String(report?.sample_point || '').trim();
+  const samplePointOther = String(report?.sample_point_other || '').trim();
+  const truckNumber = String(report?.truck_number || '').trim();
+  const customerName = String(report?.customer_name || '').trim();
+  const loadingPoint = String(report?.loading_point || '').trim();
+  const tripId = report?.trip_id ? String(report.trip_id) : '';
+  const reportNo = String(report?.report_number || '').trim();
+
+  const items = [];
+  if (reportNo) items.push({ label: 'Report No', value: reportNo });
+  if (sampleType) items.push({ label: 'Sample Type', value: sampleType });
+  if (samplePoint) items.push({ label: 'Sample Point', value: samplePoint });
+  if (samplePoint === 'Other' && samplePointOther) items.push({ label: 'Sample Point Detail', value: samplePointOther });
+
+  const isProduction = sampleType === 'Production';
+  if (!isProduction) {
+    if (truckNumber) items.push({ label: 'Truck', value: truckNumber });
+    if (customerName) items.push({ label: 'Customer', value: customerName });
+    if (loadingPoint) items.push({ label: 'Loading Point', value: loadingPoint });
+    if (tripId) items.push({ label: 'Trip ID', value: tripId });
+  }
+
+  return items;
+}
+
 async function init() {
   if (!window.AppPermissions?.requireEmployeeSession?.(window.location.pathname + (window.location.search || ''))) {
     return;
@@ -208,12 +235,8 @@ async function init() {
       btn.textContent = original;
     }
   });
-  const [hasPrev, hasNext] = await Promise.all([
-    findNeighborReportId(id, 'prev').then(Boolean).catch(() => false),
-    findNeighborReportId(id, 'next').then(Boolean).catch(() => false)
-  ]);
-  document.getElementById('rv-prev-btn').disabled = !hasPrev;
-  document.getElementById('rv-next-btn').disabled = !hasNext;
+
+  // Render current report first so view is never blocked by neighbor probing.
   const data = await api(`/api/reports/${id}`);
   const report = data.report;
   const snapshotBranding = report?.branding_snapshot_json && typeof report.branding_snapshot_json === 'object'
@@ -232,6 +255,10 @@ async function init() {
     footer_text: 'Quality report generated for internal QA reference.'
   };
   const mergedBranding = mergeBrandingWithFallback(fallbackBranding, liveBranding, snapshotBranding);
+  const logoUrl = String(mergedBranding.logo_url || '').trim();
+  if (!logoUrl || /atomic|test|logo-mark/i.test(logoUrl)) {
+    mergedBranding.logo_url = '/assets/brand/logo-primary.png';
+  }
   document.getElementById('rv-title').textContent = `Lab Report (${report.status})`;
   document.getElementById('rv-branding').innerHTML = `
     <div class="rv-brand-head">
@@ -249,13 +276,10 @@ async function init() {
       </div>
     </div>
   `;
-  document.getElementById('rv-meta').innerHTML = `
-    <div><strong>Report No:</strong> ${escapeHtml(report.report_number || '-')}</div>
-    <div><strong>Truck:</strong> ${escapeHtml(report.truck_number || '-')}</div>
-    <div><strong>Customer:</strong> ${escapeHtml(report.customer_name || '-')}</div>
-    <div><strong>Loading Point:</strong> ${escapeHtml(report.loading_point || '-')}</div>
-    <div><strong>Trip ID:</strong> ${escapeHtml(report.trip_id || '-')}</div>
-  `;
+  const metaItems = buildMetaItems(report);
+  document.getElementById('rv-meta').innerHTML = metaItems.map((item) => `
+    <div><strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(item.value || '-')}</div>
+  `).join('');
   document.getElementById('rv-date').textContent = escapeHtml(report.report_date || '-');
   document.getElementById('rv-material').textContent = escapeHtml(report.material_type || '-');
   document.getElementById('rv-grade').textContent = escapeHtml(report.grade || '-');
@@ -280,6 +304,14 @@ async function init() {
     ${hasBrandingValue(mergedBranding.email) ? `<span>✉️ ${escapeHtml(mergedBranding.email)}</span>` : ''}
     ${hasBrandingValue(mergedBranding.address) ? `<span>📍 ${escapeHtml(mergedBranding.address)}</span>` : ''}
   `;
+
+  // Check previous/next availability after main report render.
+  const [hasPrev, hasNext] = await Promise.all([
+    findNeighborReportId(id, 'prev').then(Boolean).catch(() => false),
+    findNeighborReportId(id, 'next').then(Boolean).catch(() => false)
+  ]);
+  document.getElementById('rv-prev-btn').disabled = !hasPrev;
+  document.getElementById('rv-next-btn').disabled = !hasNext;
 }
 
 init().catch((error) => {
