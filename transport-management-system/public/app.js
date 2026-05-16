@@ -214,7 +214,7 @@ function hasRoleAccess(allowedRoles) {
 }
 
 function canReadTripsForCurrentRole() {
-  return hasRoleAccess(['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Manager', 'Admin']);
+  return hasRoleAccess(['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Accounts', 'Manager', 'Admin']);
 }
 
 function getAuthHeaders() {

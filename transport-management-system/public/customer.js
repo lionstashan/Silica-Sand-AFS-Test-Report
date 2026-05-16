@@ -34,6 +34,7 @@ let expectedRows = [];
 let transporterOptions = [];
 let tripDocumentsByTripId = new Map();
 let tripTimelineByTripId = new Map();
+let customerMastersLoaded = false;
 
 const loginPanel = document.getElementById('login-panel');
 const adminCustomerPanel = document.getElementById('admin-customer-panel');
@@ -347,6 +348,13 @@ function showMessage(text, success = true) {
   showGlobalToast(text, success);
 }
 
+function setExpectedSubmitEnabled(enabled, reason = '') {
+  const submitBtn = document.querySelector('#expected-form button[type="submit"]');
+  if (!submitBtn) return;
+  submitBtn.disabled = !enabled;
+  submitBtn.title = enabled ? '' : reason;
+}
+
 function showLoginMessage(text, success = false) {
   if (!loginMessageEl) return;
   loginMessageEl.textContent = text;
@@ -616,8 +624,14 @@ async function loadCustomerMasterOptions() {
     DISPATCH_DROPDOWNS.packing = normalizeMasterList(data.packing, DEFAULT_DISPATCH_DROPDOWNS.packing);
     transporterOptions = normalizeMasterList(data.transporters, BASE_TRANSPORTER_OPTIONS);
     locationOptions = normalizeMasterList(data.locations, []);
+    const hasCoreMasters = ['materials', 'grades', 'conditions', 'packing']
+      .every((key) => Array.isArray(data[key]) && data[key].length > 0);
+    customerMastersLoaded = hasCoreMasters;
+    setExpectedSubmitEnabled(hasCoreMasters, 'Master data not loaded from Control Panel.');
   } catch (_error) {
     DISPATCH_DROPDOWNS = { ...DEFAULT_DISPATCH_DROPDOWNS };
+    customerMastersLoaded = false;
+    setExpectedSubmitEnabled(false, 'Master data not loaded from Control Panel.');
   }
 }
 
@@ -988,6 +1002,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   initTransporterTypeahead();
+  setExpectedSubmitEnabled(false, 'Loading master data...');
   await loadCustomerMasterOptions();
   initCustomerDropdowns();
   refreshLocationOptions();
@@ -1015,6 +1030,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
     event.preventDefault();
+    if (!customerMastersLoaded) {
+      showMessage('Master data is not loaded. Please refresh or contact Admin.', false);
+      return;
+    }
     const formData = new FormData(event.target);
     const payload = {
       customer_name: String(customerUser?.customer_name || formData.get('customer_name') || '').trim(),

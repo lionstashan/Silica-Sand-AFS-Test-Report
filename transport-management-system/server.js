@@ -6788,6 +6788,13 @@ function escapeHtmlText(value) {
     .replace(/'/g, '&#39;');
 }
 
+function formatReportDateForSnapshot(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' });
+}
+
 async function attachLabReportSnapshot(client, reportRow) {
   if (!reportRow || !reportRow.trip_id) return null;
   const lineItems = Array.isArray(reportRow.line_items_json) ? reportRow.line_items_json : [];
@@ -6803,11 +6810,17 @@ async function attachLabReportSnapshot(client, reportRow) {
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>${escapeHtmlText(reportRow.report_number)} - Lab Report Snapshot</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtmlText(reportRow.report_number)} - Lab Report</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
-    h1 { margin: 0 0 8px; font-size: 20px; }
-    .meta { margin-bottom: 16px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+    body { font-family: Arial, sans-serif; margin: 18px; color: #0f172a; background: #fff; }
+    .brand-wrap { border: 1px solid #dbe7f4; border-radius: 10px; padding: 10px 12px; background: #f9fcff; margin-bottom: 10px; display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+    .brand-left { font-size: 1.2rem; font-weight: 800; color: #0f4c81; }
+    .brand-right { display:flex; gap:10px; align-items:flex-start; }
+    .brand-right img { width:180px; height:72px; object-fit:contain; border:1px solid #d7e2f0; border-radius:6px; background:#fff; }
+    .brand-legal { font-size: 0.8rem; line-height: 1.4; color: #334155; }
+    .meta { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:8px; margin-bottom:8px; }
+    .summary { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:8px; border:1px solid #e2e8f0; background:#f8fafc; padding:8px 10px; border-radius:8px; margin-bottom:8px; }
     table { width: 100%; border-collapse: collapse; margin-top: 10px; }
     th, td { border: 1px solid #cbd5e1; padding: 6px; font-size: 12px; text-align: left; }
     th { background: #f1f5f9; }
@@ -6815,20 +6828,36 @@ async function attachLabReportSnapshot(client, reportRow) {
   </style>
 </head>
 <body>
-  <h1>${escapeHtmlText(reportRow.report_number)} (Lab Report)</h1>
+  <div class="brand-wrap">
+    <div class="brand-left">Indus Silica Sand</div>
+    <div class="brand-right">
+      <img src="/assets/brand/logo-primary.png" alt="Indus Silica Sand" />
+      <div class="brand-legal">
+        <div><strong>GST:</strong> 08ABCDE1234F1Z5</div>
+        <div><strong>CIN:</strong> U14290RJ2020PTC000000</div>
+        <div><strong>Site:</strong> www.indussilicasand.in</div>
+      </div>
+    </div>
+  </div>
   <div class="meta">
-    <div><strong>Date:</strong> ${escapeHtmlText(reportRow.report_date)}</div>
-    <div><strong>Truck:</strong> ${escapeHtmlText(reportRow.truck_number)}</div>
+    <div><strong>Report No:</strong> ${escapeHtmlText(reportRow.report_number || '-')}</div>
+    <div><strong>Truck:</strong> ${escapeHtmlText(reportRow.truck_number || '-')}</div>
     <div><strong>Customer:</strong> ${escapeHtmlText(reportRow.customer_name || '-')}</div>
     <div><strong>Loading Point:</strong> ${escapeHtmlText(reportRow.loading_point || '-')}</div>
+    <div><strong>Trip ID:</strong> ${escapeHtmlText(reportRow.trip_id || '-')}</div>
+    <div><strong>Sample Type:</strong> ${escapeHtmlText(reportRow.sample_type || '-')}</div>
+    <div><strong>Sample Point:</strong> ${escapeHtmlText(reportRow.sample_point || '-')}</div>
+    <div><strong>Lab User:</strong> ${escapeHtmlText(reportRow.lab_user_name || '-')}</div>
+  </div>
+  <div class="summary">
+    <div><strong>Date:</strong> ${escapeHtmlText(formatReportDateForSnapshot(reportRow.report_date))}</div>
     <div><strong>Material:</strong> ${escapeHtmlText(reportRow.material_type || '-')}</div>
     <div><strong>Grade:</strong> ${escapeHtmlText(reportRow.grade || '-')}</div>
-    <div><strong>Sieve Size:</strong> ${escapeHtmlText(reportRow.sieve_size || '-')}</div>
-    <div><strong>AFS:</strong> ${escapeHtmlText(Number(reportRow.total_afs || 0).toFixed(2))}</div>
+    <div><strong>AFS Value:</strong> ${escapeHtmlText(Number(reportRow.total_afs || 0).toFixed(2))}</div>
   </div>
   <table>
     <thead>
-      <tr><th>Sr</th><th>Mesh</th><th>Aperture</th><th>Weight</th><th>Factor</th><th>Product</th></tr>
+      <tr><th>Sr</th><th>Sieve</th><th>Aperture</th><th>Weight</th><th>Factor</th><th>Product</th></tr>
     </thead>
     <tbody>
       ${lineItems.map((row, index) => `
