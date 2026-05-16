@@ -213,6 +213,10 @@ function hasRoleAccess(allowedRoles) {
   return !!role && allowedRoles.includes(role);
 }
 
+function canReadTripsForCurrentRole() {
+  return hasRoleAccess(['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Manager', 'Admin']);
+}
+
 function getAuthHeaders() {
   const shared = window.AppPermissions?.getAuthHeaders?.();
   if (shared && typeof shared === 'object' && Object.keys(shared).length) return shared;
@@ -4035,10 +4039,12 @@ document.addEventListener('DOMContentLoaded', () => {
       renderCustomerOptions();
       renderGateOperatorOptions();
       refreshTransporterOptions();
-      if (getCurrentRole() !== 'Expense') {
+      if (canReadTripsForCurrentRole()) {
         loadTrips();
-      } else {
+      } else if (getCurrentRole() === 'Expense') {
         showMessage('You are logged in successfully. Open Expense Portal from top menu.');
+      } else {
+        showMessage('Role is active. Trip list is not available for this role.');
       }
     });
     loadTaskAssignees();

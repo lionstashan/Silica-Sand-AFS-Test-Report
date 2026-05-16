@@ -1,11 +1,12 @@
 const EMPLOYEE_TRANSPORT_TOKEN_KEY = 'employeeTransportToken';
 
 function getAuthHeaders() {
+  const shared = window.AppPermissions?.getAuthHeaders?.();
+  if (shared && Object.keys(shared).length) return shared;
   const role = localStorage.getItem('userRole');
   const token = localStorage.getItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
-  if (!role) return {};
   if (!token) return {};
-  return { 'x-user-role': role, 'x-user-token': token };
+  return role ? { 'x-user-role': role, 'x-user-token': token } : { 'x-user-token': token };
 }
 
 function escapeHtml(value) {
@@ -224,5 +225,10 @@ async function init() {
 }
 
 init().catch((error) => {
-  document.body.innerHTML = `<section class="panel"><p style="color:#b91c1c;">${escapeHtml(error.message)}</p></section>`;
+  document.body.innerHTML = `
+    <section class="panel" style="max-width:760px;margin:24px auto;">
+      <h2 style="margin:0 0 12px;">Unable to Load Report</h2>
+      <p style="color:#b91c1c;margin:0 0 8px;">${escapeHtml(error.message || 'Unknown error')}</p>
+      <p style="margin:0;color:#475569;">Try switching role to LAB/Accounts/Manager/Admin and refresh.</p>
+    </section>`;
 });
