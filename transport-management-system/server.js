@@ -499,7 +499,6 @@ async function getActiveCustomerUserByIdAndUsername(id, username) {
 
 async function authenticateCustomerWithPassword(username, password) {
   try {
-    const { page, limit } = getPagination(req);
     const result = await pool.query(
       `SELECT id, customer_name, username, display_name, is_active, password
        FROM customer_users
