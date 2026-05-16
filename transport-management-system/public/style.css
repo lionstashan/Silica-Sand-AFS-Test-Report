@@ -61,12 +61,12 @@ header nav {
   position: absolute;
   top: 12px;
   left: 16px;
+  right: 16px;
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  justify-content: flex-start;
-  max-width: 360px;
+  justify-content: flex-end;
 }
 
 .nav-link {
@@ -91,7 +91,7 @@ header nav {
 }
 
 .header-actions .role-indicator {
-  margin-right: 0;
+  margin-right: auto;
 }
 
 .nav-link:hover {
@@ -353,10 +353,6 @@ button.is-busy::after {
   header h1,
   header nav {
     max-width: calc(100% - 300px);
-  }
-
-  .header-actions {
-    max-width: 280px;
   }
 }
 
