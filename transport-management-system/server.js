@@ -109,6 +109,7 @@ const ROLE_PERMISSION_FALLBACK = {
     'transport.dashboard.view'
   ]),
   LAB: new Set([
+    'transport.trip.read',
     'transport.reports.view',
     'transport.reports.edit',
     'transport.reports.finalize',
