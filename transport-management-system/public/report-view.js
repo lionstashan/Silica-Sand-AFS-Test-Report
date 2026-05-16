@@ -257,7 +257,6 @@ async function init() {
   const mergedBranding = mergeBrandingWithFallback(fallbackBranding, liveBranding, snapshotBranding);
   // Force canonical Indus logo in report view to avoid stale/legacy logo URLs.
   mergedBranding.logo_url = '/assets/brand/logo-primary.png';
-  document.getElementById('rv-title').textContent = 'Lab Report';
   document.getElementById('rv-branding').innerHTML = `
     <div class="rv-brand-head">
       <div class="rv-brand-left">

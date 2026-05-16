@@ -98,6 +98,15 @@ header nav {
   white-space: nowrap;
 }
 
+.header-actions #role-switcher,
+.workflow-row #role-switcher {
+  width: auto;
+  min-width: 110px;
+  max-width: 160px;
+  flex: 0 0 auto;
+  padding-right: 28px;
+}
+
 .nav-link:hover {
   background: rgba(255, 255, 255, 0.3);
 }
