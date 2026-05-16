@@ -644,6 +644,7 @@ async function initDb() {
     ['transport.reports.view', 'View lab reports'],
     ['transport.reports.edit', 'Create or edit lab reports'],
     ['transport.reports.finalize', 'Finalize lab reports'],
+    ['transport.reports.delete', 'Delete lab reports'],
     ['transport.admin.control', 'Manage admin control panel'],
     ['transport.customer_users.manage', 'Manage customer portal users'],
     ['transport.expense.sso', 'Access expense via transport SSO']
@@ -665,7 +666,7 @@ async function initDb() {
     Expense: ['transport.expense.sso'],
     Accounts: ['transport.trip.read', 'transport.trip.update', 'transport.documents.upload', 'transport.documents.view', 'transport.reports.view', 'transport.tasks.view', 'transport.tasks.update', 'transport.dashboard.view', 'transport.analytics.view', 'transport.customer_portal.view', 'transport.expense.sso'],
     Manager: ['transport.trip.read', 'transport.dashboard.view', 'transport.analytics.view', 'transport.customer_portal.view', 'transport.expected_trucks.view', 'transport.documents.view', 'transport.reports.view', 'transport.tasks.view', 'transport.tasks.update', 'transport.expense.sso'],
-    Admin: ['transport.trip.create', 'transport.trip.read', 'transport.trip.update', 'transport.trip.delete', 'transport.documents.upload', 'transport.documents.view', 'transport.documents.delete', 'transport.tasks.view', 'transport.tasks.update', 'transport.tasks.create', 'transport.dashboard.view', 'transport.analytics.view', 'transport.customer_portal.view', 'transport.expected_trucks.view', 'transport.expected_trucks.manage', 'transport.reports.view', 'transport.reports.edit', 'transport.reports.finalize', 'transport.admin.control', 'transport.customer_users.manage', 'transport.expense.sso']
+    Admin: ['transport.trip.create', 'transport.trip.read', 'transport.trip.update', 'transport.trip.delete', 'transport.documents.upload', 'transport.documents.view', 'transport.documents.delete', 'transport.tasks.view', 'transport.tasks.update', 'transport.tasks.create', 'transport.dashboard.view', 'transport.analytics.view', 'transport.customer_portal.view', 'transport.expected_trucks.view', 'transport.expected_trucks.manage', 'transport.reports.view', 'transport.reports.edit', 'transport.reports.finalize', 'transport.reports.delete', 'transport.admin.control', 'transport.customer_users.manage', 'transport.expense.sso']
   };
   for (const [roleName, keys] of Object.entries(rolePermissionDefaults)) {
     for (const permissionKey of keys) {
@@ -695,6 +696,41 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_admin_master_values_type_active
     ON admin_master_values(master_type, is_active, updated_at DESC)
   `);
+  const defaultReportSampleMasters = [
+    ['report_sample_types', 'Production'],
+    ['report_sample_types', 'Inhouse'],
+    ['report_sample_types', 'Supply'],
+    ['report_sample_points_production', 'Screw1'],
+    ['report_sample_points_production', 'Screw2'],
+    ['report_sample_points_production', 'Screw3'],
+    ['report_sample_points_production', 'Glass Plant'],
+    ['report_sample_points_production', 'Dry Plant New'],
+    ['report_sample_points_production', 'Dry Plant Old'],
+    ['report_sample_points_production', 'Raw Material'],
+    ['report_sample_points_production', 'Other'],
+    ['report_sample_points_inhouse', 'Floor1'],
+    ['report_sample_points_inhouse', 'Floor2'],
+    ['report_sample_points_inhouse', 'Floor3'],
+    ['report_sample_points_inhouse', 'Floor4'],
+    ['report_sample_points_inhouse', 'Dry Plant New'],
+    ['report_sample_points_inhouse', 'Dry Plant Old'],
+    ['report_sample_points_inhouse', 'Glass Plant'],
+    ['report_sample_points_supply', 'Floor1'],
+    ['report_sample_points_supply', 'Floor2'],
+    ['report_sample_points_supply', 'Floor3'],
+    ['report_sample_points_supply', 'Floor4'],
+    ['report_sample_points_supply', 'Dry Plant New'],
+    ['report_sample_points_supply', 'Dry Plant Old'],
+    ['report_sample_points_supply', 'Glass Plant']
+  ];
+  for (const [masterType, value] of defaultReportSampleMasters) {
+    await pool.query(
+      `INSERT INTO admin_master_values(master_type, value, is_active, metadata_json)
+       VALUES($1, $2, true, '{}'::jsonb)
+       ON CONFLICT(master_type, value) DO NOTHING`,
+      [masterType, value]
+    );
+  }
   await pool.query(`
     CREATE TABLE IF NOT EXISTS admin_settings (
       key TEXT PRIMARY KEY,
@@ -736,6 +772,17 @@ async function initDb() {
   await pool.query(`
     ALTER TABLE lab_reports
     ADD COLUMN IF NOT EXISTS sieve_size TEXT
+  `);
+  await pool.query(`
+    ALTER TABLE lab_reports
+    ADD COLUMN IF NOT EXISTS sample_type TEXT,
+    ADD COLUMN IF NOT EXISTS sample_point TEXT,
+    ADD COLUMN IF NOT EXISTS sample_point_other TEXT,
+    ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS deleted_by_role TEXT,
+    ADD COLUMN IF NOT EXISTS deleted_by_name TEXT
   `);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_lab_reports_report_date

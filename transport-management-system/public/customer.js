@@ -87,6 +87,28 @@ function parseTripDate(value) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+function mapCustomerTripRow(row = {}) {
+  const mapped = {
+    ...row,
+    linked_trip_id: row.linked_trip_id ?? row.trip_id ?? null,
+    truck_number: row.truck_number ?? '',
+    current_status: row.current_status ?? row.trip_status ?? row.status ?? '-',
+    customer_name: row.customer_name ?? row.display_name ?? '',
+    expected_quantity_mt: row.expected_quantity_mt ?? row.expected_weight ?? null,
+    trip_net_weight: row.trip_net_weight ?? row.net_weight ?? null,
+    material_type: row.material_type ?? '',
+    grade: row.grade ?? '',
+    condition: row.condition ?? '',
+    packing: row.packing ?? '',
+    location: row.location ?? '',
+    submitted_at: row.submitted_at ?? row.created_at ?? null,
+    trip_in_time: row.trip_in_time ?? row.in_time ?? null,
+    trip_out_time: row.trip_out_time ?? row.out_time ?? null,
+    status_history: parseStatusHistory(row)
+  };
+  return mapped;
+}
+
 function formatTimeOnly(value) {
   if (!value) return '-';
   const d = new Date(value);
@@ -274,18 +296,18 @@ async function openTimelineModal(tripId) {
   }
   if (requestSeq !== timelineRequestSeq) return;
 
-  const effective = {
+  const effective = mapCustomerTripRow({
     ...row,
     ...timelineRow,
     trip_status: timelineRow?.status ?? row?.trip_status,
     trip_in_time: timelineRow?.in_time ?? row?.trip_in_time,
     trip_out_time: timelineRow?.out_time ?? row?.trip_out_time,
     trip_net_weight: timelineRow?.net_weight ?? row?.trip_net_weight
-  };
+  });
 
   timelineModalBody.innerHTML = `
     <div class="timeline-meta">
-      <div><strong>Current:</strong> ${escapeHtml(statusToLabel(effective.current_status || effective.trip_status || effective.status || '-'))}</div>
+      <div><strong>Current:</strong> ${escapeHtml(statusToLabel(effective.current_status || '-'))}</div>
       <div><strong>Customer:</strong> ${escapeHtml(effective.customer_name || '-')}</div>
       <div><strong>In Time:</strong> ${formatDateTime(effective.trip_in_time)}</div>
       <div><strong>Out Time:</strong> ${formatDateTime(effective.trip_out_time)}</div>
@@ -801,6 +823,7 @@ async function loadSummary() {
 }
 
 function renderExpectedRows(data) {
+  const rows = Array.isArray(data) ? data.map(mapCustomerTripRow) : [];
   const getDocLinks = (row) => {
     const tripId = row.linked_trip_id;
     if (!tripId) return '-';
@@ -813,11 +836,11 @@ function renderExpectedRows(data) {
 
   const isMobile = window.matchMedia('(max-width: 768px)').matches;
   if (!isMobile) {
-    expectedTable.innerHTML = data.map((row) => `
+    expectedTable.innerHTML = rows.map((row) => `
       <tr>
         <td>${row.linked_trip_id ? `#${row.linked_trip_id}` : '-'}</td>
         <td>${getTruckTimelineLink(row)}</td>
-        <td>${escapeHtml(row.current_status || row.status)}</td>
+        <td>${escapeHtml(row.current_status)}</td>
         <td>${escapeHtml(row.customer_name || '-')}</td>
         <td>${formatWeight(row.expected_quantity_mt)}</td>
         <td>${formatWeight(row.trip_net_weight)}</td>
@@ -829,11 +852,11 @@ function renderExpectedRows(data) {
     expectedMobileList.innerHTML = '';
   } else {
     expectedTable.innerHTML = '';
-    expectedMobileList.innerHTML = data.map((row) => `
+    expectedMobileList.innerHTML = rows.map((row) => `
       <article class="mobile-trip-card">
         <div class="mobile-trip-head">
           <div class="mobile-trip-truck">${getTruckTimelineLink(row)}</div>
-          <div>${escapeHtml(row.current_status || row.status)}</div>
+          <div>${escapeHtml(row.current_status)}</div>
         </div>
         <div class="mobile-trip-grid">
           <div><strong>Trp No.:</strong> ${row.linked_trip_id ? `#${row.linked_trip_id}` : '-'}</div>
@@ -925,7 +948,7 @@ async function loadExpectedTrucks() {
     const err = await response.json().catch(() => ({}));
     throw new Error(err.error || 'Failed to load expected trucks');
   }
-  expectedRows = await response.json();
+  expectedRows = (await response.json()).map(mapCustomerTripRow);
   tripTimelineByTripId = new Map();
   await refreshTripDocumentsForRows(expectedRows);
   refreshLocationOptions(expectedRows);

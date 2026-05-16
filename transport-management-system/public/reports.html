@@ -8,10 +8,11 @@
 </head>
 <body>
   <header>
-    <h1>Indus Silica Sand - Reports Portal</h1>
+    <h1 class="brand-title"><img src="/assets/brand/logo-mark.png" alt="Indus Silica Sand" class="brand-logo" />Indus Silica Sand - Reports Portal</h1>
     <p>Create and review lab reports with auto calculations.</p>
     <div class="header-actions">
       <span id="role-indicator" class="role-indicator" style="display:none;"></span>
+      <select id="role-switcher" class="nav-link nav-btn" style="display:none;"></select>
       <a href="#" id="logout-link" class="nav-link" style="display:none;">Logout</a>
     </div>
     <nav>
@@ -24,10 +25,10 @@
     <h2>Report Form</h2>
     <form id="report-form" class="form-grid">
       <label>Report Date
-        <input type="date" id="r-date" required />
+        <input type="date" id="r-date" />
       </label>
       <label>Truck Number
-        <input type="text" id="r-truck" list="truck-options" required />
+        <input type="text" id="r-truck" list="truck-options" />
         <datalist id="truck-options"></datalist>
       </label>
       <label>Linked Trip ID
@@ -50,6 +51,22 @@
       </label>
       <label>Grade
         <input type="text" id="r-grade" />
+      </label>
+      <label>Sample Type
+        <select id="r-sample-type">
+          <option value="">Select</option>
+          <option value="Production">Production</option>
+          <option value="Inhouse">Inhouse</option>
+          <option value="Supply">Supply</option>
+        </select>
+      </label>
+      <label>Sample Point
+        <select id="r-sample-point">
+          <option value="">Select</option>
+        </select>
+      </label>
+      <label id="r-sample-point-other-wrap" style="display:none;">Sample Point (Other)
+        <input type="text" id="r-sample-point-other" placeholder="Enter sample point" />
       </label>
       <label>Sieve Size
         <input type="text" id="r-sieve-size" placeholder="e.g. 40-50 AFS" />
@@ -108,6 +125,37 @@
             <option value="FINALIZED">FINALIZED</option>
           </select>
         </label>
+        <label>Customer
+          <input type="text" id="f-customer" placeholder="Customer name" />
+        </label>
+        <label>AFS Block
+          <select id="f-afs-block">
+            <option value="">All</option>
+            <option value="<30">Below 30</option>
+            <option value="30-35">30-35</option>
+            <option value="35-40">35-40</option>
+            <option value="40-45">40-45</option>
+            <option value="45-50">45-50</option>
+            <option value="50-55">50-55</option>
+            <option value="55-60">55-60</option>
+            <option value="60-65">60-65</option>
+            <option value="65-70">65-70</option>
+            <option value="70-75">70-75</option>
+            <option value="75-80">75-80</option>
+            <option value="80-85">80-85</option>
+            <option value=">85">Above 85</option>
+            <option value="Missing">Unbanded</option>
+          </select>
+        </label>
+        <label>Sieve-1 Mesh
+          <input type="text" id="f-sieve-1" value="200" />
+        </label>
+        <label>Sieve-2 Mesh
+          <input type="text" id="f-sieve-2" value="140" />
+        </label>
+        <label>Sieve-3 Mesh
+          <input type="text" id="f-sieve-3" value="100" />
+        </label>
         <button type="button" id="load-reports-btn">Load Reports</button>
       </div>
     </div>
@@ -115,7 +163,7 @@
       <table>
         <thead>
           <tr>
-            <th>ID</th><th>Date</th><th>Truck</th><th>Customer</th><th>Loading Point</th><th>Sieve Size</th><th>AFS</th><th>Status</th><th>Action</th>
+            <th>ID</th><th>Truck</th><th>Customer</th><th>Sample Type</th><th>Sample Point</th><th>AFS (Exact)</th><th>AFS Block</th><th id="th-sieve-1">Sieve-1</th><th id="th-sieve-2">Sieve-2</th><th id="th-sieve-3">Sieve-3</th><th>Status</th><th>Action</th>
           </tr>
         </thead>
         <tbody id="reports-table"></tbody>

@@ -1,4 +1,5 @@
 const EMPLOYEE_TRANSPORT_TOKEN_KEY = 'employeeTransportToken';
+const REPORT_VIEW_ROLES = ['LAB', 'Dispatch', 'Weighbridge', 'Accounts', 'Manager', 'Admin'];
 
 function getAuthHeaders() {
   const shared = window.AppPermissions?.getAuthHeaders?.();
@@ -118,6 +119,47 @@ async function init() {
   if (!window.AppPermissions?.requireEmployeeSession?.(window.location.pathname + (window.location.search || ''))) {
     return;
   }
+  const currentRole = window.AppPermissions?.getCurrentRole?.() || '';
+  if (!REPORT_VIEW_ROLES.includes(currentRole)) {
+    window.AppPermissions?.showNoAccess?.('You do not have access to Report Viewer.');
+    window.location.href = '/';
+    return;
+  }
+  const roleIndicator = document.getElementById('role-indicator');
+  if (roleIndicator) {
+    roleIndicator.style.display = 'inline-block';
+    roleIndicator.textContent = window.AppPermissions?.getEmployeeIdentityLabel?.() || `Role: ${currentRole}`;
+  }
+  window.AppPermissions?.renderRoleSwitcher?.('role-switcher', {
+    Gate: '/',
+    Dispatch: '/dashboard',
+    Loading: '/dashboard',
+    Weighbridge: '/dashboard',
+    LAB: '/reports',
+    Expense: '/expense',
+    Accounts: '/reports',
+    Manager: '/reports',
+    Admin: '/reports'
+  });
+  const logoutLink = document.getElementById('rv-logout-link');
+  if (logoutLink) {
+    logoutLink.style.display = 'inline-block';
+    logoutLink.addEventListener('click', (event) => {
+      event.preventDefault();
+      const token = localStorage.getItem(EMPLOYEE_TRANSPORT_TOKEN_KEY);
+      if (token) fetch('/auth/logout', { method: 'POST', headers: { 'x-user-token': token } }).catch(() => {});
+      localStorage.removeItem('userRole');
+      localStorage.removeItem('employeeAuth');
+      localStorage.removeItem('employeeTransportToken');
+      localStorage.removeItem('expenseToken');
+      localStorage.removeItem('expenseUser');
+      localStorage.removeItem('customerUsername');
+      localStorage.removeItem('customerPassword');
+      localStorage.removeItem('customerToken');
+      localStorage.removeItem('adminSelectedCustomerUserId');
+      window.location.href = '/';
+    });
+  }
   const id = getReportId();
   if (!id) return;
   document.getElementById('rv-print-btn').addEventListener('click', () => window.print());
@@ -164,7 +206,7 @@ async function init() {
   const branding = Object.keys(snapshotBranding).length ? snapshotBranding : liveBranding;
   const fallbackBranding = {
     company_name: 'Indus Silica Sand',
-    logo_url: '',
+    logo_url: '/assets/brand/logo-primary.png',
     gst_no: '08ABCDE1234F1Z5',
     cin: 'U14290RJ2020PTC000000',
     website: 'www.indussilicasand.in',

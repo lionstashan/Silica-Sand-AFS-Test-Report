@@ -169,7 +169,7 @@ function showAppContent() {
   const roleIndicator = document.getElementById('role-indicator');
   if (roleIndicator && userRole) {
     roleIndicator.style.display = 'inline-block';
-    roleIndicator.textContent = `Role: ${userRole}`;
+    roleIndicator.textContent = window.AppPermissions?.getEmployeeIdentityLabel?.() || `Role: ${userRole}`;
   }
   if (taskNotificationsBtn) {
     taskNotificationsBtn.style.display = 'inline-block';

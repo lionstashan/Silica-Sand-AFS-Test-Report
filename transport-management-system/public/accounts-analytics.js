@@ -9,6 +9,7 @@ const ANALYTICS_SAVED_VIEWS_KEY = 'accountsAnalyticsSavedViewsV1';
 let activeAnalyticsTab = 'overview';
 let analyticsLayout = { hidden: {}, order: {} };
 let lastAnalyticsPayload = null;
+let analyticsLoadRequestSeq = 0;
 
 function escapeHtml(value) {
   return String(value || '')
@@ -91,6 +92,20 @@ function getCurrentFilterState() {
   };
 }
 
+function getDefaultFilterState() {
+  return {
+    from_date: '',
+    to_date: '',
+    customer: '',
+    grade: '',
+    material: '',
+    afs_min: '',
+    afs_max: '',
+    afs_band: '',
+    status_scope: 'BILLED_ONLY'
+  };
+}
+
 function applyFilterState(filters = {}) {
   const setValue = (id, value) => {
     const el = document.getElementById(id);
@@ -105,6 +120,11 @@ function applyFilterState(filters = {}) {
   setValue('sales-afs-max-filter', filters.afs_max);
   setValue('sales-afs-band-filter', filters.afs_band);
   setValue('sales-status-scope', filters.status_scope || 'BILLED_ONLY');
+}
+
+function clearAllFilters() {
+  applyFilterState(getDefaultFilterState());
+  localStorage.removeItem(ANALYTICS_FILTERS_KEY);
 }
 
 function saveCurrentFilters() {
@@ -319,6 +339,59 @@ function renderSimpleAggregateTable(tableId, rows, nameKey) {
   `).join('');
 }
 
+function normalizeAnalyticsRows(rows = []) {
+  if (!Array.isArray(rows)) return [];
+  return rows.map((row) => ({
+    key: row?.key || '-',
+    date: row?.date || '',
+    trips: Number(row?.trips || 0),
+    qty_mt: Number(row?.qty_mt || 0),
+    total_amount: Number(row?.total_amount || 0),
+    avg_rate_per_mt: Number(row?.avg_rate_per_mt || 0)
+  }));
+}
+
+function normalizeAnalyticsPayload(payload = {}) {
+  return {
+    summary: {
+      total_trips: Number(payload?.summary?.total_trips || 0),
+      total_qty_mt: Number(payload?.summary?.total_qty_mt || 0),
+      total_taxable_amount: Number(payload?.summary?.total_taxable_amount || 0),
+      total_gst_amount: Number(payload?.summary?.total_gst_amount || 0),
+      total_sales_amount: Number(payload?.summary?.total_sales_amount || 0),
+      avg_realization_per_mt: Number(payload?.summary?.avg_realization_per_mt || 0)
+    },
+    trend: normalizeAnalyticsRows(payload?.trend),
+    grade_wise: normalizeAnalyticsRows(payload?.grade_wise),
+    customer_wise: normalizeAnalyticsRows(payload?.customer_wise),
+    material_wise: normalizeAnalyticsRows(payload?.material_wise),
+    afs_band_wise: normalizeAnalyticsRows(payload?.afs_band_wise)
+  };
+}
+
+function renderFilterSummary(filters = getCurrentFilterState()) {
+  const el = document.getElementById('sales-filter-summary');
+  if (!el) return;
+  const applied = Object.entries(filters)
+    .filter(([, value]) => String(value || '').trim() !== '' && !(value === 'BILLED_ONLY' && filters.status_scope === 'BILLED_ONLY'))
+    .map(([k, v]) => `${k.replaceAll('_', ' ')}: ${v}`);
+  el.textContent = applied.length ? `Applied filters: ${applied.join(' | ')}` : 'Applied filters: None (default)';
+}
+
+function clearAnalyticsRenderTargets() {
+  renderSalesKpis({});
+  renderTrendTable([]);
+  renderBarChart('sales-trend-chart', [], 'date');
+  renderBarChart('sales-grade-chart', [], 'key');
+  renderBarChart('sales-customer-chart', [], 'key');
+  renderBarChart('sales-material-chart', [], 'key');
+  renderBarChart('sales-afs-band-chart', [], 'key');
+  renderSimpleAggregateTable('sales-grade-table', [], 'key');
+  renderSimpleAggregateTable('sales-customer-table', [], 'key');
+  renderSimpleAggregateTable('sales-material-table', [], 'key');
+  renderSimpleAggregateTable('sales-afs-band-table', [], 'key');
+}
+
 function renderTrendTable(rows = []) {
   const tableBody = document.getElementById('sales-trend-table');
   if (!tableBody) return;
@@ -370,6 +443,17 @@ async function loadSalesAnalytics() {
   const afsBand = document.getElementById('sales-afs-band-filter')?.value || '';
   const statusScope = document.getElementById('sales-status-scope')?.value || 'BILLED_ONLY';
   saveCurrentFilters();
+  renderFilterSummary({
+    from_date: fromDate,
+    to_date: toDate,
+    customer,
+    grade,
+    material,
+    afs_min: afsMin,
+    afs_max: afsMax,
+    afs_band: afsBand,
+    status_scope: statusScope
+  });
   const query = new URLSearchParams();
   if (fromDate) query.set('from_date', fromDate);
   if (toDate) query.set('to_date', toDate);
@@ -383,33 +467,33 @@ async function loadSalesAnalytics() {
 
   const loadBtn = document.getElementById('sales-load-btn');
   if (loadBtn) loadBtn.disabled = true;
+  const reqSeq = ++analyticsLoadRequestSeq;
+  clearAnalyticsRenderTargets();
   try {
     const response = await fetch(`/accounts/sales-analytics?${query.toString()}`, { headers: getAuthHeaders() });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || 'Failed to load sales analytics');
-    lastAnalyticsPayload = payload;
-    renderSalesKpis(payload.summary || {});
-    renderTrendTable(payload.trend || []);
-    renderBarChart('sales-trend-chart', payload.trend || [], 'date');
-    renderBarChart('sales-grade-chart', payload.grade_wise || [], 'key');
-    renderBarChart('sales-customer-chart', payload.customer_wise || [], 'key');
-    renderBarChart('sales-material-chart', payload.material_wise || [], 'key');
-    renderBarChart('sales-afs-band-chart', payload.afs_band_wise || [], 'key');
-    renderSimpleAggregateTable('sales-grade-table', payload.grade_wise || [], 'key');
-    renderSimpleAggregateTable('sales-customer-table', payload.customer_wise || [], 'key');
-    renderSimpleAggregateTable('sales-material-table', payload.material_wise || [], 'key');
-    renderSimpleAggregateTable('sales-afs-band-table', payload.afs_band_wise || [], 'key');
+    if (reqSeq !== analyticsLoadRequestSeq) return;
+    const normalized = normalizeAnalyticsPayload(payload);
+    lastAnalyticsPayload = normalized;
+    renderSalesKpis(normalized.summary);
+    renderTrendTable(normalized.trend);
+    renderBarChart('sales-trend-chart', normalized.trend, 'date');
+    renderBarChart('sales-grade-chart', normalized.grade_wise, 'key');
+    renderBarChart('sales-customer-chart', normalized.customer_wise, 'key');
+    renderBarChart('sales-material-chart', normalized.material_wise, 'key');
+    renderBarChart('sales-afs-band-chart', normalized.afs_band_wise, 'key');
+    renderSimpleAggregateTable('sales-grade-table', normalized.grade_wise, 'key');
+    renderSimpleAggregateTable('sales-customer-table', normalized.customer_wise, 'key');
+    renderSimpleAggregateTable('sales-material-table', normalized.material_wise, 'key');
+    renderSimpleAggregateTable('sales-afs-band-table', normalized.afs_band_wise, 'key');
   } catch (error) {
+    if (reqSeq !== analyticsLoadRequestSeq) return;
     lastAnalyticsPayload = null;
     window.AppPermissions?.showModal?.('Action Required', error.message || 'Failed to load sales analytics');
-    renderBarChart('sales-trend-chart', [], 'date');
-    renderBarChart('sales-grade-chart', [], 'key');
-    renderBarChart('sales-customer-chart', [], 'key');
-    renderBarChart('sales-material-chart', [], 'key');
-    renderBarChart('sales-afs-band-chart', [], 'key');
-    renderSimpleAggregateTable('sales-afs-band-table', [], 'key');
+    clearAnalyticsRenderTargets();
   } finally {
-    if (loadBtn) loadBtn.disabled = false;
+    if (loadBtn && reqSeq === analyticsLoadRequestSeq) loadBtn.disabled = false;
   }
 }
 
@@ -517,22 +601,21 @@ function initializeAccess() {
   const roleIndicator = document.getElementById('role-indicator');
   if (roleIndicator) {
     roleIndicator.style.display = 'inline-block';
-    roleIndicator.textContent = `Role: ${role}`;
+    roleIndicator.textContent = window.AppPermissions?.getEmployeeIdentityLabel?.() || `Role: ${role}`;
   }
   const logoutLink = document.getElementById('logout-link');
   if (logoutLink) logoutLink.style.display = 'inline-block';
-
-  const roleSwitcher = document.getElementById('role-switcher');
-  const roles = Array.isArray(employeeAuth?.roles) ? employeeAuth.roles.filter((r) => VALID_ROLES.includes(r)) : [];
-  if (roleSwitcher) {
-    if (roles.length > 1) {
-      roleSwitcher.innerHTML = roles.map((r) => `<option value="${r}">Switch: ${r}</option>`).join('');
-      roleSwitcher.value = role;
-      roleSwitcher.style.display = 'inline-block';
-    } else {
-      roleSwitcher.style.display = 'none';
-    }
-  }
+  window.AppPermissions?.renderRoleSwitcher?.('role-switcher', {
+    Gate: '/',
+    Dispatch: '/dashboard',
+    Loading: '/dashboard',
+    Weighbridge: '/dashboard',
+    LAB: '/reports',
+    Expense: '/expense',
+    Accounts: '/accounts-analytics',
+    Manager: '/accounts-analytics',
+    Admin: '/accounts-analytics'
+  });
   return true;
 }
 
@@ -549,19 +632,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     event.preventDefault();
     logout();
   });
-  document.getElementById('role-switcher')?.addEventListener('change', (event) => {
-    const selectedRole = event.target.value;
-    const employeeAuth = getEmployeeAuthSession();
-    const roles = Array.isArray(employeeAuth?.roles) ? employeeAuth.roles : [];
-    if (!selectedRole || !roles.includes(selectedRole)) return;
-    localStorage.setItem('userRole', selectedRole);
-    if (['Accounts', 'Admin', 'Manager'].includes(selectedRole)) {
-      window.location.reload();
-    } else {
-      window.location.href = '/dashboard';
-    }
-  });
   document.getElementById('sales-load-btn')?.addEventListener('click', loadSalesAnalytics);
+  document.getElementById('sales-clear-btn')?.addEventListener('click', async () => {
+    clearAllFilters();
+    renderFilterSummary(getDefaultFilterState());
+    await loadSalesAnalytics();
+  });
   document.getElementById('analytics-export-current')?.addEventListener('click', exportCurrentViewCsv);
   document.getElementById('analytics-save-view')?.addEventListener('click', () => {
     const name = window.prompt('Saved view name');
@@ -603,5 +679,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById(id)?.addEventListener('change', saveCurrentFilters);
     document.getElementById(id)?.addEventListener('blur', saveCurrentFilters);
   });
+  renderFilterSummary(getCurrentFilterState());
   await loadSalesAnalytics();
 });

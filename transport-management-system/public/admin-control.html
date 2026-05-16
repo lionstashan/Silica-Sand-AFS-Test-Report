@@ -8,7 +8,7 @@
 </head>
 <body>
   <header>
-    <h1>Admin Control Panel</h1>
+    <h1 class="brand-title"><img src="/assets/brand/logo-mark.png" alt="Indus Silica Sand" class="brand-logo" />Admin Control Panel</h1>
     <p>Manage users, access and master data from one place.</p>
     <div class="header-actions">
       <span id="role-indicator" class="role-indicator"></span>
@@ -122,6 +122,10 @@
           <option value="loading_points">loading_points</option>
           <option value="loading_teams">loading_teams</option>
           <option value="transporters">transporters</option>
+          <option value="report_sample_types">report_sample_types</option>
+          <option value="report_sample_points_production">report_sample_points_production</option>
+          <option value="report_sample_points_inhouse">report_sample_points_inhouse</option>
+          <option value="report_sample_points_supply">report_sample_points_supply</option>
         </select>
       </label>
       <label>Value<input type="text" id="m-value" required /></label>
@@ -135,6 +139,7 @@
         </select>
       </label>
       <button type="submit">Save Master Value</button>
+      <button type="button" id="master-cancel-edit-btn" style="display:none;">Cancel Edit</button>
     </form>
     <button id="master-refresh-btn" type="button">Refresh Selected Type</button>
     <div class="table-container">

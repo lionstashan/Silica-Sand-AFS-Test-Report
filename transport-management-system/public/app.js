@@ -1259,7 +1259,7 @@ function applyRoleUI() {
 
   if (roleIndicator && role) {
     roleIndicator.style.display = 'inline-block';
-    roleIndicator.textContent = `Role: ${role}`;
+    roleIndicator.textContent = window.AppPermissions?.getEmployeeIdentityLabel?.() || `Role: ${role}`;
   }
 
   if (roleSwitcher) {

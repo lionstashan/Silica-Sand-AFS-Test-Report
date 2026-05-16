@@ -162,6 +162,7 @@ const ROLE_PERMISSION_FALLBACK = {
     'transport.reports.view',
     'transport.reports.edit',
     'transport.reports.finalize',
+    'transport.reports.delete',
     'transport.admin.control',
     'transport.customer_users.manage',
     'transport.expense.sso'
@@ -193,6 +194,8 @@ const ROUTE_PERMISSION_RULES = [
   { method: 'GET', pattern: /^\/accounts\/sales-analytics$/, permission: 'transport.analytics.view' },
   { method: 'GET', pattern: /^\/admin\/control\//, permission: 'transport.admin.control' },
   { method: 'POST', pattern: /^\/admin\/control\//, permission: 'transport.admin.control' },
+  { method: 'PUT', pattern: /^\/admin\/control\//, permission: 'transport.admin.control' },
+  { method: 'DELETE', pattern: /^\/admin\/control\//, permission: 'transport.admin.control' },
   { method: 'GET', pattern: /^\/admin\/customer-portal\//, permission: 'transport.admin.control' },
   { method: 'GET', pattern: /^\/admin\/customer-users$/, permission: 'transport.customer_users.manage' },
   { method: 'POST', pattern: /^\/admin\/customer-users$/, permission: 'transport.customer_users.manage' },
@@ -200,7 +203,8 @@ const ROUTE_PERMISSION_RULES = [
   { method: 'GET', pattern: /^\/api\/reports/, permission: 'transport.reports.view' },
   { method: 'POST', pattern: /^\/api\/reports$/, permission: 'transport.reports.edit' },
   { method: 'PUT', pattern: /^\/api\/reports\/\d+$/, permission: 'transport.reports.edit' },
-  { method: 'POST', pattern: /^\/api\/reports\/\d+\/finalize$/, permission: 'transport.reports.finalize' }
+  { method: 'POST', pattern: /^\/api\/reports\/\d+\/finalize$/, permission: 'transport.reports.finalize' },
+  { method: 'DELETE', pattern: /^\/api\/reports\/\d+$/, permission: 'transport.reports.delete' }
 ];
 
 const FINAL_STATUSES = new Set(['COMPLETED', 'CANCELLED', 'EXITED']);
@@ -255,6 +259,7 @@ const BCRYPT_COST = Number.parseInt(process.env.BCRYPT_COST || '10', 10);
 const revokedTransportTokenHashes = new Set();
 const REPORT_VIEW_ROLES = ['LAB', 'Dispatch', 'Weighbridge', 'Accounts', 'Manager', 'Admin'];
 const REPORT_EDIT_ROLES = ['LAB', 'Admin'];
+const REPORT_DELETE_ROLES = ['Admin'];
 fs.mkdirSync(DOC_UPLOAD_DIR, { recursive: true });
 
 const documentStorage = multer.diskStorage({
@@ -614,6 +619,7 @@ function validatePermissionConsistency() {
   ensureRolePermission(REPORT_VIEW_ROLES, 'transport.reports.view', 'Report view');
   ensureRolePermission(REPORT_EDIT_ROLES, 'transport.reports.edit', 'Report edit');
   ensureRolePermission(REPORT_EDIT_ROLES, 'transport.reports.finalize', 'Report finalize');
+  ensureRolePermission(REPORT_DELETE_ROLES, 'transport.reports.delete', 'Report delete');
   ensureRolePermission(Array.from(DOC_VIEW_ROLES), 'transport.documents.view', 'Trip document view');
   ensureRolePermission(Array.from(DOC_UPLOAD_ROLES), 'transport.documents.upload', 'Trip document upload');
 
@@ -5799,6 +5805,7 @@ app.post('/admin/control/employees', async (req, res) => {
   if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can manage employees' });
 
   const username = String(req.body.username || '').trim();
+  const originalUsername = String(req.body.original_username || username).trim();
   const fullName = String(req.body.full_name || '').trim();
   const password = normalizeEmpty(req.body.password);
   const isActive = req.body.is_active === undefined ? true : Boolean(req.body.is_active);
@@ -5815,6 +5822,11 @@ app.post('/admin/control/employees', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    if (originalUsername !== username) {
+      await client.query(`UPDATE users SET username = $1, updated_at = NOW() WHERE username = $2`, [username, originalUsername]);
+      await client.query(`UPDATE expense_users SET username = $1, updated_at = NOW() WHERE username = $2`, [username, originalUsername]);
+    }
 
     let transportUserId = null;
     if (transportRoles.length > 0) {
@@ -5874,11 +5886,57 @@ app.post('/admin/control/employees', async (req, res) => {
     }
 
     await client.query('COMMIT');
-    return res.status(201).json({ ok: true, username, full_name: fullName, transport_roles: transportRoles, expense_role: validExpenseRole, is_active: isActive });
+    return res.status(201).json({
+      ok: true,
+      username,
+      original_username: originalUsername,
+      full_name: fullName,
+      transport_roles: transportRoles,
+      expense_role: validExpenseRole,
+      is_active: isActive
+    });
   } catch (error) {
     await client.query('ROLLBACK');
+    if (error?.code === '23505') {
+      return res.status(409).json({ error: 'Username already exists' });
+    }
     console.error('Failed to upsert employee', error);
     return res.status(500).json({ error: `Failed to save employee: ${error.message || 'unknown error'}` });
+  } finally {
+    client.release();
+  }
+});
+
+app.delete('/admin/control/employees/:username', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can delete employees' });
+  const username = String(req.params.username || '').trim();
+  if (!username) return res.status(400).json({ error: 'username is required' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const expenseDelete = await client.query(`DELETE FROM expense_users WHERE username = $1`, [username]);
+    const transportDelete = await client.query(`DELETE FROM users WHERE username = $1`, [username]);
+    await client.query('COMMIT');
+    if (!expenseDelete.rowCount && !transportDelete.rowCount) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+    return res.json({
+      ok: true,
+      username,
+      deleted: {
+        transport_user: transportDelete.rowCount,
+        expense_user: expenseDelete.rowCount
+      }
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    if (error?.code === '23503') {
+      return res.status(409).json({ error: 'Cannot delete employee due to linked records. Mark as inactive instead.' });
+    }
+    console.error('Failed to delete employee', error);
+    return res.status(500).json({ error: 'Failed to delete employee' });
   } finally {
     client.release();
   }
@@ -6055,6 +6113,7 @@ app.post('/admin/control/customer-users', async (req, res) => {
   if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can upsert customer users' });
   const customerName = String(req.body.customer_name || '').trim();
   const username = String(req.body.username || '').trim();
+  const originalUsername = String(req.body.original_username || username).trim();
   const displayName = normalizeEmpty(req.body.display_name);
   const password = normalizeEmpty(req.body.password);
   const isActive = req.body.is_active === undefined ? true : Boolean(req.body.is_active);
@@ -6064,6 +6123,9 @@ app.post('/admin/control/customer-users', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    if (originalUsername !== username) {
+      await client.query(`UPDATE customer_users SET username = $1, updated_at = NOW() WHERE username = $2`, [username, originalUsername]);
+    }
     const existing = await client.query(`SELECT id, password FROM customer_users WHERE username = $1 LIMIT 1`, [username]);
     let passwordHash = null;
     if (password) {
@@ -6102,10 +6164,32 @@ app.post('/admin/control/customer-users', async (req, res) => {
     return res.status(201).json(row);
   } catch (error) {
     await client.query('ROLLBACK');
+    if (error?.code === '23505') {
+      return res.status(409).json({ error: 'Username already exists' });
+    }
     console.error('Failed to upsert customer user', error);
     return res.status(500).json({ error: 'Failed to upsert customer user' });
   } finally {
     client.release();
+  }
+});
+
+app.delete('/admin/control/customer-users/:username', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can delete customer users' });
+  const username = String(req.params.username || '').trim();
+  if (!username) return res.status(400).json({ error: 'username is required' });
+  try {
+    const deleted = await pool.query(`DELETE FROM customer_users WHERE username = $1`, [username]);
+    if (!deleted.rowCount) return res.status(404).json({ error: 'Customer user not found' });
+    return res.json({ ok: true, username, deleted: deleted.rowCount });
+  } catch (error) {
+    if (error?.code === '23503') {
+      return res.status(409).json({ error: 'Cannot delete customer user due to linked records. Mark as inactive instead.' });
+    }
+    console.error('Failed to delete customer user', error);
+    return res.status(500).json({ error: 'Failed to delete customer user' });
   }
 });
 
@@ -6236,6 +6320,10 @@ function normalizeMasterType(type) {
     loading_teams: 'loading_teams',
     transporters: 'transporters',
     locations: 'locations',
+    report_sample_types: 'report_sample_types',
+    report_sample_points_production: 'report_sample_points_production',
+    report_sample_points_inhouse: 'report_sample_points_inhouse',
+    report_sample_points_supply: 'report_sample_points_supply',
     products: 'products',
     packing: 'packing'
   };
@@ -6411,8 +6499,81 @@ app.post('/admin/control/masters/:masterType', async (req, res) => {
     );
     return res.status(201).json(result.rows[0]);
   } catch (error) {
+    if (error?.code === '23505') {
+      return res.status(409).json({ error: 'Master value already exists for this type' });
+    }
     console.error('Failed to upsert master value', error);
     return res.status(500).json({ error: 'Failed to upsert master value' });
+  }
+});
+
+app.put('/admin/control/masters/:id', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can update master values' });
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Valid id is required' });
+
+  const masterType = normalizeMasterType(req.body.master_type);
+  const value = String(req.body.value || '').trim();
+  const isActive = req.body.is_active === undefined ? true : Boolean(req.body.is_active);
+  if (masterType === 'customers') {
+    return res.status(400).json({ error: 'customers master type is disabled. Manage customers from Customers section.' });
+  }
+  if (!masterType || !value) {
+    return res.status(400).json({ error: 'master_type and value are required' });
+  }
+
+  const metadata = req.body.metadata_json && typeof req.body.metadata_json === 'object'
+    ? req.body.metadata_json
+    : {};
+  if (masterType === 'materials' || masterType === 'grades') {
+    const rate = req.body.price_per_mt;
+    metadata.price_per_mt = rate === '' || rate === null || rate === undefined ? null : Number(rate);
+    if (metadata.price_per_mt !== null && (!Number.isFinite(metadata.price_per_mt) || metadata.price_per_mt < 0)) {
+      return res.status(400).json({ error: 'price_per_mt must be a valid non-negative number' });
+    }
+  }
+
+  try {
+    const result = await pool.query(
+      `UPDATE admin_master_values
+       SET master_type = $1,
+           value = $2,
+           is_active = $3,
+           metadata_json = $4,
+           updated_at = NOW()
+       WHERE id = $5
+       RETURNING id, master_type, value, is_active, metadata_json, created_at, updated_at`,
+      [masterType, value, isActive, JSON.stringify(metadata), id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Master value not found' });
+    return res.json(result.rows[0]);
+  } catch (error) {
+    if (error?.code === '23505') {
+      return res.status(409).json({ error: 'Master value already exists for this type' });
+    }
+    console.error('Failed to update master value', error);
+    return res.status(500).json({ error: 'Failed to update master value' });
+  }
+});
+
+app.delete('/admin/control/masters/:id', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (auth.role !== 'Admin') return res.status(403).json({ error: 'Only Admin can delete master values' });
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Valid id is required' });
+  try {
+    const result = await pool.query(`DELETE FROM admin_master_values WHERE id = $1 RETURNING id, master_type, value`, [id]);
+    if (!result.rows.length) return res.status(404).json({ error: 'Master value not found' });
+    return res.json({ ok: true, deleted: result.rows[0] });
+  } catch (error) {
+    if (error?.code === '23503') {
+      return res.status(409).json({ error: 'Cannot delete master value due to linked records. Mark as inactive instead.' });
+    }
+    console.error('Failed to delete master value', error);
+    return res.status(500).json({ error: 'Failed to delete master value' });
   }
 });
 
@@ -6527,6 +6688,10 @@ function canEditReports(role) {
   return REPORT_EDIT_ROLES.includes(role);
 }
 
+function canDeleteReports(role) {
+  return REPORT_DELETE_ROLES.includes(role);
+}
+
 function toAfsBand(value) {
   const n = toFiniteNumberOrNull(value);
   if (n === null) return 'Missing';
@@ -6562,6 +6727,57 @@ function normalizeReportRowForApi(row) {
   };
 }
 
+function normalizeMeshLabel(value, fallback) {
+  const raw = String(value ?? '').trim();
+  return raw || String(fallback || '').trim();
+}
+
+function getSieveWeightForMesh(lineItems, meshLabel) {
+  const target = String(meshLabel || '').trim().toLowerCase();
+  if (!target) return null;
+  const rows = Array.isArray(lineItems) ? lineItems : [];
+  const row = rows.find((item) => String(item?.mesh_size || '').trim().toLowerCase() === target);
+  if (!row) return null;
+  const weight = toFiniteNumberOrNull(row.weight);
+  return weight === null ? null : weight;
+}
+
+function normalizeAfsBlockFilter(value) {
+  const v = String(value || '').trim();
+  if (!v) return null;
+  if (v === '<30' || v === '>85' || v === 'Missing') return v;
+  if (/^\d{2}-\d{2}$/.test(v)) return v;
+  return null;
+}
+
+function applyAfsBlockFilter(where, params, afsBlock) {
+  if (!afsBlock) return;
+  if (afsBlock === 'Missing') {
+    where.push(`total_afs IS NULL`);
+    return;
+  }
+  if (afsBlock === '<30') {
+    where.push(`total_afs < 30`);
+    return;
+  }
+  if (afsBlock === '>85') {
+    where.push(`total_afs > 85`);
+    return;
+  }
+  const [minRaw, maxRaw] = afsBlock.split('-');
+  const min = Number(minRaw);
+  const max = Number(maxRaw);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) return;
+  params.push(min);
+  where.push(`total_afs >= $${params.length}`);
+  params.push(max);
+  if (max === 85) {
+    where.push(`total_afs <= $${params.length}`);
+  } else {
+    where.push(`total_afs < $${params.length}`);
+  }
+}
+
 function escapeHtmlText(value) {
   return String(value || '')
     .replace(/&/g, '&amp;')
@@ -6571,7 +6787,7 @@ function escapeHtmlText(value) {
     .replace(/'/g, '&#39;');
 }
 
-async function attachFinalizedReportSnapshot(client, reportRow) {
+async function attachLabReportSnapshot(client, reportRow) {
   if (!reportRow || !reportRow.trip_id) return null;
   const lineItems = Array.isArray(reportRow.line_items_json) ? reportRow.line_items_json : [];
   const now = new Date().toISOString().replace(/[:.]/g, '-');
@@ -6598,7 +6814,7 @@ async function attachFinalizedReportSnapshot(client, reportRow) {
   </style>
 </head>
 <body>
-  <h1>${escapeHtmlText(reportRow.report_number)} (Finalized)</h1>
+  <h1>${escapeHtmlText(reportRow.report_number)} (Lab Report)</h1>
   <div class="meta">
     <div><strong>Date:</strong> ${escapeHtmlText(reportRow.report_date)}</div>
     <div><strong>Truck:</strong> ${escapeHtmlText(reportRow.truck_number)}</div>
@@ -6651,7 +6867,7 @@ async function attachFinalizedReportSnapshot(client, reportRow) {
            uploaded_by_name = COALESCE($6, uploaded_by_name),
            created_at = NOW()
        WHERE id = $1`,
-      [existing.rows[0].id, fileName, fileSize, relativePath, reportRow.finalized_by_role || 'LAB', reportRow.finalized_by_name || 'LAB']
+      [existing.rows[0].id, fileName, fileSize, relativePath, reportRow.created_by_role || 'LAB', reportRow.created_by_name || 'LAB']
     );
     return existing.rows[0].id;
   }
@@ -6669,8 +6885,8 @@ async function attachFinalizedReportSnapshot(client, reportRow) {
       fileName,
       fileSize,
       relativePath,
-      reportRow.finalized_by_role || 'LAB',
-      reportRow.finalized_by_name || 'LAB'
+      reportRow.created_by_role || 'LAB',
+      reportRow.created_by_name || 'LAB'
     ]
   );
   return insert.rows[0]?.id || null;
@@ -6693,6 +6909,22 @@ async function linkAfsSnapshotToTrip(client, reportRow) {
   );
 }
 
+async function clearOldTripAfsLinkIfMoved(client, oldReportRow, newReportRow) {
+  if (!oldReportRow || !oldReportRow.trip_id) return;
+  const oldTripId = Number(oldReportRow.trip_id);
+  const newTripId = Number(newReportRow?.trip_id || 0);
+  if (oldTripId === newTripId) return;
+  await client.query(
+    `UPDATE trips
+     SET afs_value_used = NULL,
+         afs_report_id = NULL,
+         afs_linked_at = NULL,
+         updated_at = NOW()
+     WHERE id = $1 AND afs_report_id = $2`,
+    [oldTripId, oldReportRow.id]
+  );
+}
+
 function normalizeLabLineItems(value) {
   const source = Array.isArray(value) ? value : [];
   return source
@@ -6703,6 +6935,34 @@ function normalizeLabLineItems(value) {
       multiplying_factor: toFiniteNumberOrNull(row.multiplying_factor) || 0
     }))
     .filter((row) => hasValue(row.mesh_size));
+}
+
+function normalizeSampleType(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return null;
+  if (raw === 'production') return 'Production';
+  if (raw === 'inhouse') return 'Inhouse';
+  if (raw === 'supply') return 'Supply';
+  return null;
+}
+
+function normalizeSamplePoint(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  return raw;
+}
+
+async function loadReportSampleOptions() {
+  const data = await readMasterOptionsForTypes([
+    'report_sample_points_production',
+    'report_sample_points_inhouse',
+    'report_sample_points_supply'
+  ]);
+  return {
+    Production: new Set(Array.isArray(data.report_sample_points_production) ? data.report_sample_points_production.map((v) => String(v).trim()).filter(Boolean) : []),
+    Inhouse: new Set(Array.isArray(data.report_sample_points_inhouse) ? data.report_sample_points_inhouse.map((v) => String(v).trim()).filter(Boolean) : []),
+    Supply: new Set(Array.isArray(data.report_sample_points_supply) ? data.report_sample_points_supply.map((v) => String(v).trim()).filter(Boolean) : [])
+  };
 }
 
 function isValidIsoDate(value) {
@@ -6733,8 +6993,7 @@ function computeLabTotals(lineItems, multiplier) {
   };
 }
 
-function validateReportPayload(payload, existingRow = null, options = {}) {
-  const mode = options.mode === 'finalize' ? 'finalize' : 'draft';
+async function validateReportPayload(payload, existingRow = null, options = {}) {
   const reportDate = String(payload.report_date || '').trim();
   const truckNumber = String(payload.truck_number || '').trim();
   const requestedTripId = toFiniteNumberOrNull(payload.trip_id);
@@ -6743,8 +7002,10 @@ function validateReportPayload(payload, existingRow = null, options = {}) {
   const sieveSize = normalizeEmpty(payload.sieve_size);
   const lineItems = normalizeLabLineItems(payload.line_items);
   const totals = computeLabTotals(lineItems, payload.afs_multiplier);
+  const sampleType = normalizeSampleType(payload.sample_type);
+  const samplePoint = normalizeSamplePoint(payload.sample_point);
+  const samplePointOther = normalizeEmpty(payload.sample_point_other);
 
-  // Draft mode is intentionally permissive for faster data capture.
   let tripId = requestedTripId;
   let isGeneric = requestedIsGeneric;
 
@@ -6754,21 +7015,22 @@ function validateReportPayload(payload, existingRow = null, options = {}) {
     isGeneric = true;
   }
 
-  if (mode === 'finalize') {
-    if (isGeneric) {
-      if (!lineItems.length) return { error: 'At least one sieve line item is required' };
-      if (totals.totalQuantity <= 0) return { error: 'For generic report, line-item weight cannot be all zero' };
-    } else {
-      if (!reportDate || !isValidIsoDate(reportDate)) return { error: 'Valid report_date is required (YYYY-MM-DD)' };
-      if (!truckNumber) return { error: 'truck_number is required' };
-      if (!tripId) return { error: 'trip_id is required when report is not generic' };
-      if (!lineItems.length) return { error: 'At least one sieve line item is required' };
-      if (totals.totalQuantity <= 0) return { error: 'At least one line weight must be greater than zero' };
-    }
+  if (isGeneric) {
+    if (lineItems.length && totals.totalQuantity <= 0) return { error: 'For generic report, line-item weight cannot be all zero' };
   }
 
-  if (existingRow && existingRow.status === 'FINALIZED') {
-    return { error: 'Finalized reports cannot be edited directly' };
+  if (sampleType && !['Production', 'Inhouse', 'Supply'].includes(sampleType)) {
+    return { error: 'Invalid sample type' };
+  }
+  if (sampleType && samplePoint) {
+    const sampleOptions = await loadReportSampleOptions();
+    const allowed = sampleOptions[sampleType] || new Set();
+    if (allowed.size && !allowed.has(samplePoint)) {
+      return { error: `Invalid sample point for ${sampleType}` };
+    }
+  }
+  if (sampleType === 'Production' && samplePoint === 'Other' && !samplePointOther) {
+    return { error: 'Sample point detail is required when point is Other' };
   }
 
   const safeReportDate = reportDate && isValidIsoDate(reportDate)
@@ -6780,6 +7042,9 @@ function validateReportPayload(payload, existingRow = null, options = {}) {
     truckNumber,
     loadingPoint,
     sieveSize,
+    sampleType,
+    samplePoint,
+    samplePointOther,
     tripId,
     isGeneric,
     lineItems,
@@ -6915,11 +7180,35 @@ app.get('/api/reports/branding', async (req, res) => {
   }
 });
 
+app.get('/api/reports/sample-options', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!canViewReports(auth.role)) return res.status(403).json({ error: 'Not allowed' });
+  try {
+    const data = await readMasterOptionsForTypes([
+      'report_sample_points_production',
+      'report_sample_points_inhouse',
+      'report_sample_points_supply'
+    ]);
+    return res.json({
+      sample_types: ['Production', 'Inhouse', 'Supply'],
+      sample_points: {
+        Production: Array.isArray(data.report_sample_points_production) ? data.report_sample_points_production : [],
+        Inhouse: Array.isArray(data.report_sample_points_inhouse) ? data.report_sample_points_inhouse : [],
+        Supply: Array.isArray(data.report_sample_points_supply) ? data.report_sample_points_supply : []
+      }
+    });
+  } catch (error) {
+    console.error('Failed to load report sample options', error);
+    return res.status(500).json({ error: 'Failed to load report sample options' });
+  }
+});
+
 app.post('/api/reports', async (req, res) => {
   const auth = readRoleFromRequest(req);
   if (auth.error) return res.status(auth.status).json({ error: auth.error });
   if (!canEditReports(auth.role)) return res.status(403).json({ error: 'Only LAB/Admin can create reports' });
-  const validated = validateReportPayload(req.body);
+  const validated = await validateReportPayload(req.body);
   if (validated.error) return res.status(400).json({ error: validated.error });
   const branding = await loadReportBranding();
   const nextSeq = await pool.query(`SELECT nextval(pg_get_serial_sequence('lab_reports','id')) AS id`);
@@ -6929,10 +7218,10 @@ app.post('/api/reports', async (req, res) => {
     `INSERT INTO lab_reports(
       id, report_number, trip_id, is_generic, truck_number, customer_name, loading_point, report_date,
       material_type, grade, sieve_size, afs_reference, afs_multiplier, total_quantity, total_product, total_afs,
-      status, line_items_json, notes, created_by_role, created_by_name, branding_snapshot_json
+      status, line_items_json, notes, sample_type, sample_point, sample_point_other, created_by_role, created_by_name, branding_snapshot_json
     ) VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
-      'DRAFT',$17::jsonb,$18,$19,$20,$21::jsonb
+      'ACTIVE',$17::jsonb,$18,$19,$20,$21,$22,$23,$24::jsonb
     )
     RETURNING *`,
     [
@@ -6954,11 +7243,26 @@ app.post('/api/reports', async (req, res) => {
       validated.totals.totalAfs,
       JSON.stringify(validated.totals.lineItems),
       normalizeEmpty(req.body.notes),
+      validated.sampleType,
+      validated.samplePoint,
+      validated.samplePointOther,
       auth.role,
       normalizeEmpty(req.body.lab_user_name) || auth.user?.full_name || auth.user?.username || auth.role,
       JSON.stringify(branding || {})
     ]
   );
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await linkAfsSnapshotToTrip(client, insert.rows[0]);
+    await attachLabReportSnapshot(client, insert.rows[0]);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Failed to link report after create', error);
+  } finally {
+    client.release();
+  }
   await pool.query(
     `INSERT INTO lab_report_history(report_id, action_type, actor_role, actor_name, new_values_json, request_id)
      VALUES ($1,'CREATED',$2,$3,$4::jsonb,$5)`,
@@ -6977,32 +7281,56 @@ app.get('/api/reports', async (req, res) => {
   const fromDate = normalizeEmpty(req.query.from_date);
   const toDate = normalizeEmpty(req.query.to_date);
   const truck = normalizeEmpty(req.query.truck_number);
+  const customer = normalizeEmpty(req.query.customer);
   const status = normalizeEmpty(req.query.status);
+  const afsBlock = normalizeAfsBlockFilter(req.query.afs_block);
+  const sieve1Mesh = normalizeMeshLabel(req.query.sieve_mesh_1, '200');
+  const sieve2Mesh = normalizeMeshLabel(req.query.sieve_mesh_2, '140');
+  const sieve3Mesh = normalizeMeshLabel(req.query.sieve_mesh_3, '100');
   const params = [];
   const where = [];
   if (fromDate) { params.push(fromDate); where.push(`report_date >= $${params.length}`); }
   if (toDate) { params.push(toDate); where.push(`report_date <= $${params.length}`); }
   if (truck) { params.push(truck); where.push(`lower(truck_number) LIKE lower($${params.length})`); params[params.length - 1] = `%${truck}%`; }
+  if (customer) { params.push(customer); where.push(`lower(customer_name) LIKE lower($${params.length})`); params[params.length - 1] = `%${customer}%`; }
   if (status) { params.push(status); where.push(`status = $${params.length}`); }
+  applyAfsBlockFilter(where, params, afsBlock);
   const countSql = `
     SELECT COUNT(*)::int AS total
     FROM lab_reports
-    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ${where.length ? `WHERE ${where.join(' AND ')} AND is_deleted = false` : 'WHERE is_deleted = false'}
   `;
   const countResult = await pool.query(countSql, params);
   const total = Number(countResult.rows[0]?.total || 0);
   const sql = `
     SELECT id, report_number, trip_id, is_generic, truck_number, customer_name, loading_point, report_date,
-           material_type, grade, sieve_size, total_quantity, total_afs, status, created_by_name, created_at, updated_at
+           material_type, grade, sieve_size, sample_type, sample_point, sample_point_other, total_quantity, total_afs, status, created_by_name, created_at, updated_at,
+           line_items_json
     FROM lab_reports
-    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ${where.length ? `WHERE ${where.join(' AND ')} AND is_deleted = false` : 'WHERE is_deleted = false'}
     ORDER BY report_date DESC, id DESC
     LIMIT $${params.length + 1}
     OFFSET $${params.length + 2}
   `;
   const rows = await pool.query(sql, [...params, limit, offset]);
+  const mappedRows = rows.rows.map((row) => {
+    const normalized = normalizeReportRowForApi(row);
+    const lineItems = Array.isArray(row.line_items_json) ? row.line_items_json : [];
+    const exactAfs = toFiniteNumberOrNull(row.total_afs);
+    return {
+      ...normalized,
+      exact_afs: exactAfs,
+      afs_block: toAfsBand(exactAfs),
+      sieve_1_mesh: sieve1Mesh,
+      sieve_2_mesh: sieve2Mesh,
+      sieve_3_mesh: sieve3Mesh,
+      sieve_1_weight: getSieveWeightForMesh(lineItems, sieve1Mesh),
+      sieve_2_weight: getSieveWeightForMesh(lineItems, sieve2Mesh),
+      sieve_3_weight: getSieveWeightForMesh(lineItems, sieve3Mesh)
+    };
+  });
   return res.json({
-    rows: rows.rows.map(normalizeReportRowForApi),
+    rows: mappedRows,
     pagination: {
       page,
       limit,
@@ -7010,6 +7338,11 @@ app.get('/api/reports', async (req, res) => {
       totalPages: Math.max(1, Math.ceil(total / limit)),
       hasNextPage: page * limit < total,
       hasPrevPage: page > 1
+    },
+    sieve_meshes: {
+      sieve_1_mesh: sieve1Mesh,
+      sieve_2_mesh: sieve2Mesh,
+      sieve_3_mesh: sieve3Mesh
     }
   });
 });
@@ -7020,7 +7353,7 @@ app.get('/api/reports/:id', async (req, res) => {
   if (!canViewReports(auth.role)) return res.status(403).json({ error: 'Not allowed' });
   const id = Number(req.params.id);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Invalid report id' });
-  const report = await pool.query(`SELECT * FROM lab_reports WHERE id = $1 LIMIT 1`, [id]);
+  const report = await pool.query(`SELECT * FROM lab_reports WHERE id = $1 AND is_deleted = false LIMIT 1`, [id]);
   if (!report.rows.length) return res.status(404).json({ error: 'Report not found' });
   const history = await pool.query(
     `SELECT action_type, actor_role, actor_name, remarks, created_at
@@ -7038,11 +7371,14 @@ app.put('/api/reports/:id', async (req, res) => {
   if (!canEditReports(auth.role)) return res.status(403).json({ error: 'Only LAB/Admin can edit reports' });
   const id = Number(req.params.id);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Invalid report id' });
-  const existing = await pool.query(`SELECT * FROM lab_reports WHERE id = $1 LIMIT 1`, [id]);
+  const existing = await pool.query(`SELECT * FROM lab_reports WHERE id = $1 AND is_deleted = false LIMIT 1`, [id]);
   if (!existing.rows.length) return res.status(404).json({ error: 'Report not found' });
   const row = existing.rows[0];
-  if (row.status === 'FINALIZED') return res.status(403).json({ error: 'Finalized report cannot be edited. Create a new report/revision.' });
-  const validated = validateReportPayload(req.body, row);
+  const requestVersion = toFiniteNumberOrNull(req.body.version);
+  if (requestVersion !== null && Number(requestVersion) !== Number(row.version || 1)) {
+    return res.status(409).json({ error: 'This report was updated by another user. Please refresh and try again.' });
+  }
+  const validated = await validateReportPayload(req.body, row);
   if (validated.error) return res.status(400).json({ error: validated.error });
   const updated = await pool.query(
     `UPDATE lab_reports
@@ -7062,6 +7398,10 @@ app.put('/api/reports/:id', async (req, res) => {
         total_afs = $15,
         line_items_json = $16::jsonb,
         notes = $17,
+        sample_type = $18,
+        sample_point = $19,
+        sample_point_other = $20,
+        version = COALESCE(version, 1) + 1,
         updated_at = NOW()
      WHERE id = $1
      RETURNING *`,
@@ -7082,9 +7422,25 @@ app.put('/api/reports/:id', async (req, res) => {
       validated.totals.totalProduct,
       validated.totals.totalAfs,
       JSON.stringify(validated.totals.lineItems),
-      normalizeEmpty(req.body.notes)
+      normalizeEmpty(req.body.notes),
+      validated.sampleType,
+      validated.samplePoint,
+      validated.samplePointOther
     ]
   );
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await clearOldTripAfsLinkIfMoved(client, row, updated.rows[0]);
+    await linkAfsSnapshotToTrip(client, updated.rows[0]);
+    await attachLabReportSnapshot(client, updated.rows[0]);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Failed to link report after update', error);
+  } finally {
+    client.release();
+  }
   await pool.query(
     `INSERT INTO lab_report_history(report_id, action_type, actor_role, actor_name, old_values_json, new_values_json, request_id)
      VALUES ($1,'UPDATED',$2,$3,$4::jsonb,$5::jsonb,$6)`,
@@ -7096,58 +7452,35 @@ app.put('/api/reports/:id', async (req, res) => {
 app.post('/api/reports/:id/finalize', async (req, res) => {
   const auth = readRoleFromRequest(req);
   if (auth.error) return res.status(auth.status).json({ error: auth.error });
-  if (!canEditReports(auth.role)) return res.status(403).json({ error: 'Only LAB/Admin can finalize reports' });
+  return res.status(410).json({ error: 'Finalize flow removed. Use Save/Submit to update report.' });
+});
+
+app.delete('/api/reports/:id', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!canDeleteReports(auth.role)) return res.status(403).json({ error: 'Only Admin can delete reports' });
   const id = Number(req.params.id);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Invalid report id' });
-  const existing = await pool.query(`SELECT * FROM lab_reports WHERE id = $1 LIMIT 1`, [id]);
+  const existing = await pool.query(`SELECT * FROM lab_reports WHERE id = $1 AND is_deleted = false LIMIT 1`, [id]);
   if (!existing.rows.length) return res.status(404).json({ error: 'Report not found' });
   const row = existing.rows[0];
-  const normalizedFinalizeDate = normalizeReportDateValue(row.report_date) || new Date().toISOString().slice(0, 10);
-  const finalizedValidation = validateReportPayload(
-    {
-      report_date: normalizedFinalizeDate,
-      truck_number: row.truck_number,
-      trip_id: row.trip_id,
-      is_generic: row.is_generic,
-      loading_point: row.loading_point,
-      line_items: row.line_items_json,
-      afs_multiplier: row.afs_multiplier
-    },
-    row,
-    { mode: 'finalize' }
+  const result = await pool.query(
+    `UPDATE lab_reports
+     SET is_deleted = true,
+         deleted_at = NOW(),
+         deleted_by_role = $2,
+         deleted_by_name = $3,
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [id, auth.role, auth.user?.full_name || auth.user?.username || auth.role]
   );
-  if (finalizedValidation.error) return res.status(400).json({ error: finalizedValidation.error });
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const result = await client.query(
-      `UPDATE lab_reports
-       SET status = 'FINALIZED',
-           report_date = COALESCE(report_date, $4::date),
-           finalized_by_role = $2,
-           finalized_by_name = $3,
-           finalized_at = NOW(),
-           updated_at = NOW()
-       WHERE id = $1
-       RETURNING *`,
-      [id, auth.role, auth.user?.full_name || auth.user?.username || auth.role, normalizedFinalizeDate]
-    );
-    await client.query(
-      `INSERT INTO lab_report_history(report_id, action_type, actor_role, actor_name, old_values_json, new_values_json, request_id)
-       VALUES ($1,'FINALIZED',$2,$3,$4::jsonb,$5::jsonb,$6)`,
-      [id, auth.role, auth.user?.full_name || auth.user?.username || null, JSON.stringify(row), JSON.stringify(result.rows[0]), req.requestId]
-    );
-    await linkAfsSnapshotToTrip(client, result.rows[0]);
-    await attachFinalizedReportSnapshot(client, result.rows[0]);
-    await client.query('COMMIT');
-    return res.json(result.rows[0]);
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Failed to finalize report', error);
-    return res.status(500).json({ error: 'Failed to finalize report' });
-  } finally {
-    client.release();
-  }
+  await pool.query(
+    `INSERT INTO lab_report_history(report_id, action_type, actor_role, actor_name, old_values_json, new_values_json, request_id)
+     VALUES ($1,'DELETED',$2,$3,$4::jsonb,$5::jsonb,$6)`,
+    [id, auth.role, auth.user?.full_name || auth.user?.username || null, JSON.stringify(row), JSON.stringify(result.rows[0]), req.requestId]
+  );
+  return res.json({ ok: true, id });
 });
 
 app.get('/health', (req, res) => {

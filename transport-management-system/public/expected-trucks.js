@@ -95,7 +95,7 @@ function showAppContent() {
   });
   const roleIndicator = document.getElementById('role-indicator');
   roleIndicator.style.display = 'inline-block';
-  roleIndicator.textContent = `Role: ${userRole}`;
+  roleIndicator.textContent = window.AppPermissions?.getEmployeeIdentityLabel?.() || `Role: ${userRole}`;
   document.getElementById('logout-link').style.display = 'inline-block';
   const switcher = document.getElementById('role-switcher');
   if (switcher) {

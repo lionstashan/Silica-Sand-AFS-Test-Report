@@ -856,7 +856,18 @@ async function exportCsv() {
 }
 
 async function initApp() {
-  $('me-label').textContent = `Role: ${String(me.role || '').toLowerCase()}`;
+  $('me-label').textContent = window.AppPermissions?.getEmployeeIdentityLabel?.() || `Role: ${String(me.role || '').toLowerCase()}`;
+  window.AppPermissions?.renderRoleSwitcher?.('role-switcher', {
+    Gate: '/',
+    Dispatch: '/dashboard',
+    Loading: '/dashboard',
+    Weighbridge: '/dashboard',
+    LAB: '/reports',
+    Expense: '/expense',
+    Accounts: '/expense',
+    Manager: '/expense',
+    Admin: '/expense'
+  });
   const dashboardLink = $('expense-dashboard-link');
   const transportLink = $('manager-transport-link');
   if (dashboardLink) {

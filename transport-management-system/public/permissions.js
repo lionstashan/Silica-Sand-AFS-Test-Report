@@ -33,6 +33,13 @@
     return hasAnyRole(EXPENSE_ACCESS_ROLES);
   }
 
+  function getEmployeeIdentityLabel() {
+    const session = getEmployeeSession() || {};
+    const role = getCurrentRole() || '-';
+    const name = String(session.full_name || session.username || 'Unknown').trim() || 'Unknown';
+    return `User: ${name} | Role: ${role}`;
+  }
+
   function getAuthHeaders() {
     const role = getCurrentRole();
     const token = getEmployeeToken();
@@ -162,6 +169,38 @@
     return requestId ? `${message} (Ref: ${requestId})` : message;
   }
 
+  function renderRoleSwitcher(containerId, onChangeRedirectMap) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const session = getEmployeeSession();
+    const roles = Array.isArray(session?.roles)
+      ? session.roles.filter((r) => VALID_EMPLOYEE_ROLES.includes(r))
+      : [];
+    if (roles.length <= 1) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
+    const current = getCurrentRole();
+    el.innerHTML = roles.map((role) => `<option value="${role}">Role: ${role}</option>`).join('');
+    el.value = current && roles.includes(current) ? current : roles[0];
+    el.style.display = 'inline-block';
+    if (!el.dataset.switcherBound) {
+      el.addEventListener('change', (event) => {
+        const nextRole = String(event.target.value || '').trim();
+        if (!roles.includes(nextRole)) return;
+        localStorage.setItem('userRole', nextRole);
+        const map = onChangeRedirectMap && typeof onChangeRedirectMap === 'object' ? onChangeRedirectMap : null;
+        if (map && map[nextRole]) {
+          window.location.href = map[nextRole];
+          return;
+        }
+        window.location.reload();
+      });
+      el.dataset.switcherBound = '1';
+    }
+  }
+
   global.AppPermissions = {
     VALID_EMPLOYEE_ROLES,
     EXPENSE_ACCESS_ROLES,
@@ -170,12 +209,14 @@
     getEmployeeToken,
     hasAnyRole,
     hasExpenseAccess,
+    getEmployeeIdentityLabel,
     getAuthHeaders,
     redirectToEmployeeLogin,
     requireEmployeeSession,
     showNoAccess,
     showToast,
     showModal,
+    renderRoleSwitcher,
     setBusy,
     setPageLoading,
     parseApiError

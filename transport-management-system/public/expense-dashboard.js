@@ -246,13 +246,27 @@ function logout() {
 }
 
 async function init() {
+  if (!window.AppPermissions?.requireEmployeeSession?.(window.location.pathname + (window.location.search || ''))) {
+    return;
+  }
   const me = getUser();
   const token = getToken();
   if (!me || !token) {
     window.location.href = '/expense';
     return;
   }
-  $('me-label').textContent = `Role: ${String(me.role || '').toLowerCase()}`;
+  $('me-label').textContent = window.AppPermissions?.getEmployeeIdentityLabel?.() || `Role: ${String(me.role || '').toLowerCase()}`;
+  window.AppPermissions?.renderRoleSwitcher?.('role-switcher', {
+    Gate: '/',
+    Dispatch: '/dashboard',
+    Loading: '/dashboard',
+    Weighbridge: '/dashboard',
+    LAB: '/reports',
+    Expense: '/expense-dashboard',
+    Accounts: '/expense-dashboard',
+    Manager: '/expense-dashboard',
+    Admin: '/expense-dashboard'
+  });
   $('transport-link').style.display = ['Accounts', 'Manager', 'Admin'].includes(me.role) ? 'inline-block' : 'none';
   $('load-btn').addEventListener('click', loadDashboard);
   $('export-btn').addEventListener('click', exportCsv);

@@ -144,7 +144,9 @@ let employeesCache = [];
 let customerUsersCache = [];
 let masterValuesCache = [];
 let employeeAutoSeedAttempted = false;
+let employeeEditUsername = null;
 let customerEditUsername = null;
+let masterEditId = null;
 
 async function loadEmployees() {
   try {
@@ -221,7 +223,10 @@ async function loadEmployees() {
       <td>${r.expense_role || '-'}</td>
       <td>${r.is_active ? 'Active' : 'Inactive'}</td>
       <td>${fmt(r.updated_at)}</td>
-      <td><button type="button" data-edit-employee="${r.username}">Edit</button></td>
+      <td>
+        <button type="button" data-edit-employee="${r.username}">Edit</button>
+        <button type="button" data-delete-employee="${r.username}">Delete</button>
+      </td>
     </tr>
   `).join('') || '<tr><td colspan="7">No employees found. Click "Seed Current Data Into Control Panel" and refresh.</td></tr>';
 
@@ -230,6 +235,24 @@ async function loadEmployees() {
       const username = btn.getAttribute('data-edit-employee');
       const row = employeesCache.find((r) => r.username === username);
       openEmployeeModal(row || null);
+    });
+  });
+  document.querySelectorAll('[data-delete-employee]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const username = btn.getAttribute('data-delete-employee');
+      if (!username) return;
+      const confirmed = window.confirm(`Delete employee "${username}" from control panel tables?`);
+      if (!confirmed) return;
+      try {
+        setButtonBusy(btn, true, 'Deleting...');
+        await api(`/admin/control/employees/${encodeURIComponent(username)}`, { method: 'DELETE' });
+        showMessage(`Employee deleted: ${username}`);
+        await refreshAll();
+      } catch (error) {
+        showMessage(error.message, false);
+      } finally {
+        setButtonBusy(btn, false);
+      }
     });
   });
 }
@@ -243,7 +266,10 @@ async function loadCustomerUsers() {
       <td>${r.display_name || '-'}</td>
       <td>${r.username || '-'}</td>
       <td>${r.is_active ? 'Active' : 'Inactive'}</td>
-      <td><button type="button" data-edit-customer-user="${r.username}">Edit</button></td>
+      <td>
+        <button type="button" data-edit-customer-user="${r.username}">Edit</button>
+        <button type="button" data-delete-customer-user="${r.username}">Delete</button>
+      </td>
     </tr>
   `).join('') || '<tr><td colspan="5">No customer users</td></tr>';
 
@@ -256,12 +282,32 @@ async function loadCustomerUsers() {
       document.getElementById('cu-customer').value = row.customer_name || '';
       document.getElementById('cu-display').value = row.display_name || '';
       document.getElementById('cu-username').value = row.username || '';
-      document.getElementById('cu-username').readOnly = true;
+      document.getElementById('cu-username').readOnly = false;
       document.getElementById('cu-password').value = '';
       document.getElementById('cu-active').value = row.is_active ? 'true' : 'false';
       showMessage(`Editing customer user: ${row.username}`);
       showCustomerMessage(`Editing customer user: ${row.username}`);
       window.scrollTo({ top: document.getElementById('customer-user-form').offsetTop - 80, behavior: 'smooth' });
+    });
+  });
+  document.querySelectorAll('[data-delete-customer-user]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const username = btn.getAttribute('data-delete-customer-user');
+      if (!username) return;
+      const confirmed = window.confirm(`Delete customer user "${username}"?`);
+      if (!confirmed) return;
+      try {
+        setButtonBusy(btn, true, 'Deleting...');
+        await api(`/admin/control/customer-users/${encodeURIComponent(username)}`, { method: 'DELETE' });
+        showCustomerMessage(`Deleted customer user: ${username}`);
+        showMessage(`Deleted customer user: ${username}`);
+        await refreshAll();
+      } catch (error) {
+        showCustomerMessage(error.message, false);
+        showMessage(error.message, false);
+      } finally {
+        setButtonBusy(btn, false);
+      }
     });
   });
 }
@@ -286,23 +332,73 @@ async function loadMasterValues() {
       <td>${r.master_type === 'grades' ? (r.metadata_json?.price_per_mt ?? '-') : '-'}</td>
       <td>${r.is_active ? 'Active' : 'Inactive'}</td>
       <td>${fmt(r.updated_at)}</td>
-      <td><button type="button" data-edit-master-value="${encodeURIComponent(r.value)}">Edit</button></td>
+      <td>
+        <button type="button" data-edit-master-id="${r.id}">Edit</button>
+        <button type="button" data-delete-master-id="${r.id}" ${Number(r.id) > 0 ? '' : 'disabled'}>Delete</button>
+      </td>
     </tr>
   `).join('') || `<tr><td colspan="6">No values for "${type}". Click "Seed Current Data Into Control Panel" once, then refresh.</td></tr>`;
 
-  document.querySelectorAll('[data-edit-master-value]').forEach((btn) => {
+  document.querySelectorAll('[data-edit-master-id]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const value = decodeURIComponent(btn.getAttribute('data-edit-master-value'));
-      const row = masterValuesCache.find((r) => r.value === value);
+      const id = Number(btn.getAttribute('data-edit-master-id'));
+      const row = masterValuesCache.find((r) => Number(r.id) === id);
       if (!row) return;
+      if (Number(row.id) <= 0) {
+        showMessage('Fallback values must be seeded first before edit/delete.', false);
+        return;
+      }
+      masterEditId = Number(row.id);
       document.getElementById('m-type').value = row.master_type;
       document.getElementById('m-value').value = row.value;
       document.getElementById('m-price').value = row.master_type === 'grades' ? (row.metadata_json?.price_per_mt ?? '') : '';
       document.getElementById('m-active').value = row.is_active ? 'true' : 'false';
+      const submitBtn = document.querySelector('#master-form button[type="submit"]');
+      if (submitBtn) submitBtn.textContent = 'Update Master Value';
+      const cancelBtn = document.getElementById('master-cancel-edit-btn');
+      if (cancelBtn) cancelBtn.style.display = 'inline-block';
       showMessage(`Editing master value: ${row.value}`);
       window.scrollTo({ top: document.getElementById('master-form').offsetTop - 80, behavior: 'smooth' });
     });
   });
+
+  document.querySelectorAll('[data-delete-master-id]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = Number(btn.getAttribute('data-delete-master-id'));
+      if (!Number.isInteger(id) || id <= 0) return;
+      const row = masterValuesCache.find((r) => Number(r.id) === id);
+      const title = row ? `${row.master_type}: ${row.value}` : `id ${id}`;
+      const confirmed = window.confirm(`Delete master value "${title}"?`);
+      if (!confirmed) return;
+      try {
+        setButtonBusy(btn, true, 'Deleting...');
+        await api(`/admin/control/masters/${id}`, { method: 'DELETE' });
+        showMessage(`Master value deleted: ${title}`);
+        if (masterEditId === id) resetMasterFormMode();
+        await loadMasterValues();
+        await loadOverview();
+      } catch (error) {
+        showMessage(error.message, false);
+      } finally {
+        setButtonBusy(btn, false);
+      }
+    });
+  });
+}
+
+function resetMasterFormMode() {
+  masterEditId = null;
+  const submitBtn = document.querySelector('#master-form button[type="submit"]');
+  if (submitBtn) submitBtn.textContent = 'Save Master Value';
+  const cancelBtn = document.getElementById('master-cancel-edit-btn');
+  if (cancelBtn) cancelBtn.style.display = 'none';
+  const form = document.getElementById('master-form');
+  form?.reset();
+  const active = document.getElementById('m-active');
+  if (active) active.value = 'true';
+  const type = document.getElementById('m-type')?.value;
+  const priceWrap = document.getElementById('m-price-wrap');
+  if (priceWrap) priceWrap.style.display = type === 'grades' ? '' : 'none';
 }
 
 async function refreshAll() {
@@ -362,10 +458,11 @@ function getSelectedTransportRoles() {
 }
 
 function openEmployeeModal(row) {
+  employeeEditUsername = row?.username || null;
   document.getElementById('employee-modal').style.display = 'flex';
   document.getElementById('employee-modal-title').textContent = row ? `Edit: ${row.username}` : 'Add Employee';
   document.getElementById('e-username').value = row?.username || '';
-  document.getElementById('e-username').readOnly = !!row;
+  document.getElementById('e-username').readOnly = false;
   document.getElementById('e-full-name').value = row?.full_name || '';
   document.getElementById('e-password').value = '';
   setSelectedTransportRoles(Array.isArray(row?.transport_roles) ? row.transport_roles : []);
@@ -379,6 +476,7 @@ function openEmployeeModal(row) {
 
 function closeEmployeeModal() {
   document.getElementById('employee-modal').style.display = 'none';
+  employeeEditUsername = null;
 }
 
 async function init() {
@@ -386,30 +484,18 @@ async function init() {
     return;
   }
   const role = localStorage.getItem('userRole');
-  document.getElementById('role-indicator').textContent = `Role: ${role || '-'}`;
-  const roleSwitcher = document.getElementById('role-switcher');
-  const auth = getEmployeeAuthSession();
-  const roles = Array.isArray(auth?.roles) ? auth.roles.filter((r) => VALID_ROLES.includes(r)) : [];
-  if (roleSwitcher) {
-    if (roles.length > 1) {
-      roleSwitcher.innerHTML = roles.map((r) => `<option value="${r}">Switch: ${r}</option>`).join('');
-      roleSwitcher.value = role && roles.includes(role) ? role : roles[0];
-      roleSwitcher.style.display = 'inline-block';
-    } else {
-      roleSwitcher.style.display = 'none';
-      roleSwitcher.innerHTML = '';
-    }
-    roleSwitcher.addEventListener('change', (event) => {
-      const selectedRole = event.target.value;
-      if (!selectedRole || !roles.includes(selectedRole)) return;
-      localStorage.setItem('userRole', selectedRole);
-      if (selectedRole !== 'Admin') {
-        window.location.href = '/';
-        return;
-      }
-      window.location.reload();
-    });
-  }
+  document.getElementById('role-indicator').textContent = window.AppPermissions?.getEmployeeIdentityLabel?.() || `Role: ${role || '-'}`;
+  window.AppPermissions?.renderRoleSwitcher?.('role-switcher', {
+    Gate: '/',
+    Dispatch: '/dashboard',
+    Loading: '/dashboard',
+    Weighbridge: '/dashboard',
+    LAB: '/reports',
+    Expense: '/expense',
+    Accounts: '/dashboard',
+    Manager: '/dashboard',
+    Admin: '/admin-control'
+  });
   if (role !== 'Admin') {
     window.AppPermissions?.showNoAccess?.('You do not have access to Control Panel.');
     showMessage('Admin login required. Please login from main page as Admin first.', false);
@@ -447,6 +533,7 @@ async function init() {
       await api('/admin/control/employees', {
         method: 'POST',
         body: JSON.stringify({
+          original_username: employeeEditUsername,
           username: document.getElementById('e-username').value.trim(),
           full_name: document.getElementById('e-full-name').value.trim(),
           password: document.getElementById('e-password').value.trim() || null,
@@ -477,10 +564,11 @@ async function init() {
     if (formBtn) formBtn.disabled = true;
     try {
       const usernameInput = document.getElementById('cu-username');
-      const payloadUsername = customerEditUsername || usernameInput.value.trim();
+      const payloadUsername = usernameInput.value.trim();
       await api('/admin/control/customer-users', {
         method: 'POST',
         body: JSON.stringify({
+          original_username: customerEditUsername,
           customer_name: document.getElementById('cu-customer').value.trim(),
           display_name: document.getElementById('cu-display').value.trim() || null,
           username: payloadUsername,
@@ -508,16 +596,28 @@ async function init() {
     try {
       const type = document.getElementById('m-type').value;
       const priceRaw = document.getElementById('m-price').value;
-      await api(`/admin/control/masters/${encodeURIComponent(document.getElementById('m-type').value)}`, {
-        method: 'POST',
-        body: JSON.stringify({
-          value: document.getElementById('m-value').value.trim(),
-          is_active: document.getElementById('m-active').value === 'true',
-          price_per_mt: type === 'grades' ? (priceRaw === '' ? null : Number(priceRaw)) : null
-        })
-      });
-      showMessage('Master value saved');
-      document.getElementById('m-price').value = '';
+      const payload = {
+        value: document.getElementById('m-value').value.trim(),
+        is_active: document.getElementById('m-active').value === 'true',
+        price_per_mt: type === 'grades' ? (priceRaw === '' ? null : Number(priceRaw)) : null
+      };
+      if (masterEditId) {
+        await api(`/admin/control/masters/${masterEditId}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            master_type: type,
+            ...payload
+          })
+        });
+        showMessage('Master value updated');
+      } else {
+        await api(`/admin/control/masters/${encodeURIComponent(type)}`, {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+        showMessage('Master value saved');
+      }
+      resetMasterFormMode();
       await loadMasterValues();
       await loadOverview();
     } catch (error) {
@@ -526,7 +626,12 @@ async function init() {
   });
 
   document.getElementById('m-type').addEventListener('change', async () => {
+    if (masterEditId) resetMasterFormMode();
     await loadMasterValues();
+  });
+
+  document.getElementById('master-cancel-edit-btn')?.addEventListener('click', () => {
+    resetMasterFormMode();
   });
 
   document.getElementById('master-refresh-btn').addEventListener('click', async () => {

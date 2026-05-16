@@ -25,10 +25,11 @@
 </head>
 <body>
   <header>
-    <h1>Indus Silica Sand - Expense Dashboard</h1>
+    <h1 class="brand-title"><img src="/assets/brand/logo-mark.png" alt="Indus Silica Sand" class="brand-logo" />Indus Silica Sand - Expense Dashboard</h1>
     <p>Summary analytics for open and completed expense claims.</p>
     <div class="header-actions">
       <span id="me-label" class="role-indicator"></span>
+      <select id="role-switcher" class="nav-link nav-btn" style="display:none;"></select>
       <button id="expense-notifications-btn" class="nav-link nav-btn header-bell-btn" aria-label="Expense notifications" title="Expense notifications">
         <span class="bell-icon">🔔</span><span id="expense-notification-badge" class="notif-badge" style="display:none;">0</span>
       </button>
@@ -78,6 +79,7 @@
       <div id="expense-notification-list" class="mini"></div>
     </div>
   </div>
-  <script src="/expense-dashboard.js?v=20260511-7"></script>
+  <script src="/permissions.js?v=20260513-1"></script>
+  <script src="/expense-dashboard.js?v=20260516-1"></script>
 </body>
 </html>

@@ -8,7 +8,7 @@
 </head>
 <body>
   <header>
-    <h1>Accounts Sales Analytics</h1>
+    <h1 class="brand-title"><img src="/assets/brand/logo-mark.png" alt="Indus Silica Sand" class="brand-logo" />Accounts Sales Analytics</h1>
     <p>Grade, customer, material, and trend insights.</p>
     <div class="header-actions">
       <span id="role-indicator" class="role-indicator" style="display: none;"></span>
@@ -73,8 +73,10 @@
           </select>
         </label>
         <button id="sales-load-btn" type="button">Load Analytics</button>
+        <button id="sales-clear-btn" type="button" class="workflow-btn">Clear Filters</button>
       </div>
     </div>
+    <div id="sales-filter-summary" class="mini" style="margin-top:8px;"></div>
     <div class="analytics-toolbar">
       <div id="analytics-tabs" class="workflow-row">
         <button type="button" class="workflow-btn analytics-tab active" data-tab="overview">Overview</button>

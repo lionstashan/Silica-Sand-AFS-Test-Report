@@ -21,6 +21,15 @@ let editingReportId = null;
 let currentPage = 1;
 let currentTotalPages = 1;
 let currentReportRows = [];
+let currentSieveMeshes = { sieve_1_mesh: '200', sieve_2_mesh: '140', sieve_3_mesh: '100' };
+let reportSampleOptions = {
+  sample_types: ['Production', 'Inhouse', 'Supply'],
+  sample_points: {
+    Production: ['Screw1', 'Screw2', 'Screw3', 'Glass Plant', 'Dry Plant New', 'Dry Plant Old', 'Raw Material', 'Other'],
+    Inhouse: ['Floor1', 'Floor2', 'Floor3', 'Floor4', 'Dry Plant New', 'Dry Plant Old', 'Glass Plant'],
+    Supply: ['Floor1', 'Floor2', 'Floor3', 'Floor4', 'Dry Plant New', 'Dry Plant Old', 'Glass Plant']
+  }
+};
 
 function setButtonBusy(button, busy, busyText = 'Working...') {
   if (!button) return;
@@ -113,7 +122,7 @@ function renderReportCharts(rows) {
   const afsByDate = groupBy(
     rows,
     (r) => String(r.report_date || '').trim(),
-    (r) => Number(r.total_afs || 0)
+    (r) => Number((r.exact_afs ?? r.total_afs) || 0)
   ).sort((a, b) => a.label.localeCompare(b.label)).slice(-10);
   const sieveCount = groupBy(
     rows,
@@ -122,6 +131,12 @@ function renderReportCharts(rows) {
   ).sort((a, b) => b.value - a.value).slice(0, 10);
   renderMiniBars('afs-trend-chart', afsByDate, 2);
   renderMiniBars('sieve-size-chart', sieveCount, 0);
+}
+
+function fmtNullableNumber(value, digits = 2) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '-';
+  return n.toFixed(digits);
 }
 
 async function api(path, options = {}) {
@@ -209,18 +224,55 @@ function applyTruckSuggestion(truck) {
 }
 
 async function loadMeta() {
-  const [labUsers, loadingPoints, trucks] = await Promise.all([
+  const [labUsers, loadingPoints, trucks, sampleOptions] = await Promise.all([
     api('/api/reports/lab-users'),
     api('/api/reports/loading-points'),
-    api('/api/reports/truck-suggestions')
+    api('/api/reports/truck-suggestions'),
+    api('/api/reports/sample-options')
   ]);
   truckSuggestions = Array.isArray(trucks) ? trucks : [];
+  if (sampleOptions && typeof sampleOptions === 'object') {
+    reportSampleOptions = {
+      sample_types: Array.isArray(sampleOptions.sample_types) ? sampleOptions.sample_types : ['Production', 'Inhouse', 'Supply'],
+      sample_points: sampleOptions.sample_points || { Production: [], Inhouse: [], Supply: [] }
+    };
+  }
   const labSelect = document.getElementById('r-lab-user');
   labSelect.innerHTML = (labUsers || []).map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
   const lpSelect = document.getElementById('r-loading-point');
   lpSelect.innerHTML = ['<option value="">Select</option>', ...(loadingPoints || []).map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`)].join('');
   const dl = document.getElementById('truck-options');
   dl.innerHTML = truckSuggestions.map((t) => `<option value="${escapeHtml(t.truck_number)}"></option>`).join('');
+  renderSampleTypeOptions();
+  refreshSamplePointOptions();
+}
+
+function renderSampleTypeOptions() {
+  const sampleTypeEl = document.getElementById('r-sample-type');
+  if (!sampleTypeEl) return;
+  const types = Array.isArray(reportSampleOptions.sample_types) ? reportSampleOptions.sample_types : ['Production', 'Inhouse', 'Supply'];
+  const current = sampleTypeEl.value;
+  sampleTypeEl.innerHTML = ['<option value="">Select</option>', ...types.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`)].join('');
+  if (current && types.includes(current)) sampleTypeEl.value = current;
+}
+
+function refreshSamplePointOptions() {
+  const sampleType = document.getElementById('r-sample-type')?.value || '';
+  const pointEl = document.getElementById('r-sample-point');
+  const otherWrap = document.getElementById('r-sample-point-other-wrap');
+  const otherInput = document.getElementById('r-sample-point-other');
+  if (!pointEl) return;
+  const points = Array.isArray(reportSampleOptions.sample_points?.[sampleType]) ? reportSampleOptions.sample_points[sampleType] : [];
+  const current = pointEl.value;
+  pointEl.innerHTML = ['<option value="">Select</option>', ...points.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`)].join('');
+  if (current && points.includes(current)) {
+    pointEl.value = current;
+  } else {
+    pointEl.value = '';
+  }
+  const isOther = sampleType === 'Production' && pointEl.value === 'Other';
+  if (otherWrap) otherWrap.style.display = isOther ? '' : 'none';
+  if (!isOther && otherInput) otherInput.value = '';
 }
 
 async function submitReport() {
@@ -237,11 +289,15 @@ async function submitReport() {
     loading_point: document.getElementById('r-loading-point').value,
     material_type: document.getElementById('r-material').value.trim(),
     grade: document.getElementById('r-grade').value.trim(),
+    sample_type: document.getElementById('r-sample-type').value || null,
+    sample_point: document.getElementById('r-sample-point').value || null,
+    sample_point_other: document.getElementById('r-sample-point-other').value.trim() || null,
     sieve_size: document.getElementById('r-sieve-size').value.trim(),
     afs_reference: document.getElementById('r-afs-ref').value.trim(),
     afs_multiplier: Number(document.getElementById('r-afs-mult').value || 1),
     lab_user_name: document.getElementById('r-lab-user').value,
     notes: document.getElementById('r-notes').value.trim(),
+    version: editingReportId ? Number(document.getElementById('save-report-btn').dataset.reportVersion || '1') : null,
     line_items: collectLineItems()
   };
   const submitBtn = document.getElementById('save-report-btn');
@@ -251,12 +307,12 @@ async function submitReport() {
       method: editingReportId ? 'PUT' : 'POST',
       body: JSON.stringify(payload)
     });
-    await api(`/api/reports/${data.id}/finalize`, { method: 'POST' });
-    showMessage(`Submitted report ${data.report_number}`);
+    showMessage(`Saved report ${data.report_number}`);
     editingReportId = null;
     if (submitBtn) {
       submitBtn.dataset.defaultText = 'Submit Report';
       submitBtn.textContent = 'Submit Report';
+      submitBtn.dataset.reportVersion = '';
     }
     await loadReports();
   } finally {
@@ -264,17 +320,12 @@ async function submitReport() {
   }
 }
 
-async function finalizeReport(id) {
-  await api(`/api/reports/${id}/finalize`, { method: 'POST' });
-  showMessage(`Finalized report #${id}`);
-  await loadReports();
-}
-
 async function loadReportForEdit(id) {
   const data = await api(`/api/reports/${id}`);
   const r = data.report;
   editingReportId = r.id;
   document.getElementById('save-report-btn').textContent = `Submit ${r.report_number}`;
+  document.getElementById('save-report-btn').dataset.reportVersion = String(r.version || 1);
   document.getElementById('r-date').value = normalizeDateInputValue(r.report_date);
   document.getElementById('r-truck').value = r.truck_number || '';
   document.getElementById('r-trip-id').value = r.trip_id || '';
@@ -283,6 +334,11 @@ async function loadReportForEdit(id) {
   document.getElementById('r-loading-point').value = r.loading_point || '';
   document.getElementById('r-material').value = r.material_type || '';
   document.getElementById('r-grade').value = r.grade || '';
+  document.getElementById('r-sample-type').value = r.sample_type || '';
+  refreshSamplePointOptions();
+  document.getElementById('r-sample-point').value = r.sample_point || '';
+  refreshSamplePointOptions();
+  document.getElementById('r-sample-point-other').value = r.sample_point_other || '';
   document.getElementById('r-sieve-size').value = r.sieve_size || '';
   document.getElementById('r-afs-ref').value = r.afs_reference || '';
   document.getElementById('r-afs-mult').value = Number(r.afs_multiplier || 1);
@@ -299,35 +355,55 @@ async function loadReports() {
   const from = document.getElementById('f-from').value;
   const to = document.getElementById('f-to').value;
   const truck = document.getElementById('f-truck').value.trim();
+  const customer = document.getElementById('f-customer').value.trim();
+  const afsBlock = document.getElementById('f-afs-block').value;
+  const sieve1 = document.getElementById('f-sieve-1').value.trim() || '200';
+  const sieve2 = document.getElementById('f-sieve-2').value.trim() || '140';
+  const sieve3 = document.getElementById('f-sieve-3').value.trim() || '100';
   const status = document.getElementById('f-status').value;
   if (from) q.set('from_date', from);
   if (to) q.set('to_date', to);
   if (truck) q.set('truck_number', truck);
+  if (customer) q.set('customer', customer);
+  if (afsBlock) q.set('afs_block', afsBlock);
+  q.set('sieve_mesh_1', sieve1);
+  q.set('sieve_mesh_2', sieve2);
+  q.set('sieve_mesh_3', sieve3);
   if (status) q.set('status', status);
   q.set('page', String(currentPage));
   q.set('limit', '25');
   const payload = await api(`/api/reports?${q.toString()}`);
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  currentSieveMeshes = payload.sieve_meshes || currentSieveMeshes;
+  const th1 = document.getElementById('th-sieve-1');
+  const th2 = document.getElementById('th-sieve-2');
+  const th3 = document.getElementById('th-sieve-3');
+  if (th1) th1.textContent = currentSieveMeshes.sieve_1_mesh || 'Sieve-1';
+  if (th2) th2.textContent = currentSieveMeshes.sieve_2_mesh || 'Sieve-2';
+  if (th3) th3.textContent = currentSieveMeshes.sieve_3_mesh || 'Sieve-3';
   currentReportRows = rows;
   const pageInfo = payload.pagination || {};
   currentTotalPages = Number(pageInfo.totalPages || 1);
   const tbody = document.getElementById('reports-table');
   tbody.innerHTML = rows.map((row) => `
     <tr>
-      <td><a href="/reports/${row.id}/view" target="_blank" rel="noopener">${escapeHtml(row.report_number)}</a></td>
-      <td>${escapeHtml(row.report_date)}</td>
+      <td><a href="/reports/${row.id}/view" target="_blank" rel="noopener" title="${escapeHtml(row.report_number || '')}">${escapeHtml(row.id)}</a></td>
       <td>${escapeHtml(row.truck_number)}</td>
       <td>${escapeHtml(row.customer_name || '-')}</td>
-      <td>${escapeHtml(row.loading_point || '-')}</td>
-      <td>${escapeHtml(row.sieve_size || '-')}</td>
-      <td>${Number(row.total_afs || 0).toFixed(2)}</td>
+      <td>${escapeHtml(row.sample_type || '-')}</td>
+      <td>${escapeHtml((row.sample_point === 'Other' ? row.sample_point_other : row.sample_point) || '-')}</td>
+      <td>${fmtNullableNumber(row.exact_afs, 2)}</td>
+      <td>${escapeHtml(row.afs_block || '-')}</td>
+      <td>${fmtNullableNumber(row.sieve_1_weight, 2)}</td>
+      <td>${fmtNullableNumber(row.sieve_2_weight, 2)}</td>
+      <td>${fmtNullableNumber(row.sieve_3_weight, 2)}</td>
       <td>${escapeHtml(row.status)}</td>
       <td>
-        ${row.status !== 'FINALIZED' && EDIT_ROLES.includes(currentRole) ? `<button data-edit="${row.id}">Edit</button>` : ''}
-        ${row.status !== 'FINALIZED' && EDIT_ROLES.includes(currentRole) ? `<button data-finalize="${row.id}">Finalize</button>` : '-'}
+        ${EDIT_ROLES.includes(currentRole) ? `<button data-edit="${row.id}">Edit</button>` : ''}
+        ${currentRole === 'Admin' ? `<button data-delete="${row.id}">Delete</button>` : ''}
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="9">No reports found</td></tr>';
+  `).join('') || '<tr><td colspan="12">No reports found</td></tr>';
   const pager = document.getElementById('reports-pagination');
   if (pager) {
     pager.innerHTML = `Page ${pageInfo.page || 1} / ${currentTotalPages}`;
@@ -345,10 +421,15 @@ async function loadReports() {
       }
     });
   });
-  tbody.querySelectorAll('[data-finalize]').forEach((btn) => {
+  tbody.querySelectorAll('[data-delete]').forEach((btn) => {
     btn.addEventListener('click', async () => {
+      const id = Number(btn.getAttribute('data-delete'));
+      if (!Number.isFinite(id) || id <= 0) return;
+      if (!window.confirm(`Delete report #${id}?`)) return;
       try {
-        await finalizeReport(Number(btn.getAttribute('data-finalize')));
+        await api(`/api/reports/${id}`, { method: 'DELETE' });
+        showMessage(`Deleted report #${id}`);
+        await loadReports();
       } catch (error) {
         showMessage(error.message, false);
       }
@@ -391,8 +472,22 @@ async function init() {
     window.location.href = '/';
     return;
   }
-  document.getElementById('role-indicator').style.display = 'inline-block';
-  document.getElementById('role-indicator').textContent = `Role: ${role}`;
+  const roleIndicator = document.getElementById('role-indicator');
+  if (roleIndicator) {
+    roleIndicator.style.display = 'inline-block';
+    roleIndicator.textContent = window.AppPermissions?.getEmployeeIdentityLabel?.() || `Role: ${role}`;
+  }
+  window.AppPermissions?.renderRoleSwitcher?.('role-switcher', {
+    Gate: '/',
+    Dispatch: '/dashboard',
+    Loading: '/dashboard',
+    Weighbridge: '/dashboard',
+    LAB: '/reports',
+    Expense: '/expense',
+    Accounts: '/reports',
+    Manager: '/reports',
+    Admin: '/reports'
+  });
   document.getElementById('logout-link').style.display = 'inline-block';
   document.getElementById('logout-link').addEventListener('click', (e) => {
     e.preventDefault();
@@ -409,6 +504,7 @@ async function init() {
   });
   document.getElementById('load-reports-btn').addEventListener('click', async () => {
     try {
+      currentPage = 1;
       await loadReports();
     } catch {}
   });
@@ -444,6 +540,8 @@ async function init() {
     }
   });
   document.getElementById('r-afs-mult').addEventListener('input', computeTotals);
+  document.getElementById('r-sample-type')?.addEventListener('change', refreshSamplePointOptions);
+  document.getElementById('r-sample-point')?.addEventListener('change', refreshSamplePointOptions);
   document.getElementById('reports-error-ok-btn')?.addEventListener('click', closeErrorModal);
   document.getElementById('reports-error-modal')?.addEventListener('click', (e) => {
     if (e.target?.id === 'reports-error-modal') closeErrorModal();
