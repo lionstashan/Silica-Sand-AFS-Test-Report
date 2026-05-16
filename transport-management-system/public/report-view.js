@@ -61,6 +61,23 @@ function hasBrandingValue(value) {
   return typeof value === 'string' ? value.trim().length > 0 : Boolean(value);
 }
 
+function mergeBrandingWithFallback(fallback, ...sources) {
+  const out = { ...(fallback || {}) };
+  for (const src of sources) {
+    if (!src || typeof src !== 'object') continue;
+    for (const [key, value] of Object.entries(src)) {
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) continue;
+        out[key] = trimmed;
+      } else if (value !== null && value !== undefined) {
+        out[key] = value;
+      }
+    }
+  }
+  return out;
+}
+
 function renderSieveChart(items) {
   const chartEl = document.getElementById('rv-sieve-chart');
   if (!chartEl) return;
@@ -203,7 +220,6 @@ async function init() {
     ? report.branding_snapshot_json
     : {};
   const liveBranding = await api('/api/reports/branding').catch(() => ({}));
-  const branding = Object.keys(snapshotBranding).length ? snapshotBranding : liveBranding;
   const fallbackBranding = {
     company_name: 'Indus Silica Sand',
     logo_url: '/assets/brand/logo-primary.png',
@@ -215,7 +231,7 @@ async function init() {
     address: 'Kishangarh, Rajasthan',
     footer_text: 'Quality report generated for internal QA reference.'
   };
-  const mergedBranding = { ...fallbackBranding, ...(branding || {}) };
+  const mergedBranding = mergeBrandingWithFallback(fallbackBranding, liveBranding, snapshotBranding);
   document.getElementById('rv-title').textContent = `Lab Report (${report.status})`;
   document.getElementById('rv-branding').innerHTML = `
     <div class="rv-brand-head">

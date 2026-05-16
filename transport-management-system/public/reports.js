@@ -21,7 +21,7 @@ let editingReportId = null;
 let currentPage = 1;
 let currentTotalPages = 1;
 let currentReportRows = [];
-let currentSieveMeshes = { sieve_1_mesh: '200', sieve_2_mesh: '140', sieve_3_mesh: '100' };
+const TABLE_SIEVE_MESHES = ['10', '20', '30', '40', '50', '70', '100', '140', '200', '270'];
 let reportSampleOptions = {
   sample_types: ['Production', 'Inhouse', 'Supply'],
   sample_points: {
@@ -76,6 +76,23 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function setSelectValueWithFallback(selectEl, value) {
+  if (!selectEl) return;
+  const normalized = String(value || '').trim();
+  if (!normalized) {
+    selectEl.value = '';
+    return;
+  }
+  const hasOption = Array.from(selectEl.options || []).some((opt) => opt.value === normalized);
+  if (!hasOption) {
+    const option = document.createElement('option');
+    option.value = normalized;
+    option.textContent = normalized;
+    selectEl.appendChild(option);
+  }
+  selectEl.value = normalized;
 }
 
 function normalizeDateInputValue(value) {
@@ -137,6 +154,16 @@ function fmtNullableNumber(value, digits = 2) {
   const n = Number(value);
   if (!Number.isFinite(n)) return '-';
   return n.toFixed(digits);
+}
+
+function getLineItemWeight(lineItems, meshLabel) {
+  const target = String(meshLabel || '').trim().toLowerCase();
+  if (!target) return null;
+  const rows = Array.isArray(lineItems) ? lineItems : [];
+  const found = rows.find((row) => String(row?.mesh_size || '').trim().toLowerCase() === target);
+  if (!found) return null;
+  const value = Number(found.weight);
+  return Number.isFinite(value) ? value : null;
 }
 
 async function api(path, options = {}) {
@@ -219,16 +246,17 @@ function applyTruckSuggestion(truck) {
   document.getElementById('r-trip-id').value = truck.id || '';
   document.getElementById('r-customer').value = truck.customer_name || '';
   document.getElementById('r-loading-point').value = truck.loading_point || '';
-  document.getElementById('r-material').value = truck.material_type || '';
-  document.getElementById('r-grade').value = truck.grade || '';
+  setSelectValueWithFallback(document.getElementById('r-material'), truck.material_type || '');
+  setSelectValueWithFallback(document.getElementById('r-grade'), truck.grade || '');
 }
 
 async function loadMeta() {
-  const [labUsers, loadingPoints, trucks, sampleOptions] = await Promise.all([
+  const [labUsers, loadingPoints, trucks, sampleOptions, masterOptions] = await Promise.all([
     api('/api/reports/lab-users'),
     api('/api/reports/loading-points'),
     api('/api/reports/truck-suggestions'),
-    api('/api/reports/sample-options')
+    api('/api/reports/sample-options'),
+    api('/masters/options?types=materials,grades')
   ]);
   truckSuggestions = Array.isArray(trucks) ? trucks : [];
   if (sampleOptions && typeof sampleOptions === 'object') {
@@ -241,10 +269,25 @@ async function loadMeta() {
   labSelect.innerHTML = (labUsers || []).map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
   const lpSelect = document.getElementById('r-loading-point');
   lpSelect.innerHTML = ['<option value="">Select</option>', ...(loadingPoints || []).map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`)].join('');
+  const materialSelect = document.getElementById('r-material');
+  const gradeSelect = document.getElementById('r-grade');
+  const materials = Array.isArray(masterOptions?.materials)
+    ? masterOptions.materials.map((item) => (item && typeof item === 'object' ? item.value : item)).map((v) => String(v || '').trim()).filter(Boolean)
+    : [];
+  const grades = Array.isArray(masterOptions?.grades)
+    ? masterOptions.grades.map((item) => (item && typeof item === 'object' ? item.value : item)).map((v) => String(v || '').trim()).filter(Boolean)
+    : [];
+  if (materialSelect) {
+    materialSelect.innerHTML = ['<option value="">Select</option>', ...materials.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`)].join('');
+  }
+  if (gradeSelect) {
+    gradeSelect.innerHTML = ['<option value="">Select</option>', ...grades.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`)].join('');
+  }
   const dl = document.getElementById('truck-options');
   dl.innerHTML = truckSuggestions.map((t) => `<option value="${escapeHtml(t.truck_number)}"></option>`).join('');
   renderSampleTypeOptions();
   refreshSamplePointOptions();
+  refreshSamplePointFilterOptions();
 }
 
 function renderSampleTypeOptions() {
@@ -275,6 +318,22 @@ function refreshSamplePointOptions() {
   if (otherInput) otherInput.required = isOther;
   if (!isOther && otherInput) otherInput.value = '';
   toggleLinkedFieldsForSampleType(sampleType);
+}
+
+function refreshSamplePointFilterOptions() {
+  const type = document.getElementById('f-sample-type')?.value || '';
+  const samplePointFilter = document.getElementById('f-sample-point');
+  if (!samplePointFilter) return;
+  const points = type
+    ? (Array.isArray(reportSampleOptions.sample_points?.[type]) ? reportSampleOptions.sample_points[type] : [])
+    : Array.from(new Set([
+      ...(reportSampleOptions.sample_points?.Production || []),
+      ...(reportSampleOptions.sample_points?.Inhouse || []),
+      ...(reportSampleOptions.sample_points?.Supply || [])
+    ]));
+  const current = samplePointFilter.value;
+  samplePointFilter.innerHTML = ['<option value="">All</option>', ...points.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`)].join('');
+  if (current && points.includes(current)) samplePointFilter.value = current;
 }
 
 function toggleLinkedFieldsForSampleType(sampleType) {
@@ -350,8 +409,8 @@ async function loadReportForEdit(id) {
   document.getElementById('r-trip-id').value = r.trip_id || '';
   document.getElementById('r-customer').value = r.customer_name || '';
   document.getElementById('r-loading-point').value = r.loading_point || '';
-  document.getElementById('r-material').value = r.material_type || '';
-  document.getElementById('r-grade').value = r.grade || '';
+  setSelectValueWithFallback(document.getElementById('r-material'), r.material_type || '');
+  setSelectValueWithFallback(document.getElementById('r-grade'), r.grade || '');
   document.getElementById('r-sample-type').value = r.sample_type || '';
   refreshSamplePointOptions();
   document.getElementById('r-sample-point').value = r.sample_point || '';
@@ -375,30 +434,21 @@ async function loadReports() {
   const truck = document.getElementById('f-truck').value.trim();
   const customer = document.getElementById('f-customer').value.trim();
   const afsBlock = document.getElementById('f-afs-block').value;
-  const sieve1 = document.getElementById('f-sieve-1').value.trim() || '200';
-  const sieve2 = document.getElementById('f-sieve-2').value.trim() || '140';
-  const sieve3 = document.getElementById('f-sieve-3').value.trim() || '100';
+  const sampleType = document.getElementById('f-sample-type').value;
+  const samplePoint = document.getElementById('f-sample-point').value;
   const status = document.getElementById('f-status').value;
   if (from) q.set('from_date', from);
   if (to) q.set('to_date', to);
   if (truck) q.set('truck_number', truck);
   if (customer) q.set('customer', customer);
   if (afsBlock) q.set('afs_block', afsBlock);
-  q.set('sieve_mesh_1', sieve1);
-  q.set('sieve_mesh_2', sieve2);
-  q.set('sieve_mesh_3', sieve3);
+  if (sampleType) q.set('sample_type', sampleType);
+  if (samplePoint) q.set('sample_point', samplePoint);
   if (status) q.set('status', status);
   q.set('page', String(currentPage));
   q.set('limit', '25');
   const payload = await api(`/api/reports?${q.toString()}`);
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
-  currentSieveMeshes = payload.sieve_meshes || currentSieveMeshes;
-  const th1 = document.getElementById('th-sieve-1');
-  const th2 = document.getElementById('th-sieve-2');
-  const th3 = document.getElementById('th-sieve-3');
-  if (th1) th1.textContent = currentSieveMeshes.sieve_1_mesh || 'Sieve-1';
-  if (th2) th2.textContent = currentSieveMeshes.sieve_2_mesh || 'Sieve-2';
-  if (th3) th3.textContent = currentSieveMeshes.sieve_3_mesh || 'Sieve-3';
   currentReportRows = rows;
   const pageInfo = payload.pagination || {};
   currentTotalPages = Number(pageInfo.totalPages || 1);
@@ -408,20 +458,15 @@ async function loadReports() {
       <td><a href="/reports/${row.id}/view" target="_blank" rel="noopener" title="${escapeHtml(row.report_number || '')}">${escapeHtml(row.id)}</a></td>
       <td>${escapeHtml(row.truck_number)}</td>
       <td>${escapeHtml(row.customer_name || '-')}</td>
-      <td>${escapeHtml(row.sample_type || '-')}</td>
-      <td>${escapeHtml((row.sample_point === 'Other' ? row.sample_point_other : row.sample_point) || '-')}</td>
       <td>${fmtNullableNumber(row.exact_afs, 2)}</td>
-      <td>${escapeHtml(row.afs_block || '-')}</td>
-      <td>${fmtNullableNumber(row.sieve_1_weight, 2)}</td>
-      <td>${fmtNullableNumber(row.sieve_2_weight, 2)}</td>
-      <td>${fmtNullableNumber(row.sieve_3_weight, 2)}</td>
+      ${TABLE_SIEVE_MESHES.map((mesh) => `<td>${fmtNullableNumber(getLineItemWeight(row.line_items_json, mesh), 2)}</td>`).join('')}
       <td>${escapeHtml(row.status)}</td>
       <td>
         ${EDIT_ROLES.includes(currentRole) ? `<button data-edit="${row.id}">Edit</button>` : ''}
         ${currentRole === 'Admin' ? `<button data-delete="${row.id}">Delete</button>` : ''}
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="12">No reports found</td></tr>';
+  `).join('') || '<tr><td colspan="16">No reports found</td></tr>';
   const pager = document.getElementById('reports-pagination');
   if (pager) {
     pager.innerHTML = `Page ${pageInfo.page || 1} / ${currentTotalPages}`;
@@ -434,6 +479,12 @@ async function loadReports() {
       try {
         await loadReportForEdit(Number(btn.getAttribute('data-edit')));
         showMessage('Draft loaded for edit');
+        const formPanel = document.querySelector('section.panel.wide-panel');
+        if (formPanel) {
+          formPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
       } catch (error) {
         showMessage(error.message, false);
       }
@@ -560,6 +611,7 @@ async function init() {
   document.getElementById('r-afs-mult').addEventListener('input', computeTotals);
   document.getElementById('r-sample-type')?.addEventListener('change', refreshSamplePointOptions);
   document.getElementById('r-sample-point')?.addEventListener('change', refreshSamplePointOptions);
+  document.getElementById('f-sample-type')?.addEventListener('change', refreshSamplePointFilterOptions);
   document.getElementById('reports-error-ok-btn')?.addEventListener('click', closeErrorModal);
   document.getElementById('reports-error-modal')?.addEventListener('click', (e) => {
     if (e.target?.id === 'reports-error-modal') closeErrorModal();

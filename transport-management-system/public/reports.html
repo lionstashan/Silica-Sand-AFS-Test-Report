@@ -57,10 +57,10 @@
         <select id="r-loading-point"></select>
       </label>
       <label>Material Type
-        <input type="text" id="r-material" />
+        <select id="r-material"></select>
       </label>
       <label>Grade
-        <input type="text" id="r-grade" />
+        <select id="r-grade"></select>
       </label>
       <label>Sieve Size
         <input type="text" id="r-sieve-size" placeholder="e.g. 40-50 AFS" />
@@ -140,14 +140,18 @@
             <option value="Missing">Unbanded</option>
           </select>
         </label>
-        <label>Sieve-1 Mesh
-          <input type="text" id="f-sieve-1" value="200" />
+        <label>Sample Type
+          <select id="f-sample-type">
+            <option value="">All</option>
+            <option value="Production">Production</option>
+            <option value="Inhouse">Inhouse</option>
+            <option value="Supply">Supply</option>
+          </select>
         </label>
-        <label>Sieve-2 Mesh
-          <input type="text" id="f-sieve-2" value="140" />
-        </label>
-        <label>Sieve-3 Mesh
-          <input type="text" id="f-sieve-3" value="100" />
+        <label>Sample Point
+          <select id="f-sample-point">
+            <option value="">All</option>
+          </select>
         </label>
         <button type="button" id="load-reports-btn">Load Reports</button>
       </div>
@@ -156,7 +160,7 @@
       <table>
         <thead>
           <tr>
-            <th>ID</th><th>Truck</th><th>Customer</th><th>Sample Type</th><th>Sample Point</th><th>AFS (Exact)</th><th>AFS Block</th><th id="th-sieve-1">Sieve-1</th><th id="th-sieve-2">Sieve-2</th><th id="th-sieve-3">Sieve-3</th><th>Status</th><th>Action</th>
+            <th>ID</th><th>Truck</th><th>Customer</th><th>AFS (Exact)</th><th>10</th><th>20</th><th>30</th><th>40</th><th>50</th><th>70</th><th>100</th><th>140</th><th>200</th><th>270</th><th>Status</th><th>Action</th>
           </tr>
         </thead>
         <tbody id="reports-table"></tbody>

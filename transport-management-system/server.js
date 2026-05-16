@@ -7292,17 +7292,18 @@ app.get('/api/reports', async (req, res) => {
   const toDate = normalizeEmpty(req.query.to_date);
   const truck = normalizeEmpty(req.query.truck_number);
   const customer = normalizeEmpty(req.query.customer);
+  const sampleType = normalizeSampleType(req.query.sample_type);
+  const samplePoint = normalizeSamplePoint(req.query.sample_point);
   const status = normalizeEmpty(req.query.status);
   const afsBlock = normalizeAfsBlockFilter(req.query.afs_block);
-  const sieve1Mesh = normalizeMeshLabel(req.query.sieve_mesh_1, '200');
-  const sieve2Mesh = normalizeMeshLabel(req.query.sieve_mesh_2, '140');
-  const sieve3Mesh = normalizeMeshLabel(req.query.sieve_mesh_3, '100');
   const params = [];
   const where = [];
   if (fromDate) { params.push(fromDate); where.push(`report_date >= $${params.length}`); }
   if (toDate) { params.push(toDate); where.push(`report_date <= $${params.length}`); }
   if (truck) { params.push(truck); where.push(`lower(truck_number) LIKE lower($${params.length})`); params[params.length - 1] = `%${truck}%`; }
   if (customer) { params.push(customer); where.push(`lower(customer_name) LIKE lower($${params.length})`); params[params.length - 1] = `%${customer}%`; }
+  if (sampleType) { params.push(sampleType); where.push(`sample_type = $${params.length}`); }
+  if (samplePoint) { params.push(samplePoint); where.push(`sample_point = $${params.length}`); }
   if (status) { params.push(status); where.push(`status = $${params.length}`); }
   applyAfsBlockFilter(where, params, afsBlock);
   const countSql = `
@@ -7331,12 +7332,7 @@ app.get('/api/reports', async (req, res) => {
       ...normalized,
       exact_afs: exactAfs,
       afs_block: toAfsBand(exactAfs),
-      sieve_1_mesh: sieve1Mesh,
-      sieve_2_mesh: sieve2Mesh,
-      sieve_3_mesh: sieve3Mesh,
-      sieve_1_weight: getSieveWeightForMesh(lineItems, sieve1Mesh),
-      sieve_2_weight: getSieveWeightForMesh(lineItems, sieve2Mesh),
-      sieve_3_weight: getSieveWeightForMesh(lineItems, sieve3Mesh)
+      line_items_json: lineItems
     };
   });
   return res.json({
@@ -7348,11 +7344,6 @@ app.get('/api/reports', async (req, res) => {
       totalPages: Math.max(1, Math.ceil(total / limit)),
       hasNextPage: page * limit < total,
       hasPrevPage: page > 1
-    },
-    sieve_meshes: {
-      sieve_1_mesh: sieve1Mesh,
-      sieve_2_mesh: sieve2Mesh,
-      sieve_3_mesh: sieve3Mesh
     }
   });
 });
@@ -7390,6 +7381,7 @@ app.put('/api/reports/:id', async (req, res) => {
   }
   const validated = await validateReportPayload(req.body, row);
   if (validated.error) return res.status(400).json({ error: validated.error });
+  const branding = await loadReportBranding();
   const updated = await pool.query(
     `UPDATE lab_reports
      SET trip_id = $2,
@@ -7411,6 +7403,7 @@ app.put('/api/reports/:id', async (req, res) => {
         sample_type = $18,
         sample_point = $19,
         sample_point_other = $20,
+        branding_snapshot_json = $21::jsonb,
         version = COALESCE(version, 1) + 1,
         updated_at = NOW()
      WHERE id = $1
@@ -7435,7 +7428,8 @@ app.put('/api/reports/:id', async (req, res) => {
       normalizeEmpty(req.body.notes),
       validated.sampleType,
       validated.samplePoint,
-      validated.samplePointOther
+      validated.samplePointOther,
+      JSON.stringify(branding || {})
     ]
   );
   const client = await pool.connect();
