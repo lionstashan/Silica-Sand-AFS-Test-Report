@@ -255,10 +255,8 @@ async function init() {
     footer_text: 'Quality report generated for internal QA reference.'
   };
   const mergedBranding = mergeBrandingWithFallback(fallbackBranding, liveBranding, snapshotBranding);
-  const logoUrl = String(mergedBranding.logo_url || '').trim();
-  if (!logoUrl || /atomic|test|logo-mark/i.test(logoUrl)) {
-    mergedBranding.logo_url = '/assets/brand/logo-primary.png';
-  }
+  // Force canonical Indus logo in report view to avoid stale/legacy logo URLs.
+  mergedBranding.logo_url = '/assets/brand/logo-primary.png';
   document.getElementById('rv-title').textContent = `Lab Report (${report.status})`;
   document.getElementById('rv-branding').innerHTML = `
     <div class="rv-brand-head">

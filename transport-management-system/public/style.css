@@ -504,19 +504,25 @@ button.is-busy::after {
 }
 
 @media print {
+  @page {
+    margin: 8mm;
+  }
+
   body {
     background: #fff;
+    margin: 0;
   }
 
   .rv-shell {
     margin: 0;
-    padding: 8px;
+    padding: 0;
     border: none;
     box-shadow: none;
   }
 
-  .rv-shell .workflow-row:first-child button,
-  .rv-shell .workflow-row:first-child a {
+  .rv-top-controls,
+  .rv-toolbar-controls,
+  .rv-toolbar .nav-link {
     display: none !important;
   }
 

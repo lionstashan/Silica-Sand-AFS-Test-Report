@@ -142,9 +142,24 @@
             <option value="Supply">Supply</option>
           </select>
         </label>
+        <label>Table View
+          <select id="f-table-view">
+            <option value="auto">Auto</option>
+            <option value="production">Production</option>
+            <option value="inhouse">Inhouse</option>
+            <option value="supply">Supply</option>
+          </select>
+        </label>
         <label>Sample Point
           <select id="f-sample-point">
             <option value="">All</option>
+          </select>
+        </label>
+        <label>Rows
+          <select id="f-limit">
+            <option value="10" selected>10</option>
+            <option value="20">20</option>
+            <option value="50">50</option>
           </select>
         </label>
         <button type="button" id="load-reports-btn">Load Reports</button>
@@ -153,9 +168,7 @@
     <div class="table-container">
       <table>
         <thead>
-          <tr>
-            <th>ID</th><th>Truck</th><th>Customer</th><th>AFS (Exact)</th><th>10</th><th>20</th><th>30</th><th>40</th><th>50</th><th>70</th><th>100</th><th>140</th><th>200</th><th>270</th><th>Status</th><th>Action</th>
-          </tr>
+          <tr id="reports-head-row"></tr>
         </thead>
         <tbody id="reports-table"></tbody>
       </table>
@@ -169,14 +182,28 @@
 
   <section class="panel wide-panel">
     <h2>Report Trends</h2>
+    <div class="filters" style="margin-bottom:10px;">
+      <div class="filter-group">
+        <label>Trend Metric
+          <select id="trend-metric">
+            <option value="count">Count</option>
+            <option value="avg_afs">Avg AFS</option>
+          </select>
+        </label>
+      </div>
+    </div>
     <div class="report-graph-grid">
       <div class="report-graph-card">
         <h3>AFS Trend (by date)</h3>
         <div id="afs-trend-chart" class="report-chart"></div>
       </div>
       <div class="report-graph-card">
-        <h3>Sieve Size Distribution</h3>
-        <div id="sieve-size-chart" class="report-chart"></div>
+        <h3>AFS Block Trend</h3>
+        <div id="afs-block-chart" class="report-chart"></div>
+      </div>
+      <div class="report-graph-card">
+        <h3>Sample Point Trend</h3>
+        <div id="sample-point-chart" class="report-chart"></div>
       </div>
     </div>
   </section>

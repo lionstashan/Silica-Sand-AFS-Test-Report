@@ -114,6 +114,41 @@ function groupBy(items, keyFn, valueFn) {
   return Array.from(map.entries()).map(([label, value]) => ({ label, value }));
 }
 
+function toAfsBlock(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 'Missing';
+  if (n < 30) return '<30';
+  if (n > 85) return '>85';
+  const bands = ['30-35', '35-40', '40-45', '45-50', '50-55', '55-60', '60-65', '65-70', '70-75', '75-80', '80-85'];
+  for (const band of bands) {
+    const [min, max] = band.split('-').map(Number);
+    if (n >= min && (band === '80-85' ? n <= max : n < max)) return band;
+  }
+  return 'Missing';
+}
+
+function groupByMetric(items, keyFn, metric = 'count') {
+  const map = new Map();
+  (items || []).forEach((item) => {
+    const key = keyFn(item);
+    if (!key) return;
+    if (!map.has(key)) map.set(key, { count: 0, afsSum: 0, afsCount: 0 });
+    const bucket = map.get(key);
+    bucket.count += 1;
+    const afs = Number(item?.exact_afs ?? item?.total_afs);
+    if (Number.isFinite(afs)) {
+      bucket.afsSum += afs;
+      bucket.afsCount += 1;
+    }
+  });
+  return Array.from(map.entries()).map(([label, stats]) => ({
+    label,
+    value: metric === 'avg_afs'
+      ? (stats.afsCount ? (stats.afsSum / stats.afsCount) : 0)
+      : stats.count
+  }));
+}
+
 function renderMiniBars(targetId, rows = [], decimals = 2) {
   const el = document.getElementById(targetId);
   if (!el) return;
@@ -136,24 +171,52 @@ function renderMiniBars(targetId, rows = [], decimals = 2) {
 }
 
 function renderReportCharts(rows) {
+  const metric = String(document.getElementById('trend-metric')?.value || 'count');
+  const decimals = metric === 'avg_afs' ? 2 : 0;
   const afsByDate = groupBy(
     rows,
     (r) => String(r.report_date || '').trim(),
     (r) => Number((r.exact_afs ?? r.total_afs) || 0)
   ).sort((a, b) => a.label.localeCompare(b.label)).slice(-10);
-  const sieveCount = groupBy(
+  const afsBlockRows = groupByMetric(
     rows,
-    (r) => String(r.sieve_size || '').trim() || '-',
-    () => 1
+    (r) => String(r.afs_block || toAfsBlock(r.exact_afs ?? r.total_afs)).trim(),
+    metric
+  ).sort((a, b) => b.value - a.value);
+  const samplePointRows = groupByMetric(
+    rows,
+    (r) => String(r.sample_point || '').trim() || '-',
+    metric
   ).sort((a, b) => b.value - a.value).slice(0, 10);
   renderMiniBars('afs-trend-chart', afsByDate, 2);
-  renderMiniBars('sieve-size-chart', sieveCount, 0);
+  renderMiniBars('afs-block-chart', afsBlockRows, decimals);
+  renderMiniBars('sample-point-chart', samplePointRows, decimals);
 }
 
 function fmtNullableNumber(value, digits = 2) {
   const n = Number(value);
   if (!Number.isFinite(n)) return '-';
   return n.toFixed(digits);
+}
+
+function getSelectedTableView() {
+  const mode = String(document.getElementById('f-table-view')?.value || 'auto').toLowerCase();
+  if (['production', 'inhouse', 'supply'].includes(mode)) return mode;
+  const sampleType = String(document.getElementById('f-sample-type')?.value || '').toLowerCase();
+  if (['production', 'inhouse', 'supply'].includes(sampleType)) return sampleType;
+  return 'default';
+}
+
+function renderReportsHeader() {
+  const head = document.getElementById('reports-head-row');
+  if (!head) return 15;
+  const mode = getSelectedTableView();
+  const dynamicCols = mode === 'default'
+    ? ['Truck', 'Customer']
+    : ['Sample Point', 'Material', 'Grade'];
+  const columns = ['ID', ...dynamicCols, 'AFS (Exact)', ...TABLE_SIEVE_MESHES, 'Action'];
+  head.innerHTML = columns.map((col) => `<th>${escapeHtml(col)}</th>`).join('');
+  return columns.length;
 }
 
 function getLineItemWeight(lineItems, meshLabel) {
@@ -441,28 +504,40 @@ async function loadReports() {
   if (sampleType) q.set('sample_type', sampleType);
   if (samplePoint) q.set('sample_point', samplePoint);
   if (status) q.set('status', status);
+  const limit = Number(document.getElementById('f-limit')?.value || 10);
+  const safeLimit = [10, 20, 50].includes(limit) ? limit : 10;
   q.set('page', String(currentPage));
-  q.set('limit', '25');
+  q.set('limit', String(safeLimit));
   const payload = await api(`/api/reports?${q.toString()}`);
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
   currentReportRows = rows;
+  const tableMode = getSelectedTableView();
   const pageInfo = payload.pagination || {};
   currentTotalPages = Number(pageInfo.totalPages || 1);
   const tbody = document.getElementById('reports-table');
+  const columnCount = renderReportsHeader();
   tbody.innerHTML = rows.map((row) => `
     <tr>
       <td><a href="/reports/${row.id}/view" target="_blank" rel="noopener" title="${escapeHtml(row.report_number || '')}">${escapeHtml(row.id)}</a></td>
-      <td>${escapeHtml(row.truck_number)}</td>
-      <td>${escapeHtml(row.customer_name || '-')}</td>
+      ${tableMode === 'default'
+        ? `
+          <td>${escapeHtml(row.truck_number)}</td>
+          <td>${escapeHtml(row.customer_name || '-')}</td>
+        `
+        : `
+          <td>${escapeHtml(row.sample_point || '-')}</td>
+          <td>${escapeHtml(row.material_type || '-')}</td>
+          <td>${escapeHtml(row.grade || '-')}</td>
+        `
+      }
       <td>${fmtNullableNumber(row.exact_afs, 2)}</td>
       ${TABLE_SIEVE_MESHES.map((mesh) => `<td>${fmtNullableNumber(getLineItemWeight(row.line_items_json, mesh), 2)}</td>`).join('')}
-      <td>${escapeHtml(row.status)}</td>
       <td>
         ${EDIT_ROLES.includes(currentRole) ? `<button data-edit="${row.id}">Edit</button>` : ''}
         ${currentRole === 'Admin' ? `<button data-delete="${row.id}">Delete</button>` : ''}
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="16">No reports found</td></tr>';
+  `).join('') || `<tr><td colspan="${columnCount}">No reports found</td></tr>`;
   const pager = document.getElementById('reports-pagination');
   if (pager) {
     pager.innerHTML = `Page ${pageInfo.page || 1} / ${currentTotalPages}`;
@@ -608,6 +683,17 @@ async function init() {
   document.getElementById('r-sample-type')?.addEventListener('change', refreshSamplePointOptions);
   document.getElementById('r-sample-point')?.addEventListener('change', refreshSamplePointOptions);
   document.getElementById('f-sample-type')?.addEventListener('change', refreshSamplePointFilterOptions);
+  document.getElementById('f-table-view')?.addEventListener('change', async () => {
+    currentPage = 1;
+    await loadReports();
+  });
+  document.getElementById('trend-metric')?.addEventListener('change', () => {
+    renderReportCharts(currentReportRows);
+  });
+  document.getElementById('f-limit')?.addEventListener('change', async () => {
+    currentPage = 1;
+    await loadReports();
+  });
   document.getElementById('reports-error-ok-btn')?.addEventListener('click', closeErrorModal);
   document.getElementById('reports-error-modal')?.addEventListener('click', (e) => {
     if (e.target?.id === 'reports-error-modal') closeErrorModal();
