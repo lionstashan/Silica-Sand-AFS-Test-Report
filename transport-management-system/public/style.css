@@ -92,6 +92,10 @@ header nav {
 
 .header-actions .role-indicator {
   margin-right: auto;
+  flex: 0 0 auto;
+  width: auto;
+  max-width: max-content;
+  white-space: nowrap;
 }
 
 .nav-link:hover {

@@ -170,14 +170,66 @@ function renderMiniBars(targetId, rows = [], decimals = 2) {
   }).join('')}</div>`;
 }
 
+function renderBarChart(targetId, rows = [], decimals = 2, yLabel = 'Value') {
+  const el = document.getElementById(targetId);
+  if (!el) return;
+  if (!rows.length) {
+    el.innerHTML = '<p class="empty-state">No data</p>';
+    return;
+  }
+  const points = rows.map((row) => ({
+    label: String(row.label || '').trim(),
+    value: Number(row.value || 0)
+  })).filter((row) => row.label);
+  if (!points.length) {
+    el.innerHTML = '<p class="empty-state">No data</p>';
+    return;
+  }
+  const width = 860;
+  const height = 280;
+  const padding = { top: 18, right: 16, bottom: 66, left: 52 };
+  const innerW = width - padding.left - padding.right;
+  const innerH = height - padding.top - padding.bottom;
+  const max = Math.max(...points.map((p) => p.value), 1);
+  const gap = 8;
+  const barW = Math.max(14, Math.floor((innerW - (gap * (points.length - 1))) / points.length));
+  const totalBarWidth = points.length * barW + (points.length - 1) * gap;
+  const xStart = padding.left + Math.max(0, Math.floor((innerW - totalBarWidth) / 2));
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((r) => ({
+    y: padding.top + innerH - (innerH * r),
+    v: (max * r).toFixed(decimals)
+  }));
+
+  const bars = points.map((p, i) => {
+    const h = Math.max(0, (p.value / max) * innerH);
+    const x = xStart + (i * (barW + gap));
+    const y = padding.top + innerH - h;
+    const label = p.label.length > 14 ? `${p.label.slice(0, 14)}…` : p.label;
+    return `
+      <rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="3" fill="#0ea5e9"></rect>
+      <text x="${x + (barW / 2)}" y="${padding.top + innerH + 14}" text-anchor="middle" class="rv-axis-text" transform="rotate(-30 ${x + (barW / 2)},${padding.top + innerH + 14})">${escapeHtml(label)}</text>
+      <text x="${x + (barW / 2)}" y="${Math.max(12, y - 4)}" text-anchor="middle" class="rv-axis-text">${p.value.toFixed(decimals)}</text>
+    `;
+  }).join('');
+
+  el.innerHTML = `
+    <svg viewBox="0 0 ${width} ${height}" class="rv-line-chart" role="img" aria-label="${escapeHtml(yLabel)} bar chart">
+      <rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff"></rect>
+      ${ticks.map((t) => `
+        <line x1="${padding.left}" y1="${t.y}" x2="${width - padding.right}" y2="${t.y}" stroke="#e2e8f0" stroke-width="1"></line>
+        <text x="${padding.left - 6}" y="${t.y + 4}" text-anchor="end" class="rv-axis-text">${t.v}</text>
+      `).join('')}
+      <line x1="${padding.left}" y1="${padding.top + innerH}" x2="${width - padding.right}" y2="${padding.top + innerH}" stroke="#94a3b8" stroke-width="1.5"></line>
+      <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + innerH}" stroke="#94a3b8" stroke-width="1.5"></line>
+      ${bars}
+      <text x="14" y="${height / 2}" transform="rotate(-90 14,${height / 2})" text-anchor="middle" class="rv-axis-label">${escapeHtml(yLabel)}</text>
+    </svg>
+  `;
+}
+
 function renderReportCharts(rows) {
   const metric = String(document.getElementById('trend-metric')?.value || 'count');
   const decimals = metric === 'avg_afs' ? 2 : 0;
-  const afsByDate = groupBy(
-    rows,
-    (r) => String(r.report_date || '').trim(),
-    (r) => Number((r.exact_afs ?? r.total_afs) || 0)
-  ).sort((a, b) => a.label.localeCompare(b.label)).slice(-10);
   const afsBlockRows = groupByMetric(
     rows,
     (r) => String(r.afs_block || toAfsBlock(r.exact_afs ?? r.total_afs)).trim(),
@@ -188,9 +240,9 @@ function renderReportCharts(rows) {
     (r) => String(r.sample_point || '').trim() || '-',
     metric
   ).sort((a, b) => b.value - a.value).slice(0, 10);
-  renderMiniBars('afs-trend-chart', afsByDate, 2);
-  renderMiniBars('afs-block-chart', afsBlockRows, decimals);
-  renderMiniBars('sample-point-chart', samplePointRows, decimals);
+  const yLabel = metric === 'avg_afs' ? 'Avg AFS' : 'Count';
+  renderBarChart('afs-block-chart', afsBlockRows, decimals, yLabel);
+  renderBarChart('sample-point-chart', samplePointRows, decimals, yLabel);
 }
 
 function fmtNullableNumber(value, digits = 2) {
@@ -211,9 +263,12 @@ function renderReportsHeader() {
   const head = document.getElementById('reports-head-row');
   if (!head) return 15;
   const mode = getSelectedTableView();
-  const dynamicCols = mode === 'default'
-    ? ['Truck', 'Customer']
-    : ['Sample Point', 'Material', 'Grade'];
+  let dynamicCols = ['Truck', 'Customer'];
+  if (mode === 'production') {
+    dynamicCols = ['Sample Point', 'Material', 'Grade'];
+  } else if (mode === 'inhouse' || mode === 'supply') {
+    dynamicCols = ['Truck', 'Customer', 'Sample Point'];
+  }
   const columns = ['ID', ...dynamicCols, 'AFS (Exact)', ...TABLE_SIEVE_MESHES, 'Action'];
   head.innerHTML = columns.map((col) => `<th>${escapeHtml(col)}</th>`).join('');
   return columns.length;
@@ -495,7 +550,6 @@ async function loadReports() {
   const afsBlock = document.getElementById('f-afs-block').value;
   const sampleType = document.getElementById('f-sample-type').value;
   const samplePoint = document.getElementById('f-sample-point').value;
-  const status = document.getElementById('f-status').value;
   if (from) q.set('from_date', from);
   if (to) q.set('to_date', to);
   if (truck) q.set('truck_number', truck);
@@ -503,7 +557,6 @@ async function loadReports() {
   if (afsBlock) q.set('afs_block', afsBlock);
   if (sampleType) q.set('sample_type', sampleType);
   if (samplePoint) q.set('sample_point', samplePoint);
-  if (status) q.set('status', status);
   const limit = Number(document.getElementById('f-limit')?.value || 10);
   const safeLimit = [10, 20, 50].includes(limit) ? limit : 10;
   q.set('page', String(currentPage));
@@ -519,16 +572,22 @@ async function loadReports() {
   tbody.innerHTML = rows.map((row) => `
     <tr>
       <td><a href="/reports/${row.id}/view" target="_blank" rel="noopener" title="${escapeHtml(row.report_number || '')}">${escapeHtml(row.id)}</a></td>
-      ${tableMode === 'default'
+      ${tableMode === 'production'
         ? `
-          <td>${escapeHtml(row.truck_number)}</td>
-          <td>${escapeHtml(row.customer_name || '-')}</td>
-        `
-        : `
           <td>${escapeHtml(row.sample_point || '-')}</td>
           <td>${escapeHtml(row.material_type || '-')}</td>
           <td>${escapeHtml(row.grade || '-')}</td>
         `
+        : (tableMode === 'inhouse' || tableMode === 'supply')
+          ? `
+            <td>${escapeHtml(row.truck_number)}</td>
+            <td>${escapeHtml(row.customer_name || '-')}</td>
+            <td>${escapeHtml(row.sample_point || '-')}</td>
+          `
+          : `
+          <td>${escapeHtml(row.truck_number)}</td>
+          <td>${escapeHtml(row.customer_name || '-')}</td>
+          `
       }
       <td>${fmtNullableNumber(row.exact_afs, 2)}</td>
       ${TABLE_SIEVE_MESHES.map((mesh) => `<td>${fmtNullableNumber(getLineItemWeight(row.line_items_json, mesh), 2)}</td>`).join('')}
