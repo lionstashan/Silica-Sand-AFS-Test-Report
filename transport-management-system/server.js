@@ -7014,13 +7014,23 @@ async function validateReportPayload(payload, existingRow = null, options = {}) 
     tripId = null;
     isGeneric = true;
   }
+  if (sampleType === 'Production') {
+    tripId = null;
+    isGeneric = true;
+  }
 
   if (isGeneric) {
     if (lineItems.length && totals.totalQuantity <= 0) return { error: 'For generic report, line-item weight cannot be all zero' };
   }
 
+  if (!sampleType) {
+    return { error: 'Sample Type is required' };
+  }
   if (sampleType && !['Production', 'Inhouse', 'Supply'].includes(sampleType)) {
     return { error: 'Invalid sample type' };
+  }
+  if (!samplePoint) {
+    return { error: 'Sample Point is required' };
   }
   if (sampleType && samplePoint) {
     const sampleOptions = await loadReportSampleOptions();

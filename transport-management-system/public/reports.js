@@ -272,7 +272,25 @@ function refreshSamplePointOptions() {
   }
   const isOther = sampleType === 'Production' && pointEl.value === 'Other';
   if (otherWrap) otherWrap.style.display = isOther ? '' : 'none';
+  if (otherInput) otherInput.required = isOther;
   if (!isOther && otherInput) otherInput.value = '';
+  toggleLinkedFieldsForSampleType(sampleType);
+}
+
+function toggleLinkedFieldsForSampleType(sampleType) {
+  const isProduction = sampleType === 'Production';
+  const linkedFieldIds = ['r-truck-wrap', 'r-trip-id-wrap', 'r-customer-wrap', 'r-loading-point-wrap'];
+  linkedFieldIds.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.display = isProduction ? 'none' : '';
+  });
+  if (isProduction) {
+    document.getElementById('r-truck').value = '';
+    document.getElementById('r-trip-id').value = '';
+    document.getElementById('r-customer').value = '';
+    document.getElementById('r-loading-point').value = '';
+  }
 }
 
 async function submitReport() {
@@ -284,7 +302,6 @@ async function submitReport() {
     report_date: normalizeDateInputValue(document.getElementById('r-date').value) || new Date().toISOString().slice(0, 10),
     truck_number: document.getElementById('r-truck').value.trim(),
     trip_id: document.getElementById('r-trip-id').value ? Number(document.getElementById('r-trip-id').value) : null,
-    is_generic: document.getElementById('r-generic').value === 'true',
     customer_name: document.getElementById('r-customer').value.trim(),
     loading_point: document.getElementById('r-loading-point').value,
     material_type: document.getElementById('r-material').value.trim(),
@@ -300,6 +317,8 @@ async function submitReport() {
     version: editingReportId ? Number(document.getElementById('save-report-btn').dataset.reportVersion || '1') : null,
     line_items: collectLineItems()
   };
+  if (!payload.sample_type) throw new Error('Sample Type is required');
+  if (!payload.sample_point) throw new Error('Sample Point is required');
   const submitBtn = document.getElementById('save-report-btn');
   setButtonBusy(submitBtn, true, 'Submitting...');
   try {
@@ -329,7 +348,6 @@ async function loadReportForEdit(id) {
   document.getElementById('r-date').value = normalizeDateInputValue(r.report_date);
   document.getElementById('r-truck').value = r.truck_number || '';
   document.getElementById('r-trip-id').value = r.trip_id || '';
-  document.getElementById('r-generic').value = r.is_generic ? 'true' : 'false';
   document.getElementById('r-customer').value = r.customer_name || '';
   document.getElementById('r-loading-point').value = r.loading_point || '';
   document.getElementById('r-material').value = r.material_type || '';
