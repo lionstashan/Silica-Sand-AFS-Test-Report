@@ -250,8 +250,8 @@ async function init() {
     cin: 'U14290RJ2020PTC000000',
     website: 'www.indussilicasand.in',
     contact_phones: '+91 90000 00000',
-    email: 'ops@indussilicasand.in',
-    address: 'Kishangarh, Rajasthan',
+    email: 'quility@indussilicasand.in',
+    address: 'Khasra no 361, opp rays solar plant, Deh, Kolayat, Bikaner',
     footer_text: 'Quality report generated for internal QA reference.'
   };
   const mergedBranding = mergeBrandingWithFallback(fallbackBranding, liveBranding, snapshotBranding);

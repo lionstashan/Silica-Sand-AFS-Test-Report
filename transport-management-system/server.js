@@ -6878,9 +6878,16 @@ async function attachLabReportSnapshot(client, reportRow) {
   </div>
 </body>
 </html>`;
-  fs.writeFileSync(absolutePath, html, 'utf8');
+  const contactFooter = `
+    <div style="margin-top:10px;font-size:12px;color:#334155;display:flex;gap:14px;flex-wrap:wrap;border-top:1px solid #e2e8f0;padding-top:6px;">
+      <span>✉️ quility@indussilicasand.in</span>
+      <span>📍 Khasra no 361, opp rays solar plant, Deh, Kolayat, Bikaner</span>
+    </div>
+  `;
+  const htmlWithContact = html.replace('</body>', `${contactFooter}</body>`);
+  fs.writeFileSync(absolutePath, htmlWithContact, 'utf8');
 
-  const fileSize = Buffer.byteLength(html, 'utf8');
+  const fileSize = Buffer.byteLength(htmlWithContact, 'utf8');
   const existing = await client.query(
     `SELECT id FROM trip_documents
      WHERE trip_id = $1 AND doc_type = 'LAB_REPORT' AND file_name = $2
