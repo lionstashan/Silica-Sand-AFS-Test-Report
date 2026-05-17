@@ -2041,7 +2041,7 @@ app.get('/accounts/sales-analytics', async (req, res) => {
   const afsBand = normalizeEmpty(req.query.afs_band);
   const statusScope = normalizeEmpty(req.query.status_scope) || 'BILLED_ONLY';
 
-  let statuses = ['BILLING_COMPLETED'];
+  let statuses = ['BILLING_COMPLETED', 'COMPLETED'];
   if (statusScope === 'COMPLETED_EXITED') statuses = ['COMPLETED', 'EXITED'];
   if (statusScope === 'ALL_BILLED') statuses = ['BILLING_COMPLETED', 'COMPLETED', 'EXITED'];
 
