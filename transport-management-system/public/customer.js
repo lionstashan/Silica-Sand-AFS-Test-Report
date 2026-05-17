@@ -778,7 +778,13 @@ async function login(username, password) {
 
 async function loadMe() {
   const response = await fetch('/customer/me', { headers: getCustomerAuthHeaders() });
-  if (!response.ok) throw new Error('Not logged in');
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    const message = err.error || (response.status === 401 ? 'Not logged in' : `Customer session check failed (HTTP ${response.status})`);
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
+  }
   customerUser = await response.json();
 }
 
@@ -1168,6 +1174,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     }
   } catch (error) {
+    const status = Number(error?.status || 0);
+    if (!adminViewMode && status >= 500 && localStorage.getItem(STORAGE_TOKEN_KEY)) {
+      applyLoggedOutUI();
+      showLoginMessage('Server is temporarily unavailable. Your session is still saved. Please refresh in a few seconds.', false);
+      return;
+    }
     if (adminViewMode) {
       loginPanel.style.display = 'none';
       if (adminCustomerPanel) adminCustomerPanel.style.display = 'block';

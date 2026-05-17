@@ -3716,14 +3716,19 @@ app.post('/customer/login', async (req, res) => {
 });
 
 app.get('/customer/me', async (req, res) => {
-  const auth = await readCustomerFromRequest(req);
-  if (auth.error) return res.status(auth.status).json({ error: auth.error });
-  return res.json({
-    id: auth.user.id,
-    customer_name: auth.user.customer_name,
-    username: auth.user.username,
-    display_name: auth.user.display_name
-  });
+  try {
+    const auth = await readCustomerFromRequest(req);
+    if (auth.error) return res.status(auth.status).json({ error: auth.error });
+    return res.json({
+      id: auth.user.id,
+      customer_name: auth.user.customer_name,
+      username: auth.user.username,
+      display_name: auth.user.display_name
+    });
+  } catch (error) {
+    console.error('Failed to resolve /customer/me', error);
+    return res.status(500).json({ error: 'Failed to resolve customer session' });
+  }
 });
 
 app.post('/customer/expected-trucks', async (req, res) => {
