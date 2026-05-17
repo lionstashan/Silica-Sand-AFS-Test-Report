@@ -923,6 +923,14 @@ function wireCustomerDocumentEvents() {
 
 async function downloadCustomerDocument(docId, fileName = 'document') {
   try {
+    const customerToken = localStorage.getItem(STORAGE_TOKEN_KEY);
+    if (!adminViewMode && customerToken) {
+      const endpoint = `${buildPortalEndpoint(`/documents/${docId}/download`)}?customer_token=${encodeURIComponent(customerToken)}`;
+      const opened = window.open(endpoint, '_blank', 'noopener,noreferrer');
+      if (!opened) throw new Error('Please allow popups to open document preview');
+      return;
+    }
+
     const endpoint = adminViewMode
       ? withAdminCustomerQuery(buildPortalEndpoint(`/documents/${docId}/download`))
       : buildPortalEndpoint(`/documents/${docId}/download`);

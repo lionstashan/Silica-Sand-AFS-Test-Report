@@ -838,7 +838,8 @@ async function authenticateCustomerWithPassword(username, password) {
 async function readCustomerFromRequest(req) {
   const bearer = String(req.header('authorization') || '').trim();
   const tokenHeader = String(req.header('x-customer-token') || '').trim();
-  const token = tokenHeader || (bearer.toLowerCase().startsWith('bearer ') ? bearer.slice(7).trim() : '');
+  const queryToken = String(req.query.customer_token || '').trim();
+  const token = tokenHeader || queryToken || (bearer.toLowerCase().startsWith('bearer ') ? bearer.slice(7).trim() : '');
   if (token) {
     const verified = verifyCustomerToken(token);
     if (verified.error) return verified;
