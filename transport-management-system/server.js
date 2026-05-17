@@ -95,6 +95,7 @@ const ROLE_PERMISSION_FALLBACK = {
   Loading: new Set([
     'transport.trip.read',
     'transport.trip.update',
+    'transport.documents.view',
     'transport.tasks.view',
     'transport.tasks.update',
     'transport.dashboard.view'

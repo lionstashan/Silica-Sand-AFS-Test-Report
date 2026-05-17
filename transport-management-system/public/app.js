@@ -75,7 +75,7 @@ const ROLE_ALLOWED_TARGETS = {
   Admin: STATUS_FLOW
 };
 const DOC_UPLOAD_ROLES = ['Dispatch', 'Weighbridge', 'Accounts', 'Admin'];
-const DOC_VIEW_ROLES = ['Dispatch', 'Weighbridge', 'Accounts', 'Admin'];
+const DOC_VIEW_ROLES = ['Dispatch', 'Loading', 'Weighbridge', 'Accounts', 'Admin'];
 
 const DEFAULT_DISPATCH_DROPDOWNS = {
   loading_point: ['Other'],
