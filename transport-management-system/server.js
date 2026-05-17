@@ -6643,7 +6643,7 @@ app.get('/pricing/defaults', async (req, res) => {
 });
 
 app.get('/customer/masters/options', async (req, res) => {
-  const auth = await readCustomerUserFromRequest(req);
+  const auth = await readCustomerFromRequest(req);
   if (auth.error) return res.status(auth.status).json({ error: auth.error });
   const types = String(req.query.types || '').split(',').map((t) => t.trim()).filter(Boolean);
   if (!types.length) return res.status(400).json({ error: 'types query is required' });
