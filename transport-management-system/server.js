@@ -7076,6 +7076,26 @@ async function validateReportPayload(payload, existingRow = null, options = {}) 
     isGeneric = true;
   }
 
+  // If truck is provided but trip_id is missing, auto-resolve latest matching trip.
+  if (!tripId && truckNumber && sampleType !== 'Production') {
+    try {
+      const tripLookup = await pool.query(
+        `SELECT id
+         FROM trips
+         WHERE lower(truck_number) = lower($1)
+         ORDER BY updated_at DESC, id DESC
+         LIMIT 1`,
+        [truckNumber]
+      );
+      if (tripLookup.rows.length) {
+        tripId = Number(tripLookup.rows[0].id);
+        isGeneric = false;
+      }
+    } catch (error) {
+      console.error('Failed to auto-resolve trip_id from truck_number for lab report', error);
+    }
+  }
+
   if (isGeneric) {
     if (lineItems.length && totals.totalQuantity <= 0) return { error: 'For generic report, line-item weight cannot be all zero' };
   }
