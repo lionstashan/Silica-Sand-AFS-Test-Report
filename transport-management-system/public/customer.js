@@ -939,9 +939,13 @@ async function downloadCustomerDocument(docId, fileName = 'document') {
 }
 
 async function fetchCustomerTripDocuments(tripId) {
+  const normalizedTripId = Number(tripId);
+  if (!Number.isInteger(normalizedTripId) || normalizedTripId <= 0) {
+    return [];
+  }
   const endpoint = adminViewMode
-    ? withAdminCustomerQuery(buildPortalEndpoint('/trip-documents'), { trip_id: tripId })
-    : `${buildPortalEndpoint('/trip-documents')}?trip_id=${encodeURIComponent(tripId)}`;
+    ? withAdminCustomerQuery(buildPortalEndpoint('/trip-documents'), { trip_id: normalizedTripId })
+    : `${buildPortalEndpoint('/trip-documents')}?trip_id=${encodeURIComponent(normalizedTripId)}`;
   const response = await fetch(endpoint, { headers: getPortalAuthHeaders() });
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));

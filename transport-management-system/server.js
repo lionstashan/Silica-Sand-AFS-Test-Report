@@ -600,7 +600,7 @@ function getRequiredPermissionForRequest(req) {
 function hasPermissionForRole(role, permission, permissionsByRole = null) {
   if (!role || !permission) return true;
   if (permissionsByRole && Array.isArray(permissionsByRole[role])) {
-    return permissionsByRole[role].includes(permission);
+    if (permissionsByRole[role].includes(permission)) return true;
   }
   const fallback = ROLE_PERMISSION_FALLBACK[role];
   return !!fallback && fallback.has(permission);
@@ -6390,36 +6390,45 @@ async function readMasterOptionsForTypes(types = []) {
   const fallbackQueries = getMasterFallbackQueries();
   const result = {};
   for (const rawType of types) {
-    const masterType = normalizeMasterType(rawType);
-    if (!masterType || masterType === 'customers') continue;
-    const rows = await pool.query(
-      `SELECT value, metadata_json
-       FROM admin_master_values
-       WHERE master_type = $1 AND is_active = true
-       ORDER BY updated_at DESC, id DESC`,
-      [masterType]
-    );
-    if (rows.rows.length) {
-      if (masterType === 'materials' || masterType === 'grades') {
-        result[rawType] = rows.rows.map((r) => ({
-          value: r.value,
-          price_per_mt: Number(r.metadata_json?.price_per_mt) || null
-        }));
-      } else {
-        result[rawType] = rows.rows.map((r) => r.value).filter(Boolean);
+    const safeKey = String(rawType || '').trim();
+    const masterType = normalizeMasterType(safeKey);
+    if (!masterType || masterType === 'customers') {
+      result[safeKey] = [];
+      continue;
+    }
+    try {
+      const rows = await pool.query(
+        `SELECT value, metadata_json
+         FROM admin_master_values
+         WHERE master_type = $1 AND is_active = true
+         ORDER BY updated_at DESC, id DESC`,
+        [masterType]
+      );
+      if (rows.rows.length) {
+        if (masterType === 'materials' || masterType === 'grades') {
+          result[safeKey] = rows.rows.map((r) => ({
+            value: r.value,
+            price_per_mt: Number(r.metadata_json?.price_per_mt) || null
+          }));
+        } else {
+          result[safeKey] = rows.rows.map((r) => r.value).filter(Boolean);
+        }
+        continue;
       }
-      continue;
-    }
-    const fallbackSql = fallbackQueries[masterType];
-    if (!fallbackSql) {
-      result[rawType] = [];
-      continue;
-    }
-    const fallback = await pool.query(fallbackSql);
-    if (masterType === 'materials' || masterType === 'grades') {
-      result[rawType] = fallback.rows.map((r) => ({ value: r.value, price_per_mt: null })).filter((r) => r.value);
-    } else {
-      result[rawType] = fallback.rows.map((r) => r.value).filter(Boolean);
+      const fallbackSql = fallbackQueries[masterType];
+      if (!fallbackSql) {
+        result[safeKey] = [];
+        continue;
+      }
+      const fallback = await pool.query(fallbackSql);
+      if (masterType === 'materials' || masterType === 'grades') {
+        result[safeKey] = fallback.rows.map((r) => ({ value: r.value, price_per_mt: null })).filter((r) => r.value);
+      } else {
+        result[safeKey] = fallback.rows.map((r) => r.value).filter(Boolean);
+      }
+    } catch (error) {
+      console.error(`Failed to load master options for type "${safeKey}"`, error);
+      result[safeKey] = [];
     }
   }
   return result;

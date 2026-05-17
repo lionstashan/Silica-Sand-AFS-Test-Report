@@ -1165,7 +1165,10 @@ function exportReportCsv() {
 
 async function loadReportData() {
   try {
-    const response = await fetch('/trips');
+    const response = await fetch('/trips', { headers: getAuthHeaders() });
+    if (!response.ok) {
+      throw new Error(`Failed to load report data (HTTP ${response.status})`);
+    }
     const trips = await response.json();
     reportTrips = trips.filter((trip) => isFinalizedTrip(trip));
     applyReportFilters();
@@ -1320,7 +1323,10 @@ async function loadDashboardData() {
     return;
   }
   try {
-    const response = await fetch('/trips');
+    const response = await fetch('/trips', { headers: getAuthHeaders() });
+    if (!response.ok) {
+      throw new Error(`Failed to load dashboard data (HTTP ${response.status})`);
+    }
     allTrips = await response.json();
 
     updateSummaryCards(allTrips);
