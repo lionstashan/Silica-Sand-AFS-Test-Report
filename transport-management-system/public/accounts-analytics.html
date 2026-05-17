@@ -91,6 +91,7 @@
           <option value="">Saved Views</option>
         </select>
         <button type="button" id="analytics-export-current" class="workflow-btn">Export Current View</button>
+        <button type="button" id="analytics-export-sales-excel" class="workflow-btn">Export Sales Excel</button>
       </div>
     </div>
     <div id="analytics-module-controls" class="analytics-module-controls"></div>
@@ -161,6 +162,35 @@
               <tr><th>Grade</th><th>Trips</th><th>Qty (MT)</th><th>Amount (₹)</th><th>Avg ₹/MT</th></tr>
             </thead>
             <tbody id="sales-grade-table"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="analytics-module" data-module="sales-report-table" data-tab="sales">
+        <div class="analytics-module-header">
+          <h3>Sales Report</h3>
+          <div class="analytics-module-actions">
+            <button type="button" class="workflow-btn analytics-move-up">↑</button>
+            <button type="button" class="workflow-btn analytics-move-down">↓</button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Trip ID</th>
+                <th>Date</th>
+                <th>Vehicle No</th>
+                <th>Time (Completion)</th>
+                <th>Transport Name</th>
+                <th>Customer</th>
+                <th>Grade</th>
+                <th>Net Quantity (MT)</th>
+                <th>Rate (₹/MT)</th>
+                <th>Sales Value (₹)</th>
+              </tr>
+            </thead>
+            <tbody id="sales-report-table"></tbody>
           </table>
         </div>
       </article>
@@ -255,6 +285,6 @@
   </section>
 
   <script src="permissions.js?v=20260513-1"></script>
-  <script src="accounts-analytics.js?v=20260513-5"></script>
+  <script src="accounts-analytics.js?v=20260517-1"></script>
 </body>
 </html>

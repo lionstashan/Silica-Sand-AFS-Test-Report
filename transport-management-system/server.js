@@ -2087,6 +2087,8 @@ app.get('/accounts/sales-analytics', async (req, res) => {
     WITH filtered AS (
       SELECT
         id,
+        truck_number,
+        transporter,
         customer_name,
         grade,
         material_type,
@@ -2191,6 +2193,27 @@ app.get('/accounts/sales-analytics', async (req, res) => {
       }))
       .sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
+    const salesReport = scopedRows
+      .map((row) => {
+        const metricTs = row.metric_ts ? new Date(row.metric_ts) : null;
+        const completedAt = metricTs && !Number.isNaN(metricTs.getTime())
+          ? metricTs.toISOString()
+          : null;
+        return {
+          trip_id: row.id,
+          trip_date: completedAt ? completedAt.slice(0, 10) : null,
+          vehicle_no: row.truck_number || '',
+          completion_time: completedAt,
+          transport_name: row.transporter || '',
+          customer: row.customer_name || '',
+          grade: row.grade || '',
+          net_quantity_mt: Number(toNum(row.qty_mt).toFixed(3)),
+          rate_per_mt: Number(toNum(row.rate_used_per_mt).toFixed(2)),
+          sales_value: Number(toNum(row.total_amount).toFixed(2))
+        };
+      })
+      .sort((a, b) => String(b.completion_time || '').localeCompare(String(a.completion_time || '')));
+
     return res.json({
       scope: { status_scope: statusScope, statuses },
       filters: { from_date: fromDate, to_date: toDate, customer, grade, material, afs_min: afsMinRaw, afs_max: afsMaxRaw, afs_band: afsBand },
@@ -2206,7 +2229,8 @@ app.get('/accounts/sales-analytics', async (req, res) => {
       customer_wise: customerWise,
       material_wise: materialWise,
       afs_wise: afsWise,
-      afs_band_wise: afsBandWise
+      afs_band_wise: afsBandWise,
+      sales_report: salesReport
     });
   } catch (error) {
     console.error('Failed to load sales analytics', error);

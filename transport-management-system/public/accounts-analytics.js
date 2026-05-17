@@ -365,7 +365,21 @@ function normalizeAnalyticsPayload(payload = {}) {
     grade_wise: normalizeAnalyticsRows(payload?.grade_wise),
     customer_wise: normalizeAnalyticsRows(payload?.customer_wise),
     material_wise: normalizeAnalyticsRows(payload?.material_wise),
-    afs_band_wise: normalizeAnalyticsRows(payload?.afs_band_wise)
+    afs_band_wise: normalizeAnalyticsRows(payload?.afs_band_wise),
+    sales_report: Array.isArray(payload?.sales_report)
+      ? payload.sales_report.map((row) => ({
+          trip_id: Number(row?.trip_id || 0),
+          trip_date: row?.trip_date || '',
+          vehicle_no: row?.vehicle_no || '',
+          completion_time: row?.completion_time || '',
+          transport_name: row?.transport_name || '',
+          customer: row?.customer || '',
+          grade: row?.grade || '',
+          net_quantity_mt: Number(row?.net_quantity_mt || 0),
+          rate_per_mt: Number(row?.rate_per_mt || 0),
+          sales_value: Number(row?.sales_value || 0)
+        }))
+      : []
   };
 }
 
@@ -390,6 +404,44 @@ function clearAnalyticsRenderTargets() {
   renderSimpleAggregateTable('sales-customer-table', [], 'key');
   renderSimpleAggregateTable('sales-material-table', [], 'key');
   renderSimpleAggregateTable('sales-afs-band-table', [], 'key');
+  renderSalesReportTable([]);
+}
+
+function formatDateDisplay(value) {
+  if (!value) return '-';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  return parsed.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' });
+}
+
+function formatTimeDisplay(value) {
+  if (!value) return '-';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  return parsed.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+}
+
+function renderSalesReportTable(rows = []) {
+  const tableBody = document.getElementById('sales-report-table');
+  if (!tableBody) return;
+  if (!Array.isArray(rows) || !rows.length) {
+    tableBody.innerHTML = '<tr><td colspan="10">No data</td></tr>';
+    return;
+  }
+  tableBody.innerHTML = rows.map((row) => `
+    <tr>
+      <td>${Number(row.trip_id || 0)}</td>
+      <td>${escapeHtml(formatDateDisplay(row.trip_date || row.completion_time))}</td>
+      <td>${escapeHtml(row.vehicle_no || '-')}</td>
+      <td>${escapeHtml(formatTimeDisplay(row.completion_time))}</td>
+      <td>${escapeHtml(row.transport_name || '-')}</td>
+      <td>${escapeHtml(row.customer || '-')}</td>
+      <td>${escapeHtml(row.grade || '-')}</td>
+      <td>${formatWeightMT(row.net_quantity_mt || 0)}</td>
+      <td>${formatCurrencyINR(row.rate_per_mt || 0)}</td>
+      <td>${formatCurrencyINR(row.sales_value || 0)}</td>
+    </tr>
+  `).join('');
 }
 
 function renderTrendTable(rows = []) {
@@ -487,6 +539,7 @@ async function loadSalesAnalytics() {
     renderSimpleAggregateTable('sales-customer-table', normalized.customer_wise, 'key');
     renderSimpleAggregateTable('sales-material-table', normalized.material_wise, 'key');
     renderSimpleAggregateTable('sales-afs-band-table', normalized.afs_band_wise, 'key');
+    renderSalesReportTable(normalized.sales_report);
   } catch (error) {
     if (reqSeq !== analyticsLoadRequestSeq) return;
     lastAnalyticsPayload = null;
@@ -495,6 +548,52 @@ async function loadSalesAnalytics() {
   } finally {
     if (loadBtn && reqSeq === analyticsLoadRequestSeq) loadBtn.disabled = false;
   }
+}
+
+function exportSalesExcel() {
+  if (!lastAnalyticsPayload || !Array.isArray(lastAnalyticsPayload.sales_report) || !lastAnalyticsPayload.sales_report.length) {
+    window.AppPermissions?.showModal?.('Action Required', 'Load sales data first, then export.');
+    return;
+  }
+  const rows = lastAnalyticsPayload.sales_report;
+  const headers = [
+    'Trip ID',
+    'Date',
+    'Vehicle No',
+    'Time (Completion)',
+    'Transport Name',
+    'Customer',
+    'Grade',
+    'Net Quantity (MT)',
+    'Rate (INR/MT)',
+    'Sales Value (INR)'
+  ];
+  const body = rows.map((row) => [
+    row.trip_id || '',
+    formatDateDisplay(row.trip_date || row.completion_time),
+    row.vehicle_no || '',
+    formatTimeDisplay(row.completion_time),
+    row.transport_name || '',
+    row.customer || '',
+    row.grade || '',
+    Number(row.net_quantity_mt || 0).toFixed(3),
+    Number(row.rate_per_mt || 0).toFixed(2),
+    Number(row.sales_value || 0).toFixed(2)
+  ]);
+  const htmlTable = `
+    <table border="1">
+      <thead><tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>
+      <tbody>${body.map((cells) => `<tr>${cells.map((c) => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table>`;
+  const blob = new Blob([`\ufeff${htmlTable}`], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `sales-report-${new Date().toISOString().slice(0, 10)}.xls`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 function csvEscape(value) {
@@ -639,6 +738,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadSalesAnalytics();
   });
   document.getElementById('analytics-export-current')?.addEventListener('click', exportCurrentViewCsv);
+  document.getElementById('analytics-export-sales-excel')?.addEventListener('click', exportSalesExcel);
   document.getElementById('analytics-save-view')?.addEventListener('click', () => {
     const name = window.prompt('Saved view name');
     if (!name || !name.trim()) return;
