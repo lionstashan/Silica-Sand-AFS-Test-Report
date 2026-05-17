@@ -213,7 +213,17 @@ function hasRoleAccess(allowedRoles) {
   return !!role && allowedRoles.includes(role);
 }
 
+function hasCurrentRolePermission(permissionKey) {
+  const role = getCurrentRole();
+  if (!role || !permissionKey) return false;
+  const session = getEmployeeAuthSession();
+  const byRole = session?.permissions_by_role;
+  const rolePermissions = Array.isArray(byRole?.[role]) ? byRole[role] : [];
+  return rolePermissions.includes(permissionKey);
+}
+
 function canReadTripsForCurrentRole() {
+  if (hasCurrentRolePermission('transport.trip.read')) return true;
   return hasRoleAccess(['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Accounts', 'Manager', 'Admin']);
 }
 

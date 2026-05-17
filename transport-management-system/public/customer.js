@@ -397,7 +397,19 @@ function showGlobalToast(text, success = true) {
 }
 
 function isAdminSession() {
-  return localStorage.getItem('userRole') === 'Admin';
+  return String(localStorage.getItem('userRole') || '').trim() === 'Admin';
+}
+
+function hasAssignedAdminRole() {
+  try {
+    const raw = localStorage.getItem('employeeAuth');
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    const roles = Array.isArray(parsed?.roles) ? parsed.roles : [];
+    return roles.includes('Admin');
+  } catch (_error) {
+    return false;
+  }
 }
 
 function getAdminAuthHeaders() {
@@ -730,6 +742,9 @@ function applyAuthedUI() {
     customerNameInput.readOnly = !adminViewMode;
   }
   showLoginMessage('', true);
+  if (!customerMastersLoaded && !adminViewMode) {
+    showMessage('Master data not loaded from Control Panel. Submission is disabled.', false);
+  }
 }
 
 function applyLoggedOutUI() {
@@ -1144,6 +1159,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       await bootstrapAdminView();
     } else {
       await bootstrapAuthenticated();
+      if (hasAssignedAdminRole()) {
+        showLoginMessage('Tip: Switch role to Admin to use customer selection dropdown view.', true);
+      }
     }
   } catch (error) {
     if (adminViewMode) {
