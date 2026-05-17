@@ -4009,6 +4009,11 @@ app.post('/expected-trucks/:id/mark-gate-in', async (req, res) => {
       location: normalizeEmpty(expected.location)
     });
 
+    const resolvedGatePersonName = normalizeEmpty(req.body.gate_person_name)
+      || normalizeEmpty(auth?.user?.full_name)
+      || normalizeEmpty(auth?.user?.username)
+      || auth.role;
+
     const tripInsert = await client.query(
       `INSERT INTO trips(
         truck_number, customer_name, transporter, driver_name, driver_phone, gate_person_name,
@@ -4023,7 +4028,7 @@ app.post('/expected-trucks/:id/mark-gate-in', async (req, res) => {
         expected.transporter,
         expected.driver_name,
         expected.driver_phone,
-        normalizeEmpty(req.body.gate_person_name),
+        resolvedGatePersonName,
         expected.material_type,
         expected.grade,
         expected.condition,

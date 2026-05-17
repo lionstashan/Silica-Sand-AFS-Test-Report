@@ -50,6 +50,16 @@ function getEmployeeAuthSession() {
   }
 }
 
+function getLoggedInDisplayName() {
+  const auth = getEmployeeAuthSession();
+  const fullName = String(auth?.full_name || '').trim();
+  if (fullName) return fullName;
+  const username = String(auth?.username || '').trim();
+  if (username) return username;
+  const role = getStoredRole();
+  return role || 'Gate Operator';
+}
+
 function getAuthHeaders() {
   const shared = window.AppPermissions?.getAuthHeaders?.();
   if (shared && typeof shared === 'object' && Object.keys(shared).length) return shared;
@@ -276,7 +286,7 @@ async function updateStatus(id, status) {
 }
 
 async function markGateIn(id) {
-  const gatePersonName = window.prompt('Enter Gate Operator Name (X/Y/Z):') || '';
+  const gatePersonName = getLoggedInDisplayName();
   try {
     const response = await fetch(`/expected-trucks/${id}/mark-gate-in`, {
       method: 'POST',
