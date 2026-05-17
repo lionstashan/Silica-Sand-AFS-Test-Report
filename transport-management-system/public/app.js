@@ -2599,7 +2599,7 @@ function renderTripDocumentsSection(trip) {
           : '';
         return `
           <div class="workflow-row">
-            <button class="truck-link-btn" data-action="download-doc" data-doc-id="${doc.id}" data-doc-name="${escapeHtml(doc.file_name)}" type="button">${escapeHtml(doc.file_name)}</button>
+            <button class="truck-link-btn" data-action="download-doc" data-doc-id="${doc.id}" data-doc-name="${escapeHtml(doc.file_name)}" data-doc-type="${escapeHtml(doc.doc_type || '')}" type="button">${escapeHtml(doc.file_name)}</button>
             <span class="mini-muted">${type}${formatFileSize(doc.file_size)} • ${escapeHtml(doc.uploaded_by_role || '-')} ${uploaderName}</span>
             ${deleteBtn}
           </div>
@@ -2624,7 +2624,24 @@ function renderTripDocumentsSection(trip) {
   `;
 }
 
-async function downloadTripDocument(docId, fileName = 'document') {
+async function downloadTripDocument(docId, fileName = 'document', docType = '') {
+  if (String(docType || '').toUpperCase() === 'LAB_REPORT') {
+    const reportNumber = String(fileName || '').replace(/\.html$/i, '').trim();
+    if (reportNumber) {
+      try {
+        const lookup = await fetch(`/api/reports/by-number/${encodeURIComponent(reportNumber)}`, {
+          headers: { ...getAuthHeaders() }
+        });
+        if (lookup.ok) {
+          const payload = await lookup.json().catch(() => ({}));
+          if (payload?.id) {
+            window.open(`/reports/${payload.id}/view`, '_blank', 'noopener,noreferrer');
+            return;
+          }
+        }
+      } catch (_error) {}
+    }
+  }
   try {
     const response = await fetch(`/documents/${docId}/download`, {
       headers: {
@@ -3807,7 +3824,11 @@ function bindRowActionHandlers(root = document) {
   });
 
   root.querySelectorAll('[data-action="download-doc"]').forEach((button) => {
-    button.addEventListener('click', () => downloadTripDocument(button.dataset.docId, button.dataset.docName || 'document'));
+    button.addEventListener('click', () => downloadTripDocument(
+      button.dataset.docId,
+      button.dataset.docName || 'document',
+      button.dataset.docType || ''
+    ));
   });
 }
 

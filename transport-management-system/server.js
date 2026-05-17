@@ -204,6 +204,7 @@ const ROUTE_PERMISSION_RULES = [
   { method: 'POST', pattern: /^\/admin\/customer-users$/, permission: 'transport.customer_users.manage' },
   { method: 'POST', pattern: /^\/expense\/sso/, permission: 'transport.expense.sso' },
   { method: 'GET', pattern: /^\/api\/reports/, permission: 'transport.reports.view' },
+  { method: 'GET', pattern: /^\/api\/reports\/by-number\//, permission: 'transport.reports.view' },
   { method: 'POST', pattern: /^\/api\/reports$/, permission: 'transport.reports.edit' },
   { method: 'PUT', pattern: /^\/api\/reports\/\d+$/, permission: 'transport.reports.edit' },
   { method: 'POST', pattern: /^\/api\/reports\/\d+\/finalize$/, permission: 'transport.reports.finalize' },
@@ -7442,6 +7443,23 @@ app.get('/api/reports/:id', async (req, res) => {
     [id]
   );
   return res.json({ report: normalizeReportRowForApi(report.rows[0]), history: history.rows });
+});
+
+app.get('/api/reports/by-number/:reportNumber', async (req, res) => {
+  const auth = readRoleFromRequest(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+  if (!canViewReports(auth.role)) return res.status(403).json({ error: 'Not allowed' });
+  const reportNumber = String(req.params.reportNumber || '').trim();
+  if (!reportNumber) return res.status(400).json({ error: 'reportNumber is required' });
+  const result = await pool.query(
+    `SELECT id, report_number
+     FROM lab_reports
+     WHERE report_number = $1 AND is_deleted = false
+     LIMIT 1`,
+    [reportNumber]
+  );
+  if (!result.rows.length) return res.status(404).json({ error: 'Report not found' });
+  return res.json(result.rows[0]);
 });
 
 app.put('/api/reports/:id', async (req, res) => {
