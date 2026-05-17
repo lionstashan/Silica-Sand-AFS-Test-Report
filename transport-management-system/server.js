@@ -75,6 +75,7 @@ const ROLE_PERMISSION_FALLBACK = {
     'transport.trip.read',
     'transport.trip.update',
     'transport.expected_trucks.view',
+    'transport.expected_trucks.manage',
     'transport.tasks.view',
     'transport.tasks.update'
   ]),
