@@ -10,6 +10,7 @@ let activeAnalyticsTab = 'overview';
 let analyticsLayout = { hidden: {}, order: {} };
 let lastAnalyticsPayload = null;
 let analyticsLoadRequestSeq = 0;
+let standaloneSalesReportRows = [];
 
 function escapeHtml(value) {
   return String(value || '')
@@ -444,6 +445,70 @@ function renderSalesReportTable(rows = []) {
   `).join('');
 }
 
+function renderStandaloneSalesReportTable(rows = []) {
+  const tableBody = document.getElementById('standalone-sales-report-table');
+  if (!tableBody) return;
+  if (!Array.isArray(rows) || !rows.length) {
+    tableBody.innerHTML = '<tr><td colspan="10">No data</td></tr>';
+    return;
+  }
+  tableBody.innerHTML = rows.map((row) => `
+    <tr>
+      <td>${Number(row.trip_id || 0)}</td>
+      <td>${escapeHtml(formatDateDisplay(row.trip_date || row.completion_time))}</td>
+      <td>${escapeHtml(row.vehicle_no || '-')}</td>
+      <td>${escapeHtml(formatTimeDisplay(row.completion_time))}</td>
+      <td>${escapeHtml(row.transport_name || '-')}</td>
+      <td>${escapeHtml(row.customer || '-')}</td>
+      <td>${escapeHtml(row.grade || '-')}</td>
+      <td>${formatWeightMT(row.net_quantity_mt || 0)}</td>
+      <td>${formatCurrencyINR(row.rate_per_mt || 0)}</td>
+      <td>${formatCurrencyINR(row.sales_value || 0)}</td>
+    </tr>
+  `).join('');
+}
+
+function getStandaloneSalesReportFilterState() {
+  return {
+    from_date: document.getElementById('sales-report-from-date')?.value || '',
+    to_date: document.getElementById('sales-report-to-date')?.value || ''
+  };
+}
+
+function renderStandaloneSalesReportFilterSummary(filters = getStandaloneSalesReportFilterState()) {
+  const el = document.getElementById('sales-report-filter-summary');
+  if (!el) return;
+  const applied = [];
+  if (filters.from_date) applied.push(`from: ${filters.from_date}`);
+  if (filters.to_date) applied.push(`to: ${filters.to_date}`);
+  el.textContent = applied.length ? `Applied filters: ${applied.join(' | ')}` : 'Applied filters: None';
+}
+
+async function loadStandaloneSalesReport() {
+  const filters = getStandaloneSalesReportFilterState();
+  renderStandaloneSalesReportFilterSummary(filters);
+  const btn = document.getElementById('sales-report-load-btn');
+  if (btn) btn.disabled = true;
+  try {
+    const query = new URLSearchParams();
+    if (filters.from_date) query.set('from_date', filters.from_date);
+    if (filters.to_date) query.set('to_date', filters.to_date);
+    query.set('status_scope', 'BILLED_ONLY');
+    const response = await fetch(`/accounts/sales-analytics?${query.toString()}`, { headers: getAuthHeaders() });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || 'Failed to load sales report');
+    const normalized = normalizeAnalyticsPayload(payload);
+    standaloneSalesReportRows = normalized.sales_report || [];
+    renderStandaloneSalesReportTable(standaloneSalesReportRows);
+  } catch (error) {
+    standaloneSalesReportRows = [];
+    renderStandaloneSalesReportTable([]);
+    window.AppPermissions?.showModal?.('Action Required', error.message || 'Failed to load sales report');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function renderTrendTable(rows = []) {
   const tableBody = document.getElementById('sales-trend-table');
   if (!tableBody) return;
@@ -596,6 +661,51 @@ function exportSalesExcel() {
   URL.revokeObjectURL(url);
 }
 
+function exportStandaloneSalesExcel() {
+  if (!Array.isArray(standaloneSalesReportRows) || !standaloneSalesReportRows.length) {
+    window.AppPermissions?.showModal?.('Action Required', 'Load sales report first, then export.');
+    return;
+  }
+  const headers = [
+    'Trip ID',
+    'Date',
+    'Vehicle No',
+    'Time (Completion)',
+    'Transport Name',
+    'Customer',
+    'Grade',
+    'Net Quantity (MT)',
+    'Rate (INR/MT)',
+    'Sales Value (INR)'
+  ];
+  const body = standaloneSalesReportRows.map((row) => [
+    row.trip_id || '',
+    formatDateDisplay(row.trip_date || row.completion_time),
+    row.vehicle_no || '',
+    formatTimeDisplay(row.completion_time),
+    row.transport_name || '',
+    row.customer || '',
+    row.grade || '',
+    Number(row.net_quantity_mt || 0).toFixed(3),
+    Number(row.rate_per_mt || 0).toFixed(2),
+    Number(row.sales_value || 0).toFixed(2)
+  ]);
+  const htmlTable = `
+    <table border="1">
+      <thead><tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>
+      <tbody>${body.map((cells) => `<tr>${cells.map((c) => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table>`;
+  const blob = new Blob([`\ufeff${htmlTable}`], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `sales-report-table-${new Date().toISOString().slice(0, 10)}.xls`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 function csvEscape(value) {
   const input = String(value ?? '');
   const hardened = /^[=+\-@]/.test(input) ? `'${input}` : input;
@@ -739,6 +849,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   document.getElementById('analytics-export-current')?.addEventListener('click', exportCurrentViewCsv);
   document.getElementById('analytics-export-sales-excel')?.addEventListener('click', exportSalesExcel);
+  document.getElementById('sales-report-load-btn')?.addEventListener('click', loadStandaloneSalesReport);
+  document.getElementById('sales-report-clear-btn')?.addEventListener('click', async () => {
+    const fromEl = document.getElementById('sales-report-from-date');
+    const toEl = document.getElementById('sales-report-to-date');
+    if (fromEl) fromEl.value = '';
+    if (toEl) toEl.value = '';
+    await loadStandaloneSalesReport();
+  });
+  document.getElementById('sales-report-export-btn')?.addEventListener('click', exportStandaloneSalesExcel);
   document.getElementById('analytics-save-view')?.addEventListener('click', () => {
     const name = window.prompt('Saved view name');
     if (!name || !name.trim()) return;
@@ -781,4 +900,5 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   renderFilterSummary(getCurrentFilterState());
   await loadSalesAnalytics();
+  await loadStandaloneSalesReport();
 });
