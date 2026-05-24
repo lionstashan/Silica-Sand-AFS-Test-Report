@@ -867,6 +867,16 @@ function updateActiveTripsTable(trips) {
 
   const tripsTable = document.getElementById('active-trips-table');
   const activeMobileList = document.getElementById('active-mobile-list');
+  if (!activeTrips.length) {
+    const message = sourceTrips.length
+      ? 'No active trucks right now. Completed, cancelled, and exited trips are available in reports.'
+      : 'No transport trips found for this environment.';
+    tripsTable.innerHTML = `<tr><td colspan="9" class="empty-state-cell">${message}</td></tr>`;
+    if (activeMobileList) {
+      activeMobileList.innerHTML = `<article class="mobile-trip-card empty-state-card">${message}</article>`;
+    }
+    return;
+  }
   tripsTable.innerHTML = activeTrips.slice(0, 20).map(trip => { // Show last 20 active trips
     const inTime = parseTripDate(trip.in_time);
     const totalTime = calculateElapsedMinutes(inTime);
@@ -1333,6 +1343,11 @@ async function loadDashboardData() {
     updateActiveTripsTable(allTrips);
   } catch (error) {
     console.error('Failed to load dashboard data:', error);
+    const tripsTable = document.getElementById('active-trips-table');
+    const activeMobileList = document.getElementById('active-mobile-list');
+    const message = 'Unable to load transport trips. Please refresh or login again.';
+    if (tripsTable) tripsTable.innerHTML = `<tr><td colspan="9" class="empty-state-cell">${message}</td></tr>`;
+    if (activeMobileList) activeMobileList.innerHTML = `<article class="mobile-trip-card empty-state-card">${message}</article>`;
   }
 }
 

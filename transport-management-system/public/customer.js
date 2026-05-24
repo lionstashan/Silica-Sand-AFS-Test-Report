@@ -1004,6 +1004,10 @@ async function loadExpectedTrucks() {
 
 async function bootstrapAuthenticated() {
   await loadMe();
+  setExpectedSubmitEnabled(false, 'Loading master data...');
+  await loadCustomerMasterOptions();
+  initCustomerDropdowns();
+  refreshLocationOptions();
   applyAuthedUI();
   await Promise.all([loadSummary(), loadExpectedTrucks()]);
 }
@@ -1036,7 +1040,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   initTransporterTypeahead();
   setExpectedSubmitEnabled(false, 'Loading master data...');
-  await loadCustomerMasterOptions();
   initCustomerDropdowns();
   refreshLocationOptions();
 

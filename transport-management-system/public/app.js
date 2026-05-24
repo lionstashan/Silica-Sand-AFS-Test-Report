@@ -1432,7 +1432,9 @@ function initializeRole() {
     });
     document.getElementById('logout-link').style.display = 'none';
     showRoleSelection();
-    showEmployeeLoginMessage('Please login to continue');
+    const sessionMessage = sessionStorage.getItem('employeeSessionMessage') || '';
+    if (sessionMessage) sessionStorage.removeItem('employeeSessionMessage');
+    showEmployeeLoginMessage(sessionMessage || 'Please login to continue');
     return;
   }
   if (employeeAuth && Array.isArray(employeeAuth.roles) && employeeAuth.roles.length) {

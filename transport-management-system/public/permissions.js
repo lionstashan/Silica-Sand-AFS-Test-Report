@@ -1,7 +1,9 @@
 (function initPermissions(global) {
   const EMPLOYEE_TOKEN_KEY = 'employeeTransportToken';
+  const SESSION_MESSAGE_KEY = 'employeeSessionMessage';
   const VALID_EMPLOYEE_ROLES = ['Gate', 'Dispatch', 'Loading', 'Weighbridge', 'LAB', 'Expense', 'Accounts', 'Manager', 'Admin'];
   const EXPENSE_ACCESS_ROLES = ['Expense', 'Accounts', 'Manager', 'Admin'];
+  let authRedirectInProgress = false;
 
   function getEmployeeSession() {
     try {
@@ -54,9 +56,27 @@
     return encodeURIComponent(target);
   }
 
+  function clearEmployeeSession() {
+    localStorage.removeItem('userRole');
+    localStorage.removeItem('employeeAuth');
+    localStorage.removeItem(EMPLOYEE_TOKEN_KEY);
+    localStorage.removeItem('expenseToken');
+    localStorage.removeItem('expenseUser');
+  }
+
   function redirectToEmployeeLogin(pathname) {
     const next = getNextParam(pathname);
     window.location.replace(`/?next=${next}`);
+  }
+
+  function expireEmployeeSession(message = 'Your session expired. Please login again.') {
+    if (authRedirectInProgress) return;
+    authRedirectInProgress = true;
+    clearEmployeeSession();
+    try {
+      sessionStorage.setItem(SESSION_MESSAGE_KEY, message);
+    } catch (_e) {}
+    redirectToEmployeeLogin();
   }
 
   function requireEmployeeSession(pathname) {
@@ -169,6 +189,54 @@
     return requestId ? `${message} (Ref: ${requestId})` : message;
   }
 
+  async function getResponseAuthError(responseClone) {
+    const text = await responseClone.text().catch(() => '');
+    if (!text) return '';
+    try {
+      const data = JSON.parse(text);
+      return String(data?.error || text).trim();
+    } catch (_e) {
+      return String(text).trim();
+    }
+  }
+
+  function shouldHandleEmployeeAuthError(message) {
+    return /transport token (expired|revoked|invalid)|invalid transport token|no active role assigned/i.test(message);
+  }
+
+  function getRequestPath(input) {
+    try {
+      const rawUrl = typeof input === 'string' ? input : input?.url;
+      const url = new URL(rawUrl || '', window.location.origin);
+      if (url.origin !== window.location.origin) return '';
+      return url.pathname;
+    } catch (_e) {
+      return '';
+    }
+  }
+
+  function isAuthEndpoint(pathname) {
+    return ['/auth/login', '/auth/logout', '/customer/login'].includes(pathname);
+  }
+
+  function installFetchAuthInterceptor() {
+    if (!global.fetch || global.fetch.__employeeAuthInterceptorInstalled) return;
+    const originalFetch = global.fetch.bind(global);
+    const wrappedFetch = async function employeeAuthFetch(input, init) {
+      const response = await originalFetch(input, init);
+      if (response.status !== 401) return response;
+      const pathname = getRequestPath(input);
+      if (!pathname || isAuthEndpoint(pathname)) return response;
+      const message = await getResponseAuthError(response.clone());
+      if (shouldHandleEmployeeAuthError(message)) {
+        expireEmployeeSession('Your session expired. Please login again.');
+      }
+      return response;
+    };
+    wrappedFetch.__employeeAuthInterceptorInstalled = true;
+    global.fetch = wrappedFetch;
+  }
+
   function renderRoleSwitcher(containerId, onChangeRedirectMap) {
     const el = document.getElementById(containerId);
     if (!el) return;
@@ -211,6 +279,8 @@
     hasExpenseAccess,
     getEmployeeIdentityLabel,
     getAuthHeaders,
+    clearEmployeeSession,
+    expireEmployeeSession,
     redirectToEmployeeLogin,
     requireEmployeeSession,
     showNoAccess,
@@ -221,4 +291,5 @@
     setPageLoading,
     parseApiError
   };
+  installFetchAuthInterceptor();
 }(window));
