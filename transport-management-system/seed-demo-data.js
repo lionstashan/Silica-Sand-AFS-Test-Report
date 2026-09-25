@@ -1,4 +1,5 @@
 require('dotenv').config();
+const bcrypt = require('bcryptjs');
 const { pool, initDb } = require('./db');
 
 function addHours(date, hours) {
@@ -74,6 +75,11 @@ async function run() {
   }
   if (process.env.CONFIRM_DEMO_SEED !== 'YES') {
     throw new Error("Safety check failed: set CONFIRM_DEMO_SEED=YES after verifying target with 'npm run db:whereami'.");
+  }
+  const demoUsername = String(process.env.DEMO_USERNAME || 'demo').trim();
+  const demoPassword = String(process.env.DEMO_PASSWORD || '');
+  if (!demoUsername || demoPassword.length < 12) {
+    throw new Error('Safety check failed: DEMO_USERNAME and a DEMO_PASSWORD of at least 12 characters are required.');
   }
 
   await initDb();
@@ -442,6 +448,26 @@ async function run() {
     await client.query('BEGIN');
     await client.query('TRUNCATE TABLE trips RESTART IDENTITY');
 
+    const passwordHash = await bcrypt.hash(demoPassword, Number.parseInt(process.env.BCRYPT_COST || '10', 10));
+    const demoUser = await client.query(
+      `INSERT INTO users(username, full_name, password_hash, is_active)
+       VALUES ($1, 'Product Demo', $2, true)
+       ON CONFLICT (username)
+       DO UPDATE SET full_name = EXCLUDED.full_name,
+                     password_hash = EXCLUDED.password_hash,
+                     is_active = true,
+                     updated_at = NOW()
+       RETURNING id`,
+      [demoUsername, passwordHash]
+    );
+    await client.query(
+      `INSERT INTO user_roles(user_id, role_name, is_active)
+       VALUES ($1, 'Manager', true)
+       ON CONFLICT (user_id, role_name)
+       DO UPDATE SET is_active = true, updated_at = NOW()`,
+      [demoUser.rows[0].id]
+    );
+
     for (const trip of trips) {
       await client.query(insertSql, [
         trip.truck_number,
@@ -484,7 +510,7 @@ async function run() {
     }
 
     await client.query('COMMIT');
-    console.log(`Seed complete. Inserted trips: ${trips.length}`);
+    console.log(`Seed complete. Inserted trips: ${trips.length}; demo user: ${demoUsername}`);
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
