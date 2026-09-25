@@ -446,7 +446,7 @@ async function run() {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('TRUNCATE TABLE trips RESTART IDENTITY');
+    await client.query('TRUNCATE TABLE trips RESTART IDENTITY CASCADE');
 
     const passwordHash = await bcrypt.hash(demoPassword, Number.parseInt(process.env.BCRYPT_COST || '10', 10));
     const demoUser = await client.query(
