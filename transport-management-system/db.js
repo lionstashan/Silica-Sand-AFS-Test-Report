@@ -41,6 +41,17 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_schema_migrations_applied_at
     ON schema_migrations(applied_at DESC)
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      full_name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
 
   const createTableQuery = `
     CREATE TABLE IF NOT EXISTS trips (
@@ -581,17 +592,6 @@ async function initDb() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_expense_sso_nonces_expiry
     ON expense_sso_nonces(expires_at)
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id SERIAL PRIMARY KEY,
-      username TEXT NOT NULL UNIQUE,
-      full_name TEXT NOT NULL,
-      password_hash TEXT NOT NULL,
-      is_active BOOLEAN DEFAULT true,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )
   `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS user_roles (
