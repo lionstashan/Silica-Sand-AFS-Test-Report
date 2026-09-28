@@ -1,0 +1,14 @@
+{
+  "project": "Silica Beneficiation Digital Twin",
+  "basis": {
+    "dryFeedRateTph": 100,
+    "feedSilicaFraction": 0.94,
+    "feedMoistureFraction": 0.08
+  },
+  "equipment": [],
+  "connections": [],
+  "metadata": {
+    "status": "example",
+    "units": "metric"
+  }
+}

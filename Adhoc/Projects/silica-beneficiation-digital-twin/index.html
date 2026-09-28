@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>50 TPH Silica Beneficiation Plant</title>
+    <link rel="stylesheet" href="/src/styles.css">
+  </head>
+  <body>
+    <header>
+      <div><p class="eyebrow">CONCEPT DIGITAL TWIN · RAJASTHAN</p><h1>50 TPH Silica Beneficiation Plant</h1></div>
+      <div class="header-actions"><span class="status"><i></i> Simulation ready</span><button id="run-toggle" class="command" type="button" aria-pressed="true">Pause flow</button></div>
+    </header>
+    <nav class="tabs" aria-label="Plant views">
+      <button type="button" class="active" data-view="plant">3D plant</button><button type="button" data-view="builder">Process builder</button><button type="button" data-view="streams">Streams & sizing</button><button type="button" data-view="equipment">Machinery</button><button type="button" data-view="calculations">Calculations</button><button type="button" data-view="basis">Design basis</button>
+    </nav>
+    <main>
+      <section id="plant-view" class="view active">
+        <div class="workspace">
+          <div class="scene-shell">
+            <canvas id="plant-canvas" aria-label="Interactive 3D model of the beneficiation plant"></canvas>
+            <div class="scene-tools"><label for="scene-area">Plant area</label><select id="scene-area"><option value="rotary">Rotary grading pilot</option><option value="wet">Wet beneficiation plant</option></select><button id="reset-camera" type="button" title="Reset camera">Reset view</button><span>Drag to rotate · Scroll to zoom · Select a machine</span></div>
+            <div id="selected-machine" class="selection" aria-live="polite"></div>
+          </div>
+          <aside>
+            <h2>Operating scenario</h2>
+            <label for="feed">Dry feed <span><output id="feed-output">50</output> t/h</span></label><input id="feed" type="range" min="25" max="65" value="50" step="1">
+            <label for="grade">Feed SiO2 <span><output id="grade-output">94.0</output>%</span></label><input id="grade" type="range" min="85" max="98" value="94" step="0.1">
+            <label for="mass-recovery">Mass recovery <span><output id="mass-recovery-output">85.0</output>%</span></label><input id="mass-recovery" type="range" min="70" max="92" value="85" step="0.5">
+            <label for="water-rate">Process water <span><output id="water-rate-output">2.5</output> m³/t</span></label><input id="water-rate" type="range" min="1.5" max="3.5" value="2.5" step="0.1">
+            <label for="recycle">Water recycle <span><output id="recycle-output">90</output>%</span></label><input id="recycle" type="range" min="70" max="95" value="90" step="1">
+            <div class="metrics"><div><span>Washed product</span><strong id="product">42.5 t/h</strong></div><div><span>Product SiO2</span><strong id="product-grade">98.7%</strong></div><div><span>Fresh water</span><strong id="fresh-water">12.5 m³/h</strong></div><div><span>Operating power</span><strong id="operating-power">0 kW</strong></div></div>
+            <p id="capacity-warning" class="warning" hidden></p>
+          </aside>
+        </div>
+      </section>
+      <section id="builder-view" class="view content-view">
+        <div class="section-heading"><div><p class="eyebrow">MODULAR PROCESS CONFIGURATION</p><h2>Component inventory and sequence</h2></div><p>Select individual units or load a process route. Port compatibility and 3D auto-routing will use the same inventory data.</p></div>
+        <div class="builder-toolbar"><label for="preset">Process route</label><select id="preset"></select><button id="load-preset" class="command" type="button">Build sequence</button><button id="clear-sequence" class="command" type="button">Clear</button></div>
+        <div class="builder-layout">
+          <div class="inventory-panel"><div class="inventory-controls"><label for="category">Equipment category</label><select id="category"><option value="all">All categories</option></select></div><div id="inventory-list" class="inventory-list"></div></div>
+          <div class="sequence-panel"><h3>Selected process sequence</h3><ol id="process-sequence" class="process-sequence"></ol><p id="sequence-empty" class="empty-note">Choose equipment from the inventory or load a complete process route.</p></div>
+        </div>
+      </section>
+      <section id="streams-view" class="view content-view">
+        <div class="section-heading"><div><p class="eyebrow">PARTICLE AND WATER TRACKING</p><h2>Streams, screen cuts and AFS</h2></div><p>Commercial screen bands and laboratory AFS sieve analysis are related but separate calculations.</p></div>
+        <div class="stream-controls"><label for="product-band">Target product band</label><select id="product-band"><option>30-35 mesh</option><option>35-40 mesh</option><option selected>40-45 mesh</option><option>45-50 mesh</option><option>50-60 mesh</option><option>60-80 mesh</option></select></div>
+        <div class="mesh-planner"><div><p class="eyebrow">REQUIRED SALEABLE PRODUCTS</p><h3>Mesh train recommendation</h3><p>Select the product bands required. The planner derives the screen boundaries and gravity-cascade order.</p></div><div class="product-checks"><label><input type="checkbox" value="60-65 mesh" checked>60–65</label><label><input type="checkbox" value="55-60 mesh">55–60</label><label><input type="checkbox" value="50-55 mesh" checked>50–55</label><label><input type="checkbox" value="45-50 mesh">45–50</label><label><input type="checkbox" value="40-45 mesh">40–45</label></div><button id="plan-mesh" class="command" type="button">Recommend screens</button></div>
+        <div id="mesh-plan-result" class="mesh-plan-result" aria-live="polite"></div>
+        <div class="stream-summary" aria-live="polite"><div><span>Nominal aperture band</span><strong id="band-aperture"></strong></div><div><span>Indicative sized product</span><strong id="band-product"></strong></div><div><span>Calculated AFS GFN</span><strong id="band-afs"></strong></div></div>
+        <div class="stream-flow"><div class="stream-node"><strong>Washed feed</strong><span id="stream-feed"></span></div><div class="flow-arrow"><i></i><span>wet sizing</span></div><div class="stream-node product"><strong>Selected product</strong><span id="stream-product"></span></div><div class="flow-arrow reject"><i></i><span>other sizes</span></div><div class="stream-node reject"><strong>Recycle / by-product</strong><span id="stream-reject"></span></div></div>
+        <div class="table-wrap"><table class="sieve-table"><thead><tr><th>AFS sieve aperture</th><th>Retained</th><th>Distribution</th></tr></thead><tbody id="sieve-body"></tbody></table></div>
+        <div class="calibration-panel"><div><p class="eyebrow">ACTUAL-PRODUCT CALIBRATION</p><h3>Compare plant result with target</h3><p>Enter the laboratory AFS and actual dry feed rate. Full retained sieve percentages will be added as the next calibration input.</p></div><label for="actual-afs">Actual AFS<input id="actual-afs" type="number" min="1" max="300" value="38" step="0.1"></label><label for="target-afs">Target AFS<input id="target-afs" type="number" min="1" max="300" value="42" step="0.1"></label><label for="actual-rate">Actual feed<input id="actual-rate" type="number" min="1" max="100" value="45" step="0.5"><span>t/h</span></label><button id="calibrate" class="command" type="button">Suggest adjustments</button></div>
+        <div id="calibration-result" class="calibration-result" aria-live="polite"></div>
+        <div class="notice"><strong>Important:</strong> Product yield and AFS shown here are simulation estimates. They become predictive only after loading a representative feed sieve analysis and calibrated screen/classifier partition curves.</div>
+      </section>
+      <section id="equipment-view" class="view content-view">
+        <div class="section-heading"><div><p class="eyebrow">PRELIMINARY EQUIPMENT SCHEDULE</p><h2>Machinery and duties</h2></div><p>Installed ratings include practical margin and must be finalized against supplier curves and actual ore tests.</p></div>
+        <div class="table-wrap"><table><thead><tr><th>Tag</th><th>Machine</th><th>Duty / nominal size</th><th>Drive</th><th>Speed</th><th>Design load</th></tr></thead><tbody id="equipment-body"></tbody><tfoot><tr><th colspan="3">Plant connected load</th><th id="connected-power"></th><th colspan="2">Excludes buildings and future expansion</th></tr></tfoot></table></div>
+      </section>
+      <section id="calculations-view" class="view content-view">
+        <div class="section-heading"><div><p class="eyebrow">LIVE CALCULATION SHEET</p><h2>How the model calculates</h2></div><p>Values below update with the operating scenario. Units are metric.</p></div><div id="calculation-list" class="calculation-list"></div>
+      </section>
+      <section id="basis-view" class="view content-view">
+        <div class="section-heading"><div><p class="eyebrow">CONCEPTUAL · NOT FOR CONSTRUCTION</p><h2>Design basis and assumptions</h2></div></div>
+        <div class="basis-grid"><article><h3>Feed</h3><p>50 t/h dry silica sand, 8% as-received moisture, nominal top size 10 mm, bulk density 1.6 t/m³ and particle density 2.65 t/m³.</p></article><article><h3>Products</h3><p>One washed and dewatered silica product, nominal 0.1–1.0 mm. Base-case mass recovery is 85%; product moisture is assumed at 12%.</p></article><article><h3>Process route</h3><p>Feed hopper → wet scalping screen → rotary scrubber → attrition cells → cyclone classification → wet magnetic separator → dewatering screen.</p></article><article><h3>Water circuit</h3><p>Thickener and filter press return clarified water. Base circulation is 2.5 m³ per tonne of dry feed with 90% recycle.</p></article><article><h3>Power</h3><p>Operating demand is estimated from utilization factors. Pump shaft power uses flow, total dynamic head, slurry density and efficiency; motor ratings are rounded up to a standard size.</p></article><article><h3>Required validation</h3><p>Representative sieve and chemical analysis, scrubbing tests, attrition tests, magnetic response, settling tests, pump curves, site elevations and final pipe routing.</p></article></div>
+        <div class="notice"><strong>Engineering limitation:</strong> This model is for layout, discussion and early feasibility. Do not purchase equipment or construct the plant from these values without laboratory testing and review by qualified mineral-processing, mechanical, electrical and civil engineers.</div>
+      </section>
+    </main>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/node_modules/three/build/three.module.js",
+          "three/addons/": "/node_modules/three/examples/jsm/"
+        }
+      }
+    </script>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
