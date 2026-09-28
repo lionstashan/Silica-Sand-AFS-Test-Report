@@ -10,3 +10,7 @@ Projects in this directory are not deployed as active Silica India services. The
 | `Projects/mittsaa-store/` | Independent nested Git repository |
 
 The `mittsaa-store` directory keeps its own Git history and remote and is intentionally excluded from this parent repository.
+
+## Local artifacts
+
+`Artifacts/` contains local backups, generated documents, presentation material, and rendered outputs. These large files are intentionally excluded from Git.

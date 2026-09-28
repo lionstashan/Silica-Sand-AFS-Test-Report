@@ -9,3 +9,6 @@ node_modules/
 
 # Independent nested repository retained locally under Adhoc.
 Adhoc/Projects/mittsaa-store/
+
+# Large local reference material and generated artifacts.
+Adhoc/Artifacts/

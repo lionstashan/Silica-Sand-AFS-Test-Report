@@ -15,6 +15,7 @@ This repository contains the source used by the active Silica India services and
 
 ## Repository layout
 
+- `Live/`: Explorer-friendly shortcuts grouped by active service.
 - `app/`: public website application.
 - `transport-management-system/`: shared Ops production, staging, and demo application.
 - `silica_platform/`: mobile and client applications for Ops.

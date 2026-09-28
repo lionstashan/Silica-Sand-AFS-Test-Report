@@ -1,0 +1,17 @@
+{
+  "explorer.compactFolders": false,
+  "files.exclude": {
+    "**/.DS_Store": true,
+    ".venv": true,
+    "venv": true,
+    "app": true,
+    "portfolio": true,
+    "reports_pdfs": true,
+    "silica_platform": true,
+    "transport-management-system": true,
+    "Procfile": true,
+    "requirements.txt": true,
+    "silica.db": true,
+    ".replit": true
+  }
+}
