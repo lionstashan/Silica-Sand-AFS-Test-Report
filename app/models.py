@@ -1,4 +1,6 @@
-from sqlalchemy import Column, Integer, String, Float, Date, ForeignKey
+from datetime import datetime
+
+from sqlalchemy import Column, Integer, String, Float, Date, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -38,3 +40,13 @@ class SieveResult(Base):
     product = Column(Float, nullable=False)
 
     report = relationship("Report", back_populates="sieves")
+
+
+class ContactEvent(Base):
+    __tablename__ = "contact_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_type = Column(String(24), nullable=False, index=True)
+    page = Column(String(160), nullable=False)
+    session_id = Column(String(64), nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)

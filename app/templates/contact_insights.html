@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Contact Insights | Silica Sand India</title><meta name="robots" content="noindex,nofollow"><link rel="stylesheet" href="/static/site.css"></head>
+<body class="insights-page">
+  <main class="shell insights-main">
+    <div class="insights-heading"><div><p class="section-kicker">Private analytics</p><h1>Contact interest</h1></div><p>Anonymous contact actions from the last 30 days. Visitors are counted by a rotating browser identifier; no names, phone numbers or IP addresses are stored.</p></div>
+    <section class="insight-grid" aria-label="Contact summary">
+      {% for item in summary %}<article><span>{{ item.event }}</span><strong>{{ item.visitors }}</strong><small>interested visitors</small><p>{{ item.total }} total clicks</p></article>{% endfor %}
+    </section>
+    <section class="insight-table-wrap"><h2>Daily activity</h2><table><thead><tr><th>Date</th><th>Action</th><th>Visitors</th><th>Clicks</th></tr></thead><tbody>{% for row in daily %}<tr><td>{{ row.day }}</td><td>{{ row.event_type }}</td><td>{{ row.visitors }}</td><td>{{ row.total }}</td></tr>{% else %}<tr><td colspan="4">No contact activity recorded yet.</td></tr>{% endfor %}</tbody></table></section>
+  </main>
+</body>
+</html>

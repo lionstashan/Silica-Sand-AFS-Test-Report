@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ application.title }} | Silica Sand India</title>
+  <meta name="description" content="{{ application.description }}">
+  <meta name="theme-color" content="#18382f">
+  <link rel="canonical" href="https://www.silicasand.in/silica-applications/{{ slug }}">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{{ application.title }}">
+  <meta property="og:description" content="{{ application.description }}">
+  <meta property="og:url" content="https://www.silicasand.in/silica-applications/{{ slug }}">
+  <meta property="og:image" content="https://www.silicasand.in{{ application.image }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/site.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Service",
+    "name": {{ application.title | tojson }},
+    "description": {{ application.description | tojson }},
+    "provider": {"@type": "ProfessionalService", "name": "Silica Sand India", "url": "https://www.silicasand.in/"},
+    "areaServed": "India",
+    "url": "https://www.silicasand.in/silica-applications/{{ slug }}"
+  }
+  </script>
+</head>
+<body class="application-page app-{{ application.theme }}">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header" data-header>
+    <a class="brand" href="/" aria-label="Silica Sand India home">
+      <span class="brand-mark" aria-hidden="true">Si</span>
+      <span><strong>Silica Sand India</strong><small>Technical Consultancy</small></span>
+    </a>
+    <button class="nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" data-nav-toggle><span></span><span></span><span></span></button>
+    <nav class="site-nav" aria-label="Primary navigation" data-nav>
+      <a href="/#services">Services</a>
+      <details class="nav-menu">
+        <summary>Applications</summary>
+        <div class="nav-menu-panel">
+          <a href="/silica-applications/glass-grade-silica-sand">Glass-grade silica</a>
+          <a href="/silica-applications/solar-glass-silica">Solar glass silica</a>
+          <a href="/silica-applications/foundry-silica-sand">Foundry silica sand</a>
+          <a href="/silica-applications/ceramics-and-tiles">Ceramics &amp; tiles</a>
+          <a href="/silica-applications/tile-adhesive-and-dry-mix">Tile adhesive &amp; dry mix</a>
+        </div>
+      </details>
+      <a href="/portfolio">Portfolio</a>
+      <a class="nav-contact" href="#contact">Discuss a project</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="application-visual-hero">
+      <img src="{{ application.image }}" alt="{{ application.image_alt }}" fetchpriority="high">
+      <div class="application-hero-shade" aria-hidden="true"></div>
+      <div class="shell application-hero-copy">
+        <p class="eyebrow">Silica application consulting</p>
+        <h1>{{ application.title }}</h1>
+        <p>{{ application.intro }}</p>
+        <a class="button button-primary" href="#contact">Discuss this application</a>
+      </div>
+      <p class="application-image-credit"><a href="{{ application.image_source }}" rel="noopener">Reference image</a>: {{ application.image_credit }}</p>
+    </section>
+
+    <section class="application-signature" aria-label="Technical focus">
+      <div class="shell">
+        {% for item in application.quality[:3] %}<div><span>0{{ loop.index }}</span><strong>{{ item.name }}</strong></div>{% endfor %}
+      </div>
+    </section>
+
+    <section class="section application-quality">
+      <div class="shell">
+        <div class="section-heading">
+          <div><p class="section-kicker">Specification lens</p><h2>What must be controlled</h2></div>
+          <p>The target is not simply “high silica.” The useful specification is the combination of mineral, process and end-use behaviour that the customer actually needs.</p>
+        </div>
+        <div class="quality-grid">
+          {% for item in application.quality %}
+          <article><span>0{{ loop.index }}</span><h3>{{ item.name }}</h3><p>{{ item.detail }}</p></article>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+
+    <section class="equipment-section">
+      <div class="shell">
+        <div class="equipment-heading"><div><p class="section-kicker">Process architecture</p><h2>Indicative equipment train</h2></div><p>{{ application.process_note }}</p></div>
+        <ol class="equipment-train">
+          {% for item in application.equipment %}
+          <li><span>0{{ loop.index }}</span><div><h3>{{ item.stage }}</h3><p>{{ item["items"] }}</p></div></li>
+          {% endfor %}
+        </ol>
+      </div>
+    </section>
+
+    <section class="section application-approach">
+      <div class="shell approach-layout">
+        <div class="approach-intro">
+          <p class="section-kicker">Consulting approach</p>
+          <h2>A decision path for {{ application.name | lower }}</h2>
+          <p>{{ application.description }}</p>
+          <div class="technical-note"><strong>Technical caution</strong><span>{{ application.process_note }}</span></div>
+        </div>
+        <ol class="application-steps">
+          {% for item in application.approach %}
+          <li><span>0{{ loop.index }}</span><div><h3>{{ item.title }}</h3><p>{{ item.detail }}</p></div></li>
+          {% endfor %}
+        </ol>
+      </div>
+    </section>
+
+    <section class="outcome-band"><div class="shell outcome-inner"><p class="section-kicker">Intended outcome</p><p>{{ application.outcome }}</p></div></section>
+
+    <section class="contact-section" id="contact">
+      <div class="shell contact-layout">
+        <div><p class="section-kicker">Technical enquiry</p><h2>Discuss your material and target specification</h2><p>Share the source location, available test results, present process and required application. The first discussion will identify the questions that need evidence.</p></div>
+        <div class="contact-actions">
+          <a href="tel:+919166344448" data-contact-event="phone"><span>Phone</span><strong>+91 91663 44448</strong></a>
+          <a href="mailto:info@silicasand.in?subject={{ application.name | urlencode }}%20consulting%20enquiry" data-contact-event="email"><span>Email</span><strong>info@silicasand.in</strong></a>
+          <a href="https://wa.me/919166344448?text=Hello%2C%20I%20would%20like%20to%20discuss%20{{ application.name | urlencode }}." rel="noopener" data-contact-event="whatsapp"><span>WhatsApp</span><strong>Start a conversation</strong></a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer"><div class="shell footer-inner"><div><strong>Silica Sand India</strong><span>Jaipur, Rajasthan, India</span></div><p><a href="/portfolio">Consulting portfolio</a> &middot; <a href="/">All services</a></p></div></footer>
+  <script src="/static/site.js" defer></script>
+</body>
+</html>
